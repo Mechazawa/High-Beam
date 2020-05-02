@@ -9,7 +9,7 @@
   import { ipcRenderer } from 'electron'
 
   export default {
-    name: 'app',
+    name: 'query-window',
     data () {
       return {
         query: '',

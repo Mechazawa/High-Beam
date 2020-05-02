@@ -1,10 +1,10 @@
 'use strict';
 
-import { app, protocol, BrowserWindow, ipcMain } from 'electron';
+import { app, protocol } from 'electron';
 import {
-  createProtocol,
   installVueDevtools,
 } from 'vue-cli-plugin-electron-builder/lib';
+import QueryWindow from "./windows/QueryWindow.js";
 
 const isDevelopment = process.env.NODE_ENV !== 'production';
 
@@ -17,32 +17,10 @@ protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { secure: tru
 
 function createWindow () {
   // Create the browser window.
-  win = new BrowserWindow({
-    width: 800,
-    height: 80,
-    webPreferences: {
-      nodeIntegration: true,
-    },
-    frame: false,
-    resizable: false,
-  });
+  win = new QueryWindow();
 
-  win.center();
-
-  if (process.env.WEBPACK_DEV_SERVER_URL) {
-    // Load the url of the dev server if in development mode
-    win.loadURL(process.env.WEBPACK_DEV_SERVER_URL);
-
-    if (!process.env.IS_TEST) win.webContents.openDevTools();
-  } else {
-    createProtocol('app');
-    // Load the index.html when not in development
-    win.loadURL('app://./index.html');
-  }
-
-  win.on('closed', () => {
-    win = null;
-  });
+  // todo set window to null when closed or something
+  win.open();
 }
 
 // Quit when all windows are closed.
@@ -81,18 +59,6 @@ app.on('ready', async () => {
   }
 
   createWindow();
-});
-
-ipcMain.on('window:bounds?', (event, bounds) => {
-  const animated = Boolean(bounds.animated);
-
-  delete bounds.animated;
-
-  if (win !== null) {
-    win.setBounds(bounds, animated);
-
-    event.reply('window:bounds', win.getBounds());
-  }
 });
 
 // Exit cleanly on request from parent process in development mode.
