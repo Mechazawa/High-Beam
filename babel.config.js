@@ -1,10 +1,10 @@
 module.exports = {
   presets: [
-    '@vue/cli-plugin-babel/preset',
+    ['@vue/cli-plugin-babel/preset', { decoratorsLegacy: false, decoratorsBeforeExport: true }],
   ],
   plugins: [
     // Stage 2
-    ["@babel/plugin-proposal-decorators", { decoratorsBeforeExport: true }],
+    // ["@babel/plugin-proposal-decorators", { decoratorsBeforeExport: true }],
     "@babel/plugin-proposal-export-namespace-from",
     "@babel/plugin-proposal-numeric-separator",
     "@babel/plugin-proposal-throw-expressions",
