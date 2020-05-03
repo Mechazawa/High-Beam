@@ -9,8 +9,6 @@ export default class QueryWindow {
     this.pluginManager = new PluginManager();
 
     this.pluginManager.load(SpotlightPlugin);
-
-    this._initIpc();
   }
 
   isOpen () {
@@ -48,7 +46,10 @@ export default class QueryWindow {
 
     this.browser.once('closed', () => {
       this.browser = null;
+      ipcMain.removeAllListeners();
     });
+
+    this._initIpc();
   }
 
   close () {
@@ -64,6 +65,7 @@ export default class QueryWindow {
   _initIpc () {
     ipcMain.on('setBounds', (event, ...args) => event.reply('windowBounds', this.setBounds(...args)));
     ipcMain.on('input:query?', (event, ...args) => this.onInputQuery(event, ...args));
+    ipcMain.on('input:select?', (event, ...args) => this.onInputSelect(event, ...args));
   }
 
   setBounds (bounds) {
@@ -82,5 +84,12 @@ export default class QueryWindow {
     for (const result of results) {
       result.then(rows => event.reply(replyKey, rows));
     }
+  }
+
+  onInputSelect (event, pluginName, key) {
+    this.pluginManager.select(pluginName, key);
+
+    // @todo more functionality then just closing
+    this.close();
   }
 }

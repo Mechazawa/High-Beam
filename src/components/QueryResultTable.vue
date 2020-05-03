@@ -5,13 +5,14 @@
         :key="result.key"
         :index="index"
         v-bind="result"
-        :highlight="selected === index"
-        @click="activate(index)"/>
+        :highlight="highlighted === index"
+        @click="select(index)"/>
   </div>
 </template>
 
 <script>
   import QueryResultRow from "./QueryResultRow";
+  import { ipcRenderer } from "electron";
 
   export default {
     name: 'query-result-table',
@@ -21,13 +22,13 @@
     },
     data () {
       return {
-        selected: -1,
+        highlighted: -1,
         boundOnKeydown: (...args) => this.onKeydown(...args),
       };
     },
     watch: {
       results () {
-        this.selected = -1;
+        this.highlighted = -1;
       },
     },
     mounted () {
@@ -40,18 +41,22 @@
       onKeydown ({ code, metaKey }) {
         const digits = Object.fromEntries([1234567890].map(x => [`Digit${x}`, x]));
 
-        if (code === 'ArrowUp' && this.selected >= 0) {
-          this.selected--;
-        } else if (code === 'ArrowDown' && this.selected < this.results.length - 1) {
-          this.selected++;
-        } else if (code === 'Enter' && this.selected >= 0) {
-          this.activate(this.selected);
+        if (code === 'ArrowUp' && this.highlighted >= 0) {
+          this.highlighted--;
+        } else if (code === 'ArrowDown' && this.highlighted < this.results.length - 1) {
+          this.highlighted++;
+        } else if (code === 'Enter' && this.highlighted >= 0) {
+          this.select(this.highlighted);
+        } else if (code === 'Enter' && this.results.length > 0) {
+          this.select(0);
         } else if (metaKey && digits.hasOwnProperty(code)) {
-          this.activate(digits[code]);
+          this.select(digits[code]);
         }
       },
-      activate (index) {
+      select (index) {
+        const { key, pluginName } = this.results [index];
 
+        ipcRenderer.send('input:select?', pluginName, key);
       },
     },
   };

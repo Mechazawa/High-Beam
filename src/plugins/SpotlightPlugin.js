@@ -2,13 +2,12 @@ import AbstractPlugin from './AbstractPlugin';
 import osApps from 'os-apps';
 import fileIcon from 'file-icon';
 import { basename, extname } from 'path';
+import { exec } from 'child_process';
 
 export default class SpotlightPlugin extends AbstractPlugin {
   name = 'spotlight';
 
   async query (query) {
-    console.log('SpotlightPlugin::onQuery', query);
-
     if (!query.length) {
       return [];
     }
@@ -33,6 +32,6 @@ export default class SpotlightPlugin extends AbstractPlugin {
   }
 
   select (key) {
-    console.log('select', key);
+    exec('open ' + key);
   }
 }

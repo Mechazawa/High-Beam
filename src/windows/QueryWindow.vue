@@ -37,6 +37,9 @@
           ipcRenderer.send('input:query?', this.replyKey, value);
         }
       },
+      results (value) {
+        ipcRenderer.send('setBounds', { height: 80 + (60 * value.length) });
+      },
     },
     methods: {
       onKeypress ({ code }) {
@@ -46,8 +49,6 @@
       },
       replyHandler (event, rows) {
         this.results.push(...rows);
-
-        ipcRenderer.send('setBounds', { height: 80 + (60 * this.results.length) });
       },
     },
   };
