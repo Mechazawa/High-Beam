@@ -1,11 +1,15 @@
 export function debounce (...args) {
   if (typeof args[0] === 'number' && args.length <= 2) {
-    const { wait, immediate = false } = args;
-    return function ({ descriptor }) {
-      descriptor.value = _debounce(descriptor.value, wait, immediate);
+    throw new Error('debounce decorators are broken (context missing)');
 
-      return descriptor;
-    }
+    // const { wait, immediate = false } = args;
+    //
+    // return function (target, key, descriptor) {
+    //   console.log('debounce', { target, key, descriptor });
+    //   descriptor.value = _debounce((...args) => descriptor.value.apply(target, args), wait, immediate);
+    //
+    //   return descriptor;
+    // };
   } else if (args.length === 2 || args.length === 3) {
     const { func, wait, immediate = false } = args;
 

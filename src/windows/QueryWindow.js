@@ -1,13 +1,15 @@
-import { BrowserWindow, ipcMain } from "electron";
-import { createProtocol } from "vue-cli-plugin-electron-builder/lib";
-import { debounce } from "../utils/functions";
-import PluginManager from "../PluginManager";
+import { BrowserWindow, ipcMain } from 'electron';
+import { createProtocol } from 'vue-cli-plugin-electron-builder/lib';
+import PluginManager from '../PluginManager';
+import SpotlightPlugin from '../plugins/SpotlightPlugin';
 
 // @todo split into abstract version
 export default class QueryWindow {
-
   constructor () {
     this.pluginManager = new PluginManager();
+
+    this.pluginManager.load(SpotlightPlugin);
+
     this._initIpc();
   }
 
@@ -60,22 +62,25 @@ export default class QueryWindow {
   }
 
   _initIpc () {
-    ipcMain.on('window:bounds?', (event, ...args) => this.onWindowBounds(event, ...args));
+    ipcMain.on('setBounds', (event, ...args) => event.reply('windowBounds', this.setBounds(...args)));
     ipcMain.on('input:query?', (event, ...args) => this.onInputQuery(event, ...args));
   }
 
-  onWindowBounds (event, bounds) {
+  setBounds (bounds) {
     const animated = Boolean(bounds.animated);
 
     delete bounds.animated;
 
     this.browser.setBounds(bounds, animated);
 
-    event.reply('window:bounds', this.browser.getBounds());
+    return this.browser.getBounds();
   }
 
-  @debounce(300)
-  onInputQuery(event, query) {
+  onInputQuery (event, replyKey, query) {
+    const results = this.pluginManager.query(query);
 
+    for (const result of results) {
+      result.then(rows => event.reply(replyKey, rows));
+    }
   }
 }

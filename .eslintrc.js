@@ -21,6 +21,8 @@ module.exports = {
     'no-mixed-operators': 'off',
     'no-unused-vars': 'off',
     'camelcase': 'off',
+    'promise/catch-or-return': 'off',
+
   },
   overrides: [
     {

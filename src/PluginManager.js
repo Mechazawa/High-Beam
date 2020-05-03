@@ -1,5 +1,3 @@
-import { abstract } from './utils/class';
-
 /**
  * Manages loading of plugins and communication between
  * them and the rest of the application.
@@ -9,27 +7,56 @@ export default class PluginManager {
    * Collection of loaded plugins
    * @type {Set<AbstractPlugin>}
    */
-  _plugins = new Set();
+  _plugins = null;
+
+  constructor () {
+    this._plugins = new Set();
+  }
 
   /**
    * Load a plugin
-   * @param {string} path - node path
+   * @param {string|constructor<AbstractPlugin>} path - node path
    * @returns {?AbstractPlugin} - loaded plugin
    */
   load (path) {
     try {
-      const PluginConstructor = require(path);
-      const plugin = new PluginConstructor();
+      const PluginConstructor = typeof path === 'string' ? require(path) : path;
+      const plugin = typeof PluginConstructor === 'function' ? new PluginConstructor() : PluginConstructor;
 
       this._plugins.add(plugin);
 
       return plugin;
     } catch (e) {
-      console.error(`FAILED TO LOAD PLUGIN: ${path}`);
+      console.error(`FAILED TO LOAD PLUGIN: ${path} (cwd: ${__dirname})`);
       console.error(e);
 
       return undefined;
     }
+  }
+
+  /**
+   * Query the plugins
+   * To obtain results just listen for the query:response event
+   * @param {string} str - query string
+   * @returns {Array<Promise<Array<QueryResultRow>>>}
+   */
+  query (str) {
+    const output = [];
+
+    this._plugins.forEach(plugin => output.push(plugin.query(str)));
+
+    return output;
+  }
+
+  /**
+   * Select a query result row
+   * @param {string} name - plugin name
+   * @param {string|number} key - row key
+   * @returns {Promise<void>|void}
+   * @todo decide how I wanna do stuff that doesn't just close the window, show extra info, a new view etc
+   */
+  select (name, key) {
+    return this.getPlugin(name)?.select(key);
   }
 
   /**
@@ -38,12 +65,21 @@ export default class PluginManager {
    * @returns {boolean} - success
    */
   unload (name) {
-    return this._plugins.delete(this.getPlugin(name));
+    const plugin = this.getPlugin(name);
+
+    if (!plugin) {
+      return false;
+    }
+
+    plugin.removeAllListeners();
+
+    return this._plugins.delete(plugin);
   }
 
   /**
    * Get a plugin by name
    * @param {string} name - plugin name
+   * @returns {AbstractPlugin}
    */
   getPlugin (name) {
     return this.list().find(plugin => plugin.name === name);
@@ -57,91 +93,3 @@ export default class PluginManager {
   }
 }
 
-/**
- * A query result row
- * @typedef {{
- *    icon: string,
- *    weight: number,
- *    description: string,
- *    title: string,
- *    key: ?(string|number)
- * }} QueryResultRow
- */
-
-/**
- * Abstract plugin
- */
-@abstract
-class AbstractPlugin {
-  @abstract
-  name;
-
-  /**
-   *
-   * @param query
-   * @returns QueryResultRow[]
-   */
-  @abstract
-  onQuery (query) {
-    return [
-      {
-        weight: 50, // 0-100
-        title: '',
-        description: '',
-        icon: '', // can be missing or use a sprite
-        key: 'asdasdasd',
-      },
-    ];
-  }
-}
-
-export { AbstractPlugin };
-
-export class AbstractKeywordPlugin extends AbstractPlugin {
-  /**
-   * List of keywords
-   * @type {Array<RegExp|string>}
-   */
-  @abstract
-  keywords = [
-    'http',
-  ];
-
-  /**
-   * @inheritDoc
-   */
-  onQuery (query) {
-    const output = [];
-
-    for (let i = 0; i < this.keywords.length; i++) {
-      const keyword = this.keywords[i];
-
-      if (typeof keyword === 'string') {
-        if (query.startsWith(`${keyword} `)) {
-          const args = query.replace(new RegExp('^' + keyword), '');
-
-          output.push(...[this.onKeyword(args, i)].flat(1));
-        }
-      } else {
-        const match = query.match(keyword);
-
-        if (match) {
-          output.push(...[this.onKeyword(match, i)].flat(1));
-        }
-      }
-    }
-
-    return output;
-  }
-
-  /**
-   * Triggered when a keyword gets matched
-   * @param {Array<string>|string} match - regexp match or keyword arguments
-   * @param index
-   * @returns Array<QueryResultRow>|QueryResultRow
-   */
-  @abstract
-  onKeyword (match, index) {
-
-  }
-}

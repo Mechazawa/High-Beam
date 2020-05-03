@@ -25,7 +25,7 @@ export function abstract (...args) {
       if (typeof constructor === 'function') {
         constructor.apply(this, constructorArgs);
       }
-    }
+    };
 
     return input;
   }
@@ -42,5 +42,5 @@ export function isAbstract (self) {
 function hasAnyAbstractFieldSymbols (obj) {
   const descriptors = Object.getOwnPropertyDescriptors(obj);
 
-  return Object.entries(descriptors).some((desc) => desc.value === AbstractFieldSymbol);
+  return Object.entries(descriptors).some(desc => desc.value === AbstractFieldSymbol);
 }

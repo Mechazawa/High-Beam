@@ -4,7 +4,7 @@ import { app, protocol } from 'electron';
 import {
   installVueDevtools,
 } from 'vue-cli-plugin-electron-builder/lib';
-import QueryWindow from "./windows/QueryWindow.js";
+import QueryWindow from './windows/QueryWindow.js';
 
 const isDevelopment = process.env.NODE_ENV !== 'production';
 
@@ -35,7 +35,7 @@ app.on('window-all-closed', () => {
 app.on('activate', () => {
   // On macOS it's common to re-create a window in the app when the
   // dock icon is clicked and there are no other windows open.
-  if (win === null) {
+  if (!win?.isOpen()) {
     createWindow();
   }
 });
@@ -52,9 +52,9 @@ app.on('ready', async () => {
     // If you are not using Windows 10 dark mode, you may uncomment these lines
     // In addition, if the linked issue is closed, you can upgrade electron and uncomment these lines
     try {
-      await installVueDevtools()
+      await installVueDevtools();
     } catch (e) {
-      console.error('Vue Devtools failed to install:', e.toString())
+      console.error('Vue Devtools failed to install:', e.toString());
     }
   }
 
@@ -74,8 +74,6 @@ if (isDevelopment) {
       app.quit();
     });
   }
-} else {
-  if (process.platform === 'darwin') {
-    app.dock.hide();
-  }
+} else if (process.platform === 'darwin') {
+  app.dock.hide();
 }

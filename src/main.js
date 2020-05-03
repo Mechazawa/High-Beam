@@ -1,2 +1,2 @@
-import './windows/QueryWindow.main.js'
+import './windows/QueryWindow.main.js';
 // todo routing
