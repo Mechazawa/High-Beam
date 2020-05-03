@@ -8,7 +8,7 @@ module.exports = {
           .rule('babel')
           .test(/(\.js$)/)
           .use('babel')
-          .loader('babel-loader')
+          .loader('babel-loader?cacheDirectory')
           .options(require('./babel.config.js'));
       },
       plugins: [

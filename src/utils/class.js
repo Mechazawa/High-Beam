@@ -17,10 +17,13 @@ export function abstract (...args) {
     const input = args[0];
     const constructor = Object.getPrototypeOf(input).constructor;
 
+    // @todo fix, this doesn't overwrite the constructor or something
     Object.getPrototypeOf(input).constructor = function (...constructorArgs) {
       if (constructor === AbstractFieldSymbol || isAbstract(this)) {
         throw new AbstractClassError();
       }
+
+      console.log('not abstract', this.constructor.name);
 
       if (typeof constructor === 'function') {
         constructor.apply(this, constructorArgs);

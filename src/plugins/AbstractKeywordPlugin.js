@@ -8,6 +8,7 @@ export default class AbstractKeywordPlugin extends AbstractPlugin {
   /**
    * List of keywords
    * @type {Array<RegExp|string>}
+   * @abstract
    */
   @abstract
   keywords = [
@@ -46,6 +47,7 @@ export default class AbstractKeywordPlugin extends AbstractPlugin {
    * @param {Array<string>|string} match - regexp match or keyword arguments
    * @param index
    * @returns {Promise<Array<QueryResultRow>>}
+   * @abstract
    */
   @abstract
   keyword (match, index) {

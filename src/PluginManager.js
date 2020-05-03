@@ -25,6 +25,8 @@ export default class PluginManager {
 
       this._plugins.add(plugin);
 
+      console.log('PluginManager loaded', Object.getPrototypeOf(plugin).constructor.name);
+
       return plugin;
     } catch (e) {
       console.error(`FAILED TO LOAD PLUGIN: ${path} (cwd: ${__dirname})`);

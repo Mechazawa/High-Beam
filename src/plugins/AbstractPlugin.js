@@ -11,6 +11,7 @@ import { EventEmitter } from 'events';
  *    description: ?string,
  *    weight: ?number,
  *    pluginName: string,
+ *    html: ?boolean,
  * }} QueryResultRow
  */
 
@@ -20,12 +21,6 @@ import { EventEmitter } from 'events';
  */
 @abstract
 class AbstractPlugin {
-  /**
-   * Auto incrementing id for keeping track of plugins
-   * @type {number}
-   */
-  id = incrementing();
-
   /**
    * plugin name
    * @type {string}

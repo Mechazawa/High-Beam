@@ -39,7 +39,7 @@
     },
     methods: {
       onKeydown ({ code, metaKey }) {
-        const digits = Object.fromEntries([1234567890].map(x => [`Digit${x}`, x]));
+        const digits = Object.fromEntries([123456789].map(x => [`Digit${x}`, x]));
 
         if (code === 'ArrowUp' && this.highlighted >= 0) {
           this.highlighted--;
@@ -54,6 +54,10 @@
         }
       },
       select (index) {
+        if (!this.results [index]) {
+          return;
+        }
+
         const { key, pluginName } = this.results [index];
 
         ipcRenderer.send('input:select?', pluginName, key);

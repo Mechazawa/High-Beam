@@ -2,6 +2,7 @@ import { BrowserWindow, ipcMain } from 'electron';
 import { createProtocol } from 'vue-cli-plugin-electron-builder/lib';
 import PluginManager from '../PluginManager';
 import SpotlightPlugin from '../plugins/SpotlightPlugin';
+import CalculatorPlugin from "../plugins/CalculatorPlugin";
 
 // @todo split into abstract version
 export default class QueryWindow {
@@ -9,6 +10,7 @@ export default class QueryWindow {
     this.pluginManager = new PluginManager();
 
     this.pluginManager.load(SpotlightPlugin);
+    this.pluginManager.load(CalculatorPlugin);
   }
 
   isOpen () {

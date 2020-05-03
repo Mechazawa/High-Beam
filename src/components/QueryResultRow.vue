@@ -3,8 +3,14 @@
     <img v-if="icon" :src="icon" alt="icon" class="icon cell"/>
     <div v-else class="icon cell"/>
     <div class="cell">
-      <strong v-text="title"/>
-      <span v-text="description" v-if="description" class="description"/>
+      <template v-if="html">
+        <strong v-html="title"/>
+        <span v-html="description" v-if="description" class="description"/>
+      </template>
+      <template v-else>
+        <strong v-text="title"/>
+        <span v-text="description" v-if="description" class="description"/>
+      </template>
     </div>
     <div class="index cell" v-if="index >= 0" v-text="index + 1"/>
   </div>
@@ -31,6 +37,9 @@
         default: -1,
       },
       highlight: {
+        type: Boolean,
+      },
+      html: {
         type: Boolean,
       },
     },

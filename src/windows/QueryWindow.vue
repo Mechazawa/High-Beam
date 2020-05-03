@@ -2,7 +2,7 @@
   <div id="app">
     <!--suppress HtmlFormInputWithoutLabel -->
     <input placeholder="Query..." v-model="query" class="query" @keydown="onKeypress">
-    <QueryResultTable :results="results"/>
+    <QueryResultTable :results="sortedResults"/>
   </div>
 </template>
 
@@ -38,8 +38,15 @@
         }
       },
       results (value) {
-        ipcRenderer.send('setBounds', { height: 80 + (60 * value.length) });
+        ipcRenderer.send('setBounds', { height: 80 + (60 * Math.min(value.length, 10)) });
       },
+    },
+    computed: {
+      sortedResults () {
+        return Array.from(this.results)
+                    .sort((a, b) => (b?.weight ?? 50) - (a?.weight ?? 50))
+                    .slice(0, 10);
+      }
     },
     methods: {
       onKeypress ({ code }) {
