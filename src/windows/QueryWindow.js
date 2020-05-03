@@ -2,7 +2,7 @@ import { BrowserWindow, ipcMain } from 'electron';
 import { createProtocol } from 'vue-cli-plugin-electron-builder/lib';
 import PluginManager from '../PluginManager';
 import SpotlightPlugin from '../plugins/SpotlightPlugin';
-import CalculatorPlugin from "../plugins/CalculatorPlugin";
+import CalculatorPlugin from '../plugins/CalculatorPlugin';
 
 // @todo split into abstract version
 export default class QueryWindow {
@@ -84,7 +84,11 @@ export default class QueryWindow {
     const results = this.pluginManager.query(query);
 
     for (const result of results) {
-      result.then(rows => event.reply(replyKey, rows));
+      result.then(rows => {
+        if (rows.length > 0) {
+          event.reply(replyKey, rows);
+        }
+      });
     }
   }
 

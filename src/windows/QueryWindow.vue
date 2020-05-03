@@ -20,6 +20,7 @@
         replyKey: null,
         results: [],
         boundReplyHandler: (...args) => this.replyHandler(...args),
+        maxRows: 9,
       };
     },
     watch: {
@@ -38,15 +39,15 @@
         }
       },
       results (value) {
-        ipcRenderer.send('setBounds', { height: 80 + (60 * Math.min(value.length, 10)) });
+        ipcRenderer.send('setBounds', { height: 80 + (60 * Math.min(value.length, this.maxRows)) });
       },
     },
     computed: {
       sortedResults () {
         return Array.from(this.results)
-                    .sort((a, b) => (b?.weight ?? 50) - (a?.weight ?? 50))
-                    .slice(0, 10);
-      }
+          .sort((a, b) => (b?.weight ?? 50) - (a?.weight ?? 50))
+          .slice(0, this.maxRows);
+      },
     },
     methods: {
       onKeypress ({ code }) {

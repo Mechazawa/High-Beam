@@ -11,14 +11,17 @@
 </template>
 
 <script>
-  import QueryResultRow from "./QueryResultRow";
-  import { ipcRenderer } from "electron";
+  import QueryResultRow from './QueryResultRow';
+  import { ipcRenderer } from 'electron';
 
   export default {
     name: 'query-result-table',
     components: { QueryResultRow },
     props: {
-      results: Array,
+      results: {
+        type: Array,
+        required: true,
+      },
     },
     data () {
       return {
@@ -54,18 +57,14 @@
         }
       },
       select (index) {
-        if (!this.results [index]) {
+        if (!this.results[index]) {
           return;
         }
 
-        const { key, pluginName } = this.results [index];
+        const { key, pluginName } = this.results[index];
 
         ipcRenderer.send('input:select?', pluginName, key);
       },
     },
   };
 </script>
-
-<style scoped>
-
-</style>

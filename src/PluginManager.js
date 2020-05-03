@@ -2,12 +2,21 @@
  * Manages loading of plugins and communication between
  * them and the rest of the application.
  */
+import { asyncDebounce } from "./utils/functions";
+
 export default class PluginManager {
   /**
    * Collection of loaded plugins
    * @type {Set<AbstractPlugin>}
    */
   _plugins = null;
+
+  /**
+   * Last bounce lookup map
+   * @type {WeakMap<object, any>}
+   * @private
+   */
+  _bounced = new WeakMap();
 
   constructor () {
     this._plugins = new Set();
@@ -24,6 +33,7 @@ export default class PluginManager {
       const plugin = typeof PluginConstructor === 'function' ? new PluginConstructor() : PluginConstructor;
 
       this._plugins.add(plugin);
+      this._bounced.set(plugin, asyncDebounce(plugin.query.bind(plugin), plugin.debounce, false, []));
 
       console.log('PluginManager loaded', Object.getPrototypeOf(plugin).constructor.name);
 
@@ -45,7 +55,7 @@ export default class PluginManager {
   query (str) {
     const output = [];
 
-    this._plugins.forEach(plugin => output.push(plugin.query(str)));
+    this._plugins.forEach(plugin => output.push(this._bounced.get(plugin)(str)));
 
     return output;
   }
@@ -75,7 +85,7 @@ export default class PluginManager {
 
     plugin.removeAllListeners();
 
-    return this._plugins.delete(plugin);
+    return this._plugins.delete(plugin) && this._bounced.delete(plugin);
   }
 
   /**

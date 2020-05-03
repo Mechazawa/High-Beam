@@ -63,6 +63,6 @@ export default class SpotlightPlugin extends AbstractPlugin {
   }
 
   select (key) {
-    exec('open ' + key);
+    exec(`open ${key}`);
   }
 }

@@ -1,5 +1,5 @@
 <template>
-  <div class="row" v-bind:class="{highlight: highlight}">
+  <div class="row" :class="{ highlight: highlight }">
     <img v-if="icon" :src="icon" alt="icon" class="icon cell"/>
     <div v-else class="icon cell"/>
     <div class="cell">
@@ -87,15 +87,15 @@
     color: #929292;
   }
 
-  :hover, .highlight {
+  .row:hover, .highlight {
     background: gray;
     cursor: pointer;
 
-    > strong {
+    strong {
       color: #efefef;
     }
 
-    > .description {
+    .description {
       color: #c7c7c7;
     }
   }
@@ -106,7 +106,7 @@
 
   .index {
     float: right;
-    font-size: 30pt;
+    font-size: 24pt;
     padding-right: .2em;
   }
 </style>

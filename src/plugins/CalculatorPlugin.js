@@ -1,6 +1,6 @@
-import AbstractKeywordPlugin from "./AbstractKeywordPlugin";
+import AbstractKeywordPlugin from './AbstractKeywordPlugin';
 import clipboardy from 'clipboardy';
-import fileIcon from "file-icon";
+import fileIcon from 'file-icon';
 import { evaluate } from 'mathjs';
 
 export default class CalculatorPlugin extends AbstractKeywordPlugin {
@@ -23,6 +23,7 @@ export default class CalculatorPlugin extends AbstractKeywordPlugin {
 
   select (key) {
     console.log('select', key);
+
     if (key !== null) {
       clipboardy.writeSync(key);
     }

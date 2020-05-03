@@ -35,7 +35,7 @@ function _debounce (func, wait, immediate = false) {
       clearTimeout(timeout);
     }
 
-    timeout = setTimeout(later, wait);
+    timeout = setTimeout(later, out.wait);
 
     if (callNow) func(...args);
   };
@@ -45,6 +45,57 @@ function _debounce (func, wait, immediate = false) {
 
     timeout = undefined;
   };
+
+  out.wait = wait;
+
+  return out;
+}
+
+export function asyncDebounce (fn, wait, resolveAll = true, defaultValue = undefined) {
+  let timeout;
+  let promise, resolve, reject;
+
+  const out = (...args) => {
+    if (!resolveAll && promise) {
+      resolve(defaultValue);
+      promise = undefined;
+    }
+
+    if (!promise) {
+      promise = new Promise((_resolve, _reject) => {
+        resolve = _resolve;
+        reject = _reject;
+      });
+    }
+
+    const later = async () => {
+      timeout = undefined;
+
+      try {
+        resolve(await fn(...args));
+      } catch (err) {
+        reject(err);
+      } finally {
+        promise = undefined;
+      }
+    };
+
+    if (typeof timeout !== 'undefined') {
+      clearTimeout(timeout);
+    }
+
+    timeout = setTimeout(later, out.wait);
+
+    return promise;
+  };
+
+  out.cancel = () => {
+    clearTimeout(timeout);
+
+    timeout = undefined;
+  };
+
+  out.wait = wait;
 
   return out;
 }

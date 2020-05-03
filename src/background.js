@@ -17,9 +17,10 @@ protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { secure: tru
 
 function createWindow () {
   // Create the browser window.
-  win = new QueryWindow();
+  if (!win) {
+    win = new QueryWindow();
+  }
 
-  // todo set window to null when closed or something
   win.open();
 }
 

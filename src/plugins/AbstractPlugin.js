@@ -30,6 +30,12 @@ class AbstractPlugin {
   name;
 
   /**
+   * Debounce for query calls
+   * @type {number}
+   */
+  debounce = 100;
+
+  /**
    *
    * @param query
    * @returns {Promise<Array<QueryResultRow>>}
