@@ -38,10 +38,10 @@ class AbstractPlugin {
   /**
    *
    * @param query
-   * @returns {Promise<Array<QueryResultRow>>}
+   * @returns {Promise<Array<QueryResultRow>>|Array<QueryResultRow>}
    */
   @abstract
-  async query (query) {
+  query (query) {
     return [];
   }
 

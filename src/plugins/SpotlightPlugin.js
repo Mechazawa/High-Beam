@@ -8,6 +8,8 @@ import Fuse from 'fuse.js';
 export default class SpotlightPlugin extends AbstractPlugin {
   name = 'spotlight';
 
+  debounce = 100;
+
   async query (query) {
     query = query.trim().toLowerCase();
 
@@ -25,6 +27,9 @@ export default class SpotlightPlugin extends AbstractPlugin {
       includeMatches: true,
       keys: ['appName'],
     }).search(query);
+
+    matches.sort((a, b) => a.score - b.score);
+    matches.splice(10, matches.length);
 
     return Promise.all(matches.map(async match => {
       const { path } = match.item;

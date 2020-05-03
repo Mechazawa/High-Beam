@@ -1,7 +1,7 @@
 <template>
   <div id="app">
     <!--suppress HtmlFormInputWithoutLabel -->
-    <input placeholder="Query..." v-model="query" class="query" @keydown="onKeypress">
+    <input ref="query" placeholder="Query..." v-model="query" class="query" @keydown="onKeypress">
     <QueryResultTable :results="sortedResults"/>
   </div>
 </template>
@@ -41,6 +41,9 @@
       results (value) {
         ipcRenderer.send('setBounds', { height: 80 + (60 * Math.min(value.length, this.maxRows)) });
       },
+    },
+    mounted () {
+      this.$refs.query.focus();
     },
     computed: {
       sortedResults () {

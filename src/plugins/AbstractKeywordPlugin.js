@@ -46,7 +46,7 @@ export default class AbstractKeywordPlugin extends AbstractPlugin {
    * Triggered when a keyword gets matched
    * @param {Array<string>|string} match - regexp match or keyword arguments
    * @param index
-   * @returns {Promise<Array<QueryResultRow>>}
+   * @returns {Promise<Array<QueryResultRow>>|Array<QueryResultRow>}
    * @abstract
    */
   @abstract
