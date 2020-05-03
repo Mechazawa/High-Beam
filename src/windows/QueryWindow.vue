@@ -2,22 +2,18 @@
   <div id="app">
     <!--suppress HtmlFormInputWithoutLabel -->
     <input placeholder="Query..." v-model="query" class="query" @keydown="onKeypress">
-    <QueryResultRow
-      v-for="(result, index) in results"
-      :key="result.key"
-      :index="index"
-      v-bind="result"/>
+    <QueryResultTable :results="results"/>
   </div>
 </template>
 
 <script>
   import { ipcRenderer } from 'electron';
   import { randomString } from '../utils/data';
-  import QueryResultRow from '../components/QueryResultRow';
+  import QueryResultTable from '../components/QueryResultTable';
 
   export default {
     name: 'query-window',
-    components: { QueryResultRow },
+    components: { QueryResultTable },
     data () {
       return {
         query: '',
@@ -34,7 +30,7 @@
           this.replyKey = null;
         }
 
-        this.results = [];
+        this.results.splice(0, this.results.length);
 
         if (value.length > 0) {
           ipcRenderer.on(this.replyKey = randomString(), this.boundReplyHandler);

@@ -1,5 +1,5 @@
 <template>
-  <div class="row">
+  <div class="row" v-bind:class="{highlight: highlight}">
     <img v-if="icon" :src="icon" alt="icon" class="icon cell"/>
     <div v-else class="icon cell"/>
     <div class="cell">
@@ -29,6 +29,9 @@
       index: {
         type: Number,
         default: -1,
+      },
+      highlight: {
+        type: Boolean,
       },
     },
   };
@@ -75,7 +78,7 @@
     color: #929292;
   }
 
-  :hover {
+  :hover, .highlight {
     background: gray;
     cursor: pointer;
 
@@ -88,7 +91,10 @@
     }
   }
 
-  .index::before { content: '⌘' }
+  .index::before {
+    content: '⌘'
+  }
+
   .index {
     float: right;
     font-size: 30pt;
