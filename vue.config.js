@@ -3,6 +3,12 @@ const webpack = require('webpack');
 module.exports = {
   pluginOptions: {
     electronBuilder: {
+      builderOptions: {
+        appId: 'at.ioexception.high-beam',
+        mac: {
+          darkModeSupport: true,
+        },
+      },
       chainWebpackMainProcess: config => {
         config.module
           .rule('babel')
@@ -12,10 +18,10 @@ module.exports = {
           .options(require('./babel.config.js'));
 
         config.module
-              .rule('file-path-loader')
-              .test(/\.(png|jpe?g|gif)$/i)
-              .use('file-path-loader')
-              .loader('file-loader?outputPath=assets');
+          .rule('file-path-loader')
+          .test(/\.(png|jpe?g|gif)$/i)
+          .use('file-path-loader')
+          .loader('file-loader?outputPath=assets');
       },
       plugins: [
         new webpack.HotModuleReplacementPlugin(),

@@ -66,11 +66,14 @@
 </script>
 
 <style lang="scss">
+  @import '../assets/variables.scss';
+
   #app {
     font-family: Avenir, Helvetica, Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    color: #2c3e50;
+    color: var(--main-font-color);
+    background: var(--background-color);
   }
 
   .query {
@@ -81,6 +84,8 @@
     margin: 0;
     outline: 0;
     border: 0;
+    background:var(--background-color);
+    color: var(--main-font-color);
 
     :focus {
       outline: 0;

@@ -47,6 +47,8 @@
 </script>
 
 <style scoped lang="scss">
+  @import '../assets/variables.scss';
+
   .row {
     height: 60px;
     display: table;
@@ -77,26 +79,26 @@
     font-family: Avenir, Helvetica, Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    color: #2c3e50;
+    color: var(--main-font-color);
     display: block;
     font-size: 14pt;
   }
 
   .description {
     font-size: 10pt;
-    color: #929292;
+    color: var(--subtext-font-color);
   }
 
   .row:hover, .highlight {
-    background: gray;
+    background: var(--background-color-highlight);
     cursor: pointer;
 
-    strong {
-      color: #efefef;
+    strong, .index {
+      color: var(--main-font-color-highlight);
     }
 
     .description {
-      color: #c7c7c7;
+      color: var(--subtext-font-color-highlight);
     }
   }
 
@@ -105,8 +107,8 @@
   }
 
   .index {
-    float: right;
     font-size: 24pt;
-    padding-right: .2em;
+    padding-right: .5em;
+    color: var(--main-font-color);
   }
 </style>

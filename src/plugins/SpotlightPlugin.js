@@ -26,9 +26,9 @@ export default class SpotlightPlugin extends AbstractPlugin {
       includeScore: true,
       includeMatches: true,
       keys: ['appName'],
-    }).search(query);
+    }).search(query).filter(({score}) => score <= .7);
 
-    matches.sort((a, b) => a.score - b.score);
+    matches.sort((a, b) => (1e9 * a.score) - (1e9 * b.score));
     matches.splice(10, matches.length);
 
     return Promise.all(matches.map(async match => {

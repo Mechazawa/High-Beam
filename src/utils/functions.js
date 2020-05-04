@@ -53,7 +53,7 @@ function _debounce (func, wait, immediate = false) {
 
 export function asyncDebounce (fn, wait, resolveAll = true, defaultValue = undefined) {
   let timeout;
-  let promise, resolve, reject;
+  let promise; let resolve; let reject;
 
   const out = (...args) => {
     if (!resolveAll && promise) {

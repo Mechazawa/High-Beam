@@ -2,7 +2,7 @@
  * Manages loading of plugins and communication between
  * them and the rest of the application.
  */
-import { asyncDebounce } from "./utils/functions";
+import { asyncDebounce } from './utils/functions';
 
 export default class PluginManager {
   /**

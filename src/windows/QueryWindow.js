@@ -1,9 +1,10 @@
-import { BrowserWindow, globalShortcut , ipcMain } from 'electron';
+import { BrowserWindow, globalShortcut, ipcMain } from 'electron';
 import { createProtocol } from 'vue-cli-plugin-electron-builder/lib';
 import PluginManager from '../PluginManager';
 import SpotlightPlugin from '../plugins/SpotlightPlugin';
 import CalculatorPlugin from '../plugins/CalculatorPlugin';
 import PaperSizePlugin from '../plugins/PaperSizePlugin';
+import { CorePlugin } from "../plugins/CorePlugin";
 
 // @todo split into abstract version
 export default class QueryWindow {
@@ -13,6 +14,7 @@ export default class QueryWindow {
     this.pluginManager.load(SpotlightPlugin);
     this.pluginManager.load(CalculatorPlugin);
     this.pluginManager.load(PaperSizePlugin);
+    this.pluginManager.load(CorePlugin);
 
     globalShortcut.register('Alt+Space', () => this.open());
   }
@@ -24,6 +26,7 @@ export default class QueryWindow {
   async open (options = {}) {
     if (this.isOpen()) {
       this.browser.focus();
+
       return;
     }
 

@@ -4,7 +4,7 @@ import paperSizes from './paper-sizes.json';
 import iconPath from '../assets/PaperSizePlugin.png';
 import { readFileSync } from 'fs';
 
-console.log(__dirname + '/' + iconPath);
+console.log(`${__dirname}/${iconPath}`);
 
 export default class PaperSizePlugin extends AbstractKeywordPlugin {
   name = 'paper-size';
@@ -14,7 +14,7 @@ export default class PaperSizePlugin extends AbstractKeywordPlugin {
     /^\s*paper\s*(\w+)\s*$/i,
   ];
 
-  static icon = `data:image/png;base64,${readFileSync(__dirname + '/' + iconPath).toString('base64')}`;
+  static icon = `data:image/png;base64,${readFileSync(`${__dirname}/${iconPath}`).toString('base64')}`;
 
   select (key) {
     if (paperSizes[key]) {
@@ -23,11 +23,10 @@ export default class PaperSizePlugin extends AbstractKeywordPlugin {
   }
 
   keyword ([, query], index) {
-    query = query.toLowerCase()
-    console.log(query);
+    query = query.toLowerCase();
 
     const matches = Object.keys(paperSizes)
-                          .filter(key => key.toLowerCase().includes(query));
+      .filter(key => key.toLowerCase().includes(query));
 
     return matches.map(key => ({
       icon: PaperSizePlugin.icon,

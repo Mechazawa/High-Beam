@@ -1,12 +1,12 @@
 <template>
   <div>
     <QueryResultRow
-        v-for="(result, index) in results"
-        :key="result.key"
-        :index="index"
-        v-bind="result"
-        :highlight="highlighted === index"
-        @click="select(index)"/>
+      v-for="(result, index) in results"
+      :key="result.key"
+      :index="index"
+      v-bind="result"
+      :highlight="highlighted === index"
+      @click="select(index)"/>
   </div>
 </template>
 

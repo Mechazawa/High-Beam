@@ -1,6 +1,21 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
+    <script>
+      window.__setTheme = (targetTheme) => {
+        let userTheme = localStorage.user_theme
+        let OSTheme = localStorage.os_theme
+        let defaultTheme = 'light'
+
+        document.documentElement.setAttribute(
+          'data-theme',
+          targetTheme || userTheme || OSTheme || defaultTheme,
+        )
+      }
+
+      __setTheme()
+    </script>
+
     <meta charset="utf-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width,initial-scale=1.0">
