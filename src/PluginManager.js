@@ -30,10 +30,16 @@ export default class PluginManager {
   load (path) {
     try {
       const PluginConstructor = typeof path === 'string' ? require(path) : path;
+      /** @type {AbstractPlugin} */
       const plugin = typeof PluginConstructor === 'function' ? new PluginConstructor() : PluginConstructor;
 
       this._plugins.add(plugin);
-      this._bounced.set(plugin, asyncDebounce(plugin.query.bind(plugin), plugin.debounce, false, []));
+
+      if (plugin.debounce > 0) {
+        this._bounced.set(plugin, asyncDebounce(plugin.query.bind(plugin), plugin.debounce, false, []));
+      } else {
+        this._bounced.set(plugin, plugin.query.bind(plugin));
+      }
 
       console.log('PluginManager loaded', Object.getPrototypeOf(plugin).constructor.name);
 

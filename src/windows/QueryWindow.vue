@@ -1,26 +1,36 @@
 <template>
   <div id="app">
     <!--suppress HtmlFormInputWithoutLabel -->
-    <input ref="query" placeholder="Query..." v-model="query" class="query" @keydown="onKeypress">
-    <QueryResultTable :results="sortedResults"/>
+    <input ref="query" placeholder="Query..." v-model="query" class="query" @keydown="onInputKeypress">
+    <div>
+      <QueryResultRow
+          v-for="(result, index) in sortedResults"
+          :key="result.key"
+          :index="index"
+          v-bind="result"
+          :highlight="highlighted === index"
+          @click="select(index)"/>
+    </div>
   </div>
 </template>
 
 <script>
   import { ipcRenderer } from 'electron';
   import { randomString } from '../utils/data';
-  import QueryResultTable from '../components/QueryResultTable';
+  import QueryResultRow from '../components/QueryResultRow';
 
   export default {
     name: 'query-window',
-    components: { QueryResultTable },
+    components: { QueryResultRow },
     data () {
       return {
         query: '',
+        maxRows: 9,
         replyKey: null,
         results: [],
+        highlighted: -1,
         boundReplyHandler: (...args) => this.replyHandler(...args),
-        maxRows: 9,
+        boundOnWindowKeydown: (...args) => this.onWindowKeydown(...args),
       };
     },
     watch: {
@@ -39,27 +49,69 @@
         }
       },
       results (value) {
+        this.highlighted = -1;
         ipcRenderer.send('setBounds', { height: 80 + (60 * Math.min(value.length, this.maxRows)) });
       },
     },
     mounted () {
       this.$refs.query.focus();
+      window.addEventListener('keydown', this.boundOnWindowKeydown);
+    },
+    beforeDestroy () {
+      window.removeEventListener('keydown', this.boundOnWindowKeydown);
     },
     computed: {
       sortedResults () {
         return Array.from(this.results)
-          .sort((a, b) => (b?.weight ?? 50) - (a?.weight ?? 50))
-          .slice(0, this.maxRows);
+                    .sort((a, b) => (b?.weight ?? 50) - (a?.weight ?? 50))
+                    .slice(0, this.maxRows);
       },
     },
     methods: {
-      onKeypress ({ code }) {
+      onInputKeypress ({ code }) {
         if (code === 'Escape') {
           window.close();
+        } else if (code === 'Tab') {
+          const index = this.highlighted <= 0 ? 0 : this.highlighted;
+
+          if (!this.sortedResults[index]) {
+            return;
+          }
+
+          const { title } = this.sortedResults[index];
+          const div = document.createElement("div");
+
+          div.innerHTML = title;
+
+          this.query = div.innerText;
         }
       },
       replyHandler (event, rows) {
         this.results.push(...rows);
+      },
+      onWindowKeydown ({ code, metaKey }) {
+        const digits = Object.fromEntries([123456789].map(x => [`Digit${x}`, x]));
+
+        if (code === 'ArrowUp' && this.highlighted >= 0) {
+          this.highlighted--;
+        } else if (code === 'ArrowDown' && this.highlighted < this.results.length - 1) {
+          this.highlighted++;
+        } else if (code === 'Enter' && this.highlighted >= 0) {
+          this.select(this.highlighted);
+        } else if (code === 'Enter' && this.results.length > 0) {
+          this.select(0);
+        } else if (metaKey && digits.hasOwnProperty(code)) {
+          this.select(digits[code]);
+        }
+      },
+      select (index) {
+        if (!this.results[index]) {
+          return;
+        }
+
+        const { key, pluginName } = this.results[index];
+
+        ipcRenderer.send('input:select?', pluginName, key);
       },
     },
   };
@@ -84,7 +136,7 @@
     margin: 0;
     outline: 0;
     border: 0;
-    background:var(--background-color);
+    background: var(--background-color);
     color: var(--main-font-color);
 
     :focus {

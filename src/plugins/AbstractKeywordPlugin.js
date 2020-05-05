@@ -25,16 +25,19 @@ export default class AbstractKeywordPlugin extends AbstractPlugin {
       const keyword = this.keywords[i];
 
       if (typeof keyword === 'string') {
-        if (query.startsWith(`${keyword} `)) {
+        const keywordRe = new RegExp(`^(${keyword.replace(/(.)/g, '$1?')}$|keyword)`, 'i');
+        const match = query.match(keywordRe);
+
+        if (match) {
           const args = query.replace(new RegExp(`^${keyword}\\s+`), '');
 
-          output.push(this.keyword(args, i));
+          output.push(this.keyword(args, i, match[0].length));
         }
       } else {
         const match = query.match(keyword);
 
         if (match) {
-          output.push(this.keyword(match, i));
+          output.push(this.keyword(match, i, match[0].length));
         }
       }
     }
@@ -45,12 +48,13 @@ export default class AbstractKeywordPlugin extends AbstractPlugin {
   /**
    * Triggered when a keyword gets matched
    * @param {Array<string>|string} match - regexp match or keyword arguments
-   * @param index
+   * @param {number} index - matched keyword index
+   * @param {number} length - match length
    * @returns {Promise<Array<QueryResultRow>>|Array<QueryResultRow>}
    * @abstract
    */
   @abstract
-  keyword (match, index) {
+  keyword (match, index, length) {
 
   }
 }

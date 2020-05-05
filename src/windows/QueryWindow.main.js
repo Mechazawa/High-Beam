@@ -7,8 +7,6 @@ const { systemPreferences } = remote;
 const setOSTheme = () => {
   window.localStorage.os_theme = systemPreferences.isDarkMode() ? 'dark' : 'light';
 
-  console.log('isDarkMode', systemPreferences.isDarkMode());
-
   //
   // Defined in index.html, so undefined when launching the app.
   // Will be defined for `systemPreferences.subscribeNotification` callback.

@@ -2,6 +2,7 @@ import AbstractKeywordPlugin from './AbstractKeywordPlugin';
 import clipboardy from 'clipboardy';
 import fileIcon from 'file-icon';
 import { evaluate } from 'mathjs';
+import AppIconFetcher from "../utils/AppIconFetcher";
 
 export default class CalculatorPlugin extends AbstractKeywordPlugin {
   name = 'calculator';
@@ -11,19 +12,9 @@ export default class CalculatorPlugin extends AbstractKeywordPlugin {
     /^\s*(?:convert\s*)?([\d,]+\s+\w+.*)/,
   ];
 
-  iconPath = '/System/Applications/Calculator.app';
-
-  icon;
-
-  constructor () {
-    super();
-
-    this._fetchIcon();
-  }
+  iconFetcher = new AppIconFetcher('/System/Applications/Calculator.app');
 
   select (key) {
-    console.log('select', key);
-
     if (key !== null) {
       clipboardy.writeSync(key);
     }
@@ -43,7 +34,7 @@ export default class CalculatorPlugin extends AbstractKeywordPlugin {
       const result = evaluate(query.trim() || '0');
 
       return [{
-        icon: this.icon,
+        icon: this.iconFetcher.icon,
         title: String(result),
         key: String(result),
         pluginName: this.name,
@@ -51,7 +42,7 @@ export default class CalculatorPlugin extends AbstractKeywordPlugin {
       }];
     } catch {
       return [{
-        icon: this.icon,
+        icon: this.iconFetcher.icon,
         title: 'Error',
         key: null,
         pluginName: this.name,
@@ -65,7 +56,7 @@ export default class CalculatorPlugin extends AbstractKeywordPlugin {
       const result = evaluate(query.trim());
 
       return [{
-        icon: this.icon,
+        icon: this.iconFetcher.icon,
         title: String(result),
         key: String(result),
         pluginName: this.name,
@@ -74,11 +65,5 @@ export default class CalculatorPlugin extends AbstractKeywordPlugin {
     } catch {
       return [];
     }
-  }
-
-  async _fetchIcon () {
-    const iconBuffer = await fileIcon.buffer(this.iconPath, { size: 128 });
-
-    this.icon = `data:image/png;base64,${iconBuffer.toString('base64')}`;
   }
 }

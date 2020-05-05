@@ -23,8 +23,6 @@ export function abstract (...args) {
         throw new AbstractClassError();
       }
 
-      console.log('not abstract', this.constructor.name);
-
       if (typeof constructor === 'function') {
         constructor.apply(this, constructorArgs);
       }
