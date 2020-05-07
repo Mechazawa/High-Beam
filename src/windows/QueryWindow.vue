@@ -9,7 +9,8 @@
           :index="index"
           v-bind="result"
           :highlight="highlighted === index"
-          @click="select(index)"/>
+          @click="select(index)"
+          @mouseover.native="hover(index)"/>
     </div>
   </div>
 </template>
@@ -112,6 +113,9 @@
         const { key, pluginName } = this.results[index];
 
         ipcRenderer.send('input:select?', pluginName, key);
+      },
+      hover (index) {
+        this.highlighted = index;
       },
     },
   };

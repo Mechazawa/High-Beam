@@ -4,12 +4,12 @@
     <div v-else class="icon cell"/>
     <div class="cell">
       <template v-if="html">
-        <strong v-html="title"/>
-        <span v-html="description" v-if="description" class="description"/>
+        <strong v-html="title" class="cut-text"/>
+        <span v-html="description" v-if="description" :class="['description' ,{'cut-text': !showExtended}]"/>
       </template>
       <template v-else>
-        <strong v-text="title"/>
-        <span v-text="description" v-if="description" class="description"/>
+        <strong v-text="title" class="cut-text"/>
+        <span v-text="currentDescription" v-if="description" :class="['description' ,{'cut-text': !showExtended}]"/>
       </template>
     </div>
     <div class="index cell" v-if="index >= 0" v-text="index + 1"/>
@@ -32,6 +32,10 @@
         type: String,
         default: '',
       },
+      descriptionExtended: {
+        type: String,
+        default: '',
+      },
       index: {
         type: Number,
         default: -1,
@@ -43,6 +47,43 @@
         type: Boolean,
       },
     },
+    data () {
+      return {
+        mightShowExtended: false,
+        boundOnKeydown: this.onKeydown.bind(this),
+        boundKeyup: this.onKeyup.bind(this),
+      };
+    },
+    mounted () {
+      window.addEventListener('keydown', this.boundOnKeydown);
+      window.addEventListener('keyup', this.boundKeyup);
+    },
+    beforeDestroy () {
+      window.removeEventListener('keydown', this.boundOnKeydown);
+      window.removeEventListener('keyup', this.boundKeyup);
+    },
+    computed: {
+      showExtended () {
+        return this.mightShowExtended && this.highlight;
+      },
+      currentDescription () {
+        return this.showExtended && this.descriptionExtended ? this.descriptionExtended : this.description;
+      },
+    },
+    methods: {
+      onKeydown ({ code }) {
+        console.log({ code });
+
+        if (code === 'AltRight' || code === 'AltLeft') {
+          this.mightShowExtended = true;
+        }
+      },
+      onKeyup ({ code }) {
+        if (code === 'AltRight' || code === 'AltLeft') {
+          this.mightShowExtended = false;
+        }
+      },
+    },
   };
 </script>
 
@@ -51,7 +92,12 @@
 
   .row {
     height: 60px;
+    width: 800px;
     display: table;
+
+    :hover {
+      cursor: pointer;
+    }
   }
 
   .icon {
@@ -85,13 +131,14 @@
   }
 
   .description {
+    width: 50em;
+    display: block;
     font-size: 10pt;
     color: var(--subtext-font-color);
   }
 
-  .row:hover, .highlight {
+  .highlight {
     background: var(--background-color-highlight);
-    cursor: pointer;
 
     strong, .index {
       color: var(--main-font-color-highlight);
@@ -110,5 +157,11 @@
     font-size: 24pt;
     padding-right: .5em;
     color: var(--main-font-color);
+  }
+
+  .cut-text {
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: nowrap;
   }
 </style>

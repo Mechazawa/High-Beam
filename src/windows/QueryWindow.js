@@ -5,6 +5,7 @@ import SpotlightPlugin from '../plugins/SpotlightPlugin';
 import CalculatorPlugin from '../plugins/CalculatorPlugin';
 import PaperSizePlugin from '../plugins/PaperSizePlugin';
 import { CorePlugin } from "../plugins/CorePlugin";
+import HttpCodePlugin from "../plugins/HttpCodePlugin";
 
 // @todo split into abstract version
 export default class QueryWindow {
@@ -15,6 +16,7 @@ export default class QueryWindow {
     this.pluginManager.load(CalculatorPlugin);
     this.pluginManager.load(PaperSizePlugin);
     this.pluginManager.load(CorePlugin);
+    this.pluginManager.load(HttpCodePlugin);
 
     globalShortcut.register('Alt+Space', () => this.open());
   }
