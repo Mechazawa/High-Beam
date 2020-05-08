@@ -13,6 +13,7 @@ export class DnDPlugin extends AbstractKeywordPlugin {
   name = "DnD 5e";
 
   keywords = [
+    /^\s*(\w+) (.*)/i,
     /^5e\s*(\w+)/i,
     /^5e\s*(\w+) (.*)/i,
   ];
@@ -21,6 +22,7 @@ export class DnDPlugin extends AbstractKeywordPlugin {
     type = type.toLowerCase();
 
     switch (type) {
+      case 'spell':
       case 'spells':
         return this.getSpells(query);
       default:
@@ -57,7 +59,7 @@ export class DnDPlugin extends AbstractKeywordPlugin {
         } = { ...match.item, ...highlightFuseMatches(match.matches) };
 
         const shortDescription = `
-        ${level === 'cantrip' ? '' : 'Level'} ${capitalize(level)}, ${capitalize(classes)}, ${capitalize(school)}, ${range}, 
+        ${level === 'cantrip' ? '' : 'Level'} ${level.replace(/\w/, x => x.toUpperCase())}, ${classes}, ${school.replace(/\w/, x => x.toUpperCase())}, ${range}, 
         ${duration}, ${castingTime}, ${components}
       `.replace(/,\s+/g, ', ').trim();
 
@@ -83,7 +85,6 @@ export class DnDPlugin extends AbstractKeywordPlugin {
           title: name,
           description: shortDescription,
           descriptionExtended,
-          // todo long description
           html: true,
           weight: 100 - (match.score * 100),
         };
