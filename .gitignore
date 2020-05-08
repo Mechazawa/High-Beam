@@ -22,3 +22,6 @@ yarn-error.log*
 
 #Electron-builder output
 /dist_electron
+
+# I don't want legal trouble and someone probably owns copyright to the dnd spells
+/src/assets/5eSpells.json

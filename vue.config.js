@@ -19,7 +19,7 @@ module.exports = {
 
         config.module
           .rule('file-path-loader')
-          .test(/\.(png|jpe?g|gif)$/i)
+          .test(/\.(png|jpe?g|gif|svg)$/i)
           .use('file-path-loader')
           .loader('file-loader?outputPath=assets');
       },

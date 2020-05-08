@@ -9,7 +9,7 @@ export default class HttpCodePlugin extends AbstractKeywordPlugin {
   name = 'httpcode';
 
   keywords = [
-    /^http\s*(\d*)/,
+    /^http\s*(\d*)/i,
   ];
 
   iconFetcher = new AppIconFetcher('/System/Library/CoreServices/Applications/Network Utility.app');

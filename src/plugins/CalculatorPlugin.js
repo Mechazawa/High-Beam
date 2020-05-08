@@ -9,7 +9,7 @@ export default class CalculatorPlugin extends AbstractKeywordPlugin {
 
   keywords = [
     /^=(.*)/,
-    /^\s*(?:convert\s*)?([\d,]+\s+\w+.*)/,
+    /^\s*(?:convert\s*)?([\d,]+\s+\w+.*)/i,
   ];
 
   iconFetcher = new AppIconFetcher('/System/Applications/Calculator.app');

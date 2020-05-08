@@ -9,6 +9,7 @@ import { EventEmitter } from 'events';
  *    title: string,
  *    icon: ?string,
  *    description: ?string,
+ *    descriptionExtended: ?string,
  *    weight: ?number,
  *    pluginName: string,
  *    html: ?boolean,

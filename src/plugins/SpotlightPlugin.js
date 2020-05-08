@@ -4,11 +4,27 @@ import fileIcon from 'file-icon';
 import { basename, extname } from 'path';
 import { exec } from 'child_process';
 import Fuse from 'fuse.js';
+import { highlightFuseMatches } from "../utils/data";
 
 export default class SpotlightPlugin extends AbstractPlugin {
   name = 'spotlight';
 
   debounce = 100;
+
+  iconCache = new Map();
+
+  async getIcon (path) {
+    if(this.iconCache.has(path)) {
+      return this.iconCache.get(path);
+    }
+
+    const iconBuffer = await fileIcon.buffer(path, { size: 128 });
+    const icon = `data:image/png;base64,${iconBuffer.toString('base64')}`;
+
+    this.iconCache.set(path, icon);
+
+    return icon;
+  }
 
   async query (query) {
     query = query.trim().toLowerCase();
@@ -33,12 +49,10 @@ export default class SpotlightPlugin extends AbstractPlugin {
 
     return Promise.all(matches.map(async match => {
       const { path } = match.item;
-      const iconBuffer = await fileIcon.buffer(path, { size: 128 });
-      const icon = `data:image/png;base64,${iconBuffer.toString('base64')}`;
-      const highlighted = this._highlightMatches(match.matches);
+      const highlighted = highlightFuseMatches(match.matches);
 
       return {
-        icon,
+        icon: await this.getIcon(path),
         title: highlighted.appName,
         description: path,
         key: path,
@@ -47,24 +61,6 @@ export default class SpotlightPlugin extends AbstractPlugin {
         weight: 100 - (match.score * 100),
       };
     }));
-  }
-
-  _highlightMatches (matches) {
-    const output = {};
-    const insert = (strA, idx, strB) => strA.slice(0, idx) + strB + strA.slice(idx);
-
-    for (const match of matches) {
-      let str = match.value;
-
-      for (let i = match.indices.length - 1; i >= 0; i--) {
-        str = insert(str, match.indices[i][1] + 1, '</b>');
-        str = insert(str, match.indices[i][0], '<b style="font-weight: bolder;">');
-      }
-
-      output[match.key] = str;
-    }
-
-    return output;
   }
 
   select (key) {

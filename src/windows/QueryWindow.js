@@ -6,6 +6,7 @@ import CalculatorPlugin from '../plugins/CalculatorPlugin';
 import PaperSizePlugin from '../plugins/PaperSizePlugin';
 import { CorePlugin } from "../plugins/CorePlugin";
 import HttpCodePlugin from "../plugins/HttpCodePlugin";
+import { DnDPlugin } from "../plugins/DnDPlugin";
 
 // @todo split into abstract version
 export default class QueryWindow {
@@ -17,6 +18,7 @@ export default class QueryWindow {
     this.pluginManager.load(PaperSizePlugin);
     this.pluginManager.load(CorePlugin);
     this.pluginManager.load(HttpCodePlugin);
+    this.pluginManager.load(DnDPlugin);
 
     globalShortcut.register('Alt+Space', () => this.open());
   }
@@ -34,7 +36,7 @@ export default class QueryWindow {
 
     this.browser = new BrowserWindow({
       width: 800,
-      height: 80,
+      height: 73,
       webPreferences: {
         nodeIntegration: true,
       },

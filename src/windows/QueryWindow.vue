@@ -9,7 +9,7 @@
           :index="index"
           v-bind="result"
           :highlight="highlighted === index"
-          @click="select(index)"
+          @click.native="select(index)"
           @mouseover.native="hover(index)"/>
     </div>
   </div>
@@ -51,7 +51,7 @@
       },
       results (value) {
         this.highlighted = -1;
-        ipcRenderer.send('setBounds', { height: 80 + (60 * Math.min(value.length, this.maxRows)) });
+        ipcRenderer.send('setBounds', { height: 73 + (60 * Math.min(value.length, this.maxRows)) });
       },
     },
     mounted () {
@@ -84,7 +84,15 @@
 
           div.innerHTML = title;
 
-          this.query = div.innerText;
+          if (this.query !== div.innerText) {
+            this.query = div.innerText;
+
+            setTimeout(() => {
+              const len = this.query.length * 2;
+
+              this.$refs.query.setSelectionRange(len, len);
+            }, 10);
+          }
         }
       },
       replyHandler (event, rows) {
@@ -129,6 +137,10 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     color: var(--main-font-color);
+    background: var(--background-color);
+  }
+
+  body {
     background: var(--background-color);
   }
 
