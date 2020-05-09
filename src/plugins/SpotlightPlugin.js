@@ -1,10 +1,11 @@
 import AbstractPlugin from './AbstractPlugin';
-import osApps from 'os-apps';
 import fileIcon from 'file-icon';
 import { basename, extname } from 'path';
 import { exec } from 'child_process';
 import Fuse from 'fuse.js';
-import { highlightFuseMatches } from "../utils/data";
+import { highlightFuseMatches } from '../utils/data';
+import { dirname } from 'path';
+import { getFiles } from "../utils/fs";
 
 export default class SpotlightPlugin extends AbstractPlugin {
   name = 'spotlight';
@@ -13,8 +14,15 @@ export default class SpotlightPlugin extends AbstractPlugin {
 
   iconCache = new Map();
 
+  appDirectories = [
+    '/System/Library/CoreServices',
+    '/Applications',
+    // '~/Applications',
+    '/System/Applications',
+  ];
+
   async getIcon (path) {
-    if(this.iconCache.has(path)) {
+    if (this.iconCache.has(path)) {
       return this.iconCache.get(path);
     }
 
@@ -26,6 +34,19 @@ export default class SpotlightPlugin extends AbstractPlugin {
     return icon;
   }
 
+  async getAppsInPath (path, ext = ['.app']) {
+    const isApp = str => ext.some(e => str.endsWith(e));
+    const output = [];
+
+    for await (const f of getFiles(path)) {
+      if (isApp(f)) {
+        output.push(f);
+      }
+    }
+
+    return output;
+  }
+
   async query (query) {
     query = query.trim().toLowerCase();
 
@@ -33,8 +54,10 @@ export default class SpotlightPlugin extends AbstractPlugin {
       return [];
     }
 
-    // @todo improve the performance and get better way to find os apps
-    const apps = (await osApps.getAll()).map(path => ({
+    const apps = (
+      await Promise.all(this.appDirectories
+                            .map(dir => this.getAppsInPath(dir)))
+    ).flat(1).map(path => ({
       path, appName: basename(path, extname(path)),
     }));
 
@@ -42,7 +65,7 @@ export default class SpotlightPlugin extends AbstractPlugin {
       includeScore: true,
       includeMatches: true,
       keys: ['appName'],
-    }).search(query).filter(({ score }) => score <= .7);
+    }).search(query).filter(({ score }) => score <= 0.7);
 
     matches.sort((a, b) => (1e9 * a.score) - (1e9 * b.score));
     matches.splice(10, matches.length);
@@ -55,6 +78,7 @@ export default class SpotlightPlugin extends AbstractPlugin {
         icon: await this.getIcon(path),
         title: highlighted.appName,
         description: path,
+        descriptionExtended: 'Open in finder',
         key: path,
         pluginName: this.name,
         html: true,
@@ -63,7 +87,11 @@ export default class SpotlightPlugin extends AbstractPlugin {
     }));
   }
 
-  select (key) {
-    exec(`open ${key}`);
+  select (key, meta) {
+    if (meta) {
+      exec(`open /System/Library/CoreServices/Finder.app ${dirname(key)}`);
+    } else {
+      exec(`open ${key}`);
+    }
   }
 }

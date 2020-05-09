@@ -1,4 +1,4 @@
-import fileIcon from "file-icon";
+import fileIcon from 'file-icon';
 
 export default class AppIconFetcher {
   /**
@@ -25,7 +25,7 @@ export default class AppIconFetcher {
    * @param {string} appPath - path to the app
    * @param {number} size - icon size
    */
-  constructor(appPath, size = 128) {
+  constructor (appPath, size = 128) {
     this.appPath = appPath;
     this.size = size;
 
@@ -33,11 +33,11 @@ export default class AppIconFetcher {
     this.refresh();
   }
 
-  get ready() {
+  get ready () {
     return Boolean(this.icon);
   }
 
-  async refresh() {
+  async refresh () {
     this.icon = '';
 
     const iconBuffer = await fileIcon.buffer(this.appPath, { size: this.size });

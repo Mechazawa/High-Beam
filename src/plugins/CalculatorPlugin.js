@@ -2,7 +2,7 @@ import AbstractKeywordPlugin from './AbstractKeywordPlugin';
 import clipboardy from 'clipboardy';
 import fileIcon from 'file-icon';
 import { evaluate } from 'mathjs';
-import AppIconFetcher from "../utils/AppIconFetcher";
+import AppIconFetcher from '../utils/AppIconFetcher';
 
 export default class CalculatorPlugin extends AbstractKeywordPlugin {
   name = 'calculator';

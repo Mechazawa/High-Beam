@@ -4,9 +4,9 @@ import PluginManager from '../PluginManager';
 import SpotlightPlugin from '../plugins/SpotlightPlugin';
 import CalculatorPlugin from '../plugins/CalculatorPlugin';
 import PaperSizePlugin from '../plugins/PaperSizePlugin';
-import { CorePlugin } from "../plugins/CorePlugin";
-import HttpCodePlugin from "../plugins/HttpCodePlugin";
-import { DnDPlugin } from "../plugins/DnDPlugin";
+import { CorePlugin } from '../plugins/CorePlugin';
+import HttpCodePlugin from '../plugins/HttpCodePlugin';
+import { DnDPlugin } from '../plugins/DnDPlugin';
 
 // @todo split into abstract version
 export default class QueryWindow {
@@ -20,7 +20,7 @@ export default class QueryWindow {
     this.pluginManager.load(HttpCodePlugin);
     this.pluginManager.load(DnDPlugin);
 
-    globalShortcut.register('Alt+Space', () => this.open());
+    globalShortcut.register('Meta+Space', () => this.open());
   }
 
   isOpen () {
@@ -56,6 +56,8 @@ export default class QueryWindow {
       createProtocol('app');
       // Load the index.html when not in development
       await this.browser.loadURL('app://./index.html');
+
+      this.browser.on('blur', () => this.close());
     }
 
     this.browser.once('closed', () => {
@@ -104,8 +106,8 @@ export default class QueryWindow {
     }
   }
 
-  onInputSelect (event, pluginName, key) {
-    this.pluginManager.select(pluginName, key);
+  onInputSelect (event, pluginName, key, meta) {
+    this.pluginManager.select(pluginName, key, meta);
 
     // @todo more functionality then just closing
     this.close();

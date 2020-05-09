@@ -4,13 +4,14 @@
     <input ref="query" placeholder="Query..." v-model="query" class="query" @keydown="onInputKeypress">
     <div>
       <QueryResultRow
-          v-for="(result, index) in sortedResults"
-          :key="result.key"
-          :index="index"
-          v-bind="result"
-          :highlight="highlighted === index"
-          @click.native="select(index)"
-          @mouseover.native="hover(index)"/>
+        v-for="(result, index) in sortedResults"
+        :key="result.key"
+        :index="index"
+        v-bind="result"
+        :highlight="highlighted === index"
+        @click.native.meta.exact="select(index, true)"
+        @click.native.exact="select(index)"
+        @mouseover.native="hover(index)"/>
     </div>
   </div>
 </template>
@@ -64,8 +65,8 @@
     computed: {
       sortedResults () {
         return Array.from(this.results)
-                    .sort((a, b) => (b?.weight ?? 50) - (a?.weight ?? 50))
-                    .slice(0, this.maxRows);
+          .sort((a, b) => (b?.weight ?? 50) - (a?.weight ?? 50))
+          .slice(0, this.maxRows);
       },
     },
     methods: {
@@ -80,7 +81,7 @@
           }
 
           const { title } = this.sortedResults[index];
-          const div = document.createElement("div");
+          const div = document.createElement('div');
 
           div.innerHTML = title;
 
@@ -98,7 +99,9 @@
       replyHandler (event, rows) {
         this.results.push(...rows);
       },
-      onWindowKeydown ({ code, metaKey }) {
+      onWindowKeydown ({ code, metaKey, ...rest }) {
+        console.log(rest);
+
         const digits = Object.fromEntries([123456789].map(x => [`Digit${x}`, x]));
 
         if (code === 'ArrowUp' && this.highlighted >= 0) {
@@ -106,21 +109,21 @@
         } else if (code === 'ArrowDown' && this.highlighted < this.results.length - 1) {
           this.highlighted++;
         } else if (code === 'Enter' && this.highlighted >= 0) {
-          this.select(this.highlighted);
+          this.select(this.highlighted, metaKey);
         } else if (code === 'Enter' && this.results.length > 0) {
-          this.select(0);
+          this.select(0, metaKey);
         } else if (metaKey && digits.hasOwnProperty(code)) {
           this.select(digits[code]);
         }
       },
-      select (index) {
+      select (index, meta = false) {
         if (!this.results[index]) {
           return;
         }
 
         const { key, pluginName } = this.results[index];
 
-        ipcRenderer.send('input:select?', pluginName, key);
+        ipcRenderer.send('input:select?', pluginName, key, meta);
       },
       hover (index) {
         this.highlighted = index;

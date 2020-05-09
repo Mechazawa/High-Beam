@@ -1,6 +1,6 @@
-import AbstractKeywordPlugin from "./AbstractKeywordPlugin";
-import { exec } from "child_process";
-import AppIconFetcher from "../utils/AppIconFetcher";
+import AbstractKeywordPlugin from './AbstractKeywordPlugin';
+import { exec } from 'child_process';
+import AppIconFetcher from '../utils/AppIconFetcher';
 
 export class CorePlugin extends AbstractKeywordPlugin {
   debounce = 0;
@@ -10,11 +10,11 @@ export class CorePlugin extends AbstractKeywordPlugin {
   keywords = [];
 
   actions = {
-    'exit': () => process.exit(),
-    'shutdown': () => exec(`osascript -e 'tell application "Finder" to shut down'`),
-    'sleep': () => exec(`osascript -e 'tell application "Finder" to sleep'`),
-    'restart': () => exec(`osascript -e 'tell application "Finder" to restart'`),
-    'lock': () => exec(`osascript -e 'tell application "System Events" to keystroke "q" using {control down, command down}'`),
+    exit: () => process.exit(),
+    shutdown: () => exec('osascript -e \'tell application "Finder" to shut down\''),
+    sleep: () => exec('osascript -e \'tell application "Finder" to sleep\''),
+    restart: () => exec('osascript -e \'tell application "Finder" to restart\''),
+    lock: () => exec('osascript -e \'tell application "System Events" to keystroke "q" using {control down, command down}\''),
   };
 
   iconFetcher = new AppIconFetcher('/System/Applications/System Preferences.app');
@@ -41,7 +41,7 @@ export class CorePlugin extends AbstractKeywordPlugin {
     return [];
   }
 
-  select (key) {
+  select (key, meta) {
     if (this.actions.hasOwnProperty(key)) {
       this.actions[key].apply(this);
     }

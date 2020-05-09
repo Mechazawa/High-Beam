@@ -1,6 +1,6 @@
 import AbstractKeywordPlugin from './AbstractKeywordPlugin';
-import AppIconFetcher from "../utils/AppIconFetcher";
-import httpCodes from "../assets/http.json";
+import AppIconFetcher from '../utils/AppIconFetcher';
+import httpCodes from '../assets/http.json';
 import { exec } from 'child_process';
 
 export default class HttpCodePlugin extends AbstractKeywordPlugin {
@@ -16,7 +16,7 @@ export default class HttpCodePlugin extends AbstractKeywordPlugin {
 
   select (key) {
     if (key !== null) {
-      exec("open https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/" + key);
+      exec(`open https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/${key}`);
     }
   }
 
@@ -24,7 +24,9 @@ export default class HttpCodePlugin extends AbstractKeywordPlugin {
     const matches = httpCodes.filter(({ key }) => String(key).startsWith(query));
 
     return matches.map(({ key, title, description }) => ({
-      key, title: `${key} - ${title}`, description,
+      key,
+      title: `${key} - ${title}`,
+      description,
       icon: this.iconFetcher.icon,
       pluginName: this.name,
       weight: Math.min(100 * (query.length / 3), 100),

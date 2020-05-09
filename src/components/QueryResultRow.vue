@@ -5,11 +5,11 @@
     <div class="cell">
       <template v-if="html">
         <strong v-html="title" class="cut-text"/>
-        <span v-html="currentDescription" v-if="description" :class="['description' ,{'cut-text': !showExtended}]"/>
+        <span v-html="currentDescription" v-if="description" :class="['description' ,{ 'cut-text': !showExtended }]"/>
       </template>
       <template v-else>
         <strong v-text="title" class="cut-text"/>
-        <span v-text="currentDescription" v-if="description" :class="['description' ,{'cut-text': !showExtended}]"/>
+        <span v-text="currentDescription" v-if="description" :class="['description' ,{ 'cut-text': !showExtended }]"/>
       </template>
     </div>
     <div class="index cell" v-if="index >= 0" v-text="index + 1"/>
@@ -72,14 +72,12 @@
     },
     methods: {
       onKeydown ({ code }) {
-        console.log({ code });
-
-        if (code === 'AltRight' || code === 'AltLeft') {
+        if (code === 'MetaRight' || code === 'MetaLeft') {
           this.mightShowExtended = true;
         }
       },
       onKeyup ({ code }) {
-        if (code === 'AltRight' || code === 'AltLeft') {
+        if (code === 'MetaRight' || code === 'MetaLeft') {
           this.mightShowExtended = false;
         }
       },

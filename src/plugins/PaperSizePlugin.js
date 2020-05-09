@@ -1,7 +1,7 @@
 import AbstractKeywordPlugin from './AbstractKeywordPlugin';
 import clipboardy from 'clipboardy';
 import paperSizes from './paper-sizes.json';
-import AppIconFetcher from "../utils/AppIconFetcher";
+import AppIconFetcher from '../utils/AppIconFetcher';
 
 export default class PaperSizePlugin extends AbstractKeywordPlugin {
   name = 'paper-size';

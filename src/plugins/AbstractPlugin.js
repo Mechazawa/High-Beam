@@ -49,12 +49,13 @@ class AbstractPlugin {
   /**
    * Select a query result row
    * @param {string|number} key
+   * @param {boolean} meta - if alt meta is pressed
    * @returns {Promise<void>|void}
    * @abstract
    * @todo see plugin manager
    */
   @abstract
-  select (key) {
+  select (key, meta) {
 
   }
 }

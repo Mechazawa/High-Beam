@@ -70,11 +70,12 @@ export default class PluginManager {
    * Select a query result row
    * @param {string} name - plugin name
    * @param {string|number} key - row key
+   * @param {boolean} [meta=false] - if alt meta is pressed
    * @returns {Promise<void>|void}
    * @todo decide how I wanna do stuff that doesn't just close the window, show extra info, a new view etc
    */
-  select (name, key) {
-    return this.getPlugin(name)?.select(key);
+  select (name, key, meta = false) {
+    return this.getPlugin(name)?.select(key, meta);
   }
 
   /**
