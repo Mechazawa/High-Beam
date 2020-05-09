@@ -89,8 +89,12 @@ export default class SpotlightPlugin extends AbstractPlugin {
 
   select (key, meta) {
     if (meta) {
-      exec(`open /System/Library/CoreServices/Finder.app ${dirname(key)}`);
+      const path = JSON.stringify(dirname(key));
+
+      exec(`open /System/Library/CoreServices/Finder.app ${path}`);
     } else {
+      const path = JSON.stringify(key);
+
       exec(`open ${key}`);
     }
   }
