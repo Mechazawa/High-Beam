@@ -1,6 +1,8 @@
 import AbstractKeywordPlugin from './AbstractKeywordPlugin';
 import { exec } from 'child_process';
 import AppIconFetcher from '../utils/AppIconFetcher';
+import { autoUpdater } from "electron-updater";
+import { version } from '../../package.json';
 
 export class CorePlugin extends AbstractKeywordPlugin {
   debounce = 0;
@@ -15,6 +17,8 @@ export class CorePlugin extends AbstractKeywordPlugin {
     sleep: () => exec('osascript -e \'tell application "Finder" to sleep\''),
     restart: () => exec('osascript -e \'tell application "Finder" to restart\''),
     lock: () => exec('osascript -e \'tell application "System Events" to keystroke "q" using {control down, command down}\''),
+    'check for updates': () => autoUpdater.checkForUpdatesAndNotify(),
+    [`version v${version}`]: () => null,
   };
 
   iconFetcher = new AppIconFetcher('/System/Applications/System Preferences.app');

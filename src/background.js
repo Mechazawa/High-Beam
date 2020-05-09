@@ -6,6 +6,7 @@ import {
 } from 'vue-cli-plugin-electron-builder/lib';
 import QueryWindow from './windows/QueryWindow.js';
 
+import { autoUpdater } from "electron-updater";
 const isDevelopment = process.env.NODE_ENV !== 'production';
 
 // Keep a global reference of the window object, if you don't, the window will
@@ -60,6 +61,8 @@ app.on('ready', async () => {
   }
 
   createWindow();
+
+  await autoUpdater.checkForUpdatesAndNotify();
 });
 
 // Exit cleanly on request from parent process in development mode.
