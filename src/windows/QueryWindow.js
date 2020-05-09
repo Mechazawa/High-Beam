@@ -35,11 +35,12 @@ export default class QueryWindow {
     }
 
     this.browser = new BrowserWindow({
-      width: 800,
-      height: 73,
+      width: 1,
+      height: 1,
       webPreferences: {
         nodeIntegration: true,
       },
+      opacity: 0,
       frame: false,
       resizable: false,
       ...options,
@@ -48,10 +49,10 @@ export default class QueryWindow {
     this.browser.center();
 
     if (process.env.WEBPACK_DEV_SERVER_URL) {
+      if (!process.env.IS_TEST) this.browser.webContents.openDevTools();
+
       // Load the url of the dev server if in development mode
       await this.browser.loadURL(process.env.WEBPACK_DEV_SERVER_URL);
-
-      if (!process.env.IS_TEST) this.browser.webContents.openDevTools();
     } else {
       createProtocol('app');
       // Load the index.html when not in development
@@ -79,9 +80,17 @@ export default class QueryWindow {
   }
 
   _initIpc () {
+    ipcMain.on('setOpacity', (event, ...args) => event.reply('center', this.browser.setOpacity(...args)));
+    ipcMain.on('center', (event, ...args) => event.reply('center', this.center(...args)));
     ipcMain.on('setBounds', (event, ...args) => event.reply('windowBounds', this.setBounds(...args)));
     ipcMain.on('input:query?', (event, ...args) => this.onInputQuery(event, ...args));
     ipcMain.on('input:select?', (event, ...args) => this.onInputSelect(event, ...args));
+  }
+
+  center () {
+    this.browser.center()
+
+    return this.browser.getBounds();
   }
 
   setBounds (bounds) {

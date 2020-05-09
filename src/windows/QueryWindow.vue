@@ -4,14 +4,14 @@
     <input ref="query" placeholder="Query..." v-model="query" class="query" @keydown="onInputKeypress">
     <div>
       <QueryResultRow
-        v-for="(result, index) in sortedResults"
-        :key="result.key"
-        :index="index"
-        v-bind="result"
-        :highlight="highlighted === index"
-        @click.native.meta.exact="select(index, true)"
-        @click.native.exact="select(index)"
-        @mouseover.native="hover(index)"/>
+          v-for="(result, index) in sortedResults"
+          :key="result.key"
+          :index="index"
+          v-bind="result"
+          :highlight="highlighted === index"
+          @click.native.meta.exact="select(index, true)"
+          @click.native.exact="select(index)"
+          @mouseover.native="hover(index)"/>
     </div>
   </div>
 </template>
@@ -50,14 +50,19 @@
           ipcRenderer.send('input:query?', this.replyKey, value);
         }
       },
-      results (value) {
+      results () {
         this.highlighted = -1;
-        ipcRenderer.send('setBounds', { height: 73 + (60 * Math.min(value.length, this.maxRows)) });
+        this.updateBounds();
       },
     },
     mounted () {
       this.$refs.query.focus();
       window.addEventListener('keydown', this.boundOnWindowKeydown);
+      setTimeout(() => {
+        this.updateBounds();
+        ipcRenderer.send('center');
+        ipcRenderer.send('setOpacity', 0.94);
+      }, 0);
     },
     beforeDestroy () {
       window.removeEventListener('keydown', this.boundOnWindowKeydown);
@@ -65,8 +70,8 @@
     computed: {
       sortedResults () {
         return Array.from(this.results)
-          .sort((a, b) => (b?.weight ?? 50) - (a?.weight ?? 50))
-          .slice(0, this.maxRows);
+                    .sort((a, b) => (b?.weight ?? 50) - (a?.weight ?? 50))
+                    .slice(0, this.maxRows);
       },
     },
     methods: {
@@ -99,9 +104,7 @@
       replyHandler (event, rows) {
         this.results.push(...rows);
       },
-      onWindowKeydown ({ code, metaKey, ...rest }) {
-        console.log(rest);
-
+      onWindowKeydown ({ code, metaKey }) {
         const digits = Object.fromEntries([123456789].map(x => [`Digit${x}`, x]));
 
         if (code === 'ArrowUp' && this.highlighted >= 0) {
@@ -127,6 +130,14 @@
       },
       hover (index) {
         this.highlighted = index;
+      },
+      updateBounds () {
+        const bounds = {
+          width: 800,
+          height: 74 + (60 * Math.min(this.results.length, this.maxRows))
+        };
+
+        ipcRenderer.send('setBounds', bounds);
       },
     },
   };
