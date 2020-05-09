@@ -9,20 +9,25 @@ module.exports = {
         mac: {
           darkModeSupport: true,
         },
+        publish: {
+          provider: 'github',
+          owner: 'Mechazawa',
+          repo: 'high-beam',
+        },
       },
       chainWebpackMainProcess: config => {
         config.module
-          .rule('babel')
-          .test(/(\.js$)/i)
-          .use('babel')
-          .loader('babel-loader?cacheDirectory')
-          .options(require('./babel.config.js'));
+              .rule('babel')
+              .test(/(\.js$)/i)
+              .use('babel')
+              .loader('babel-loader?cacheDirectory')
+              .options(require('./babel.config.js'));
 
         config.module
-          .rule('file-path-loader')
-          .test(/\.(png|jpe?g|gif|svg)$/i)
-          .use('file-path-loader')
-          .loader('file-loader?outputPath=assets');
+              .rule('file-path-loader')
+              .test(/\.(png|jpe?g|gif|svg)$/i)
+              .use('file-path-loader')
+              .loader('file-loader?outputPath=assets');
       },
       plugins: [
         new webpack.HotModuleReplacementPlugin(),

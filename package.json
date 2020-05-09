@@ -1,6 +1,6 @@
 {
   "name": "electron-vue-app",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "scripts": {
     "serve": "vue-cli-service serve",
@@ -17,6 +17,7 @@
     "@mapcreator/eslint-config": "^1.1.2",
     "clipboardy": "^2.3.0",
     "core-js": "^3.6.4",
+    "electron-updater": "^4.3.1",
     "file-icon": "^3.1.0",
     "fuse.js": "^5.2.3",
     "mathjs": "^6.6.4",
