@@ -12,12 +12,12 @@ export class CorePlugin extends AbstractKeywordPlugin {
   keywords = [];
 
   actions = {
-    exit: () => process.exit(),
+    'exit High Beam': () => process.exit(),
     shutdown: () => exec('osascript -e \'tell application "Finder" to shut down\''),
     sleep: () => exec('osascript -e \'tell application "Finder" to sleep\''),
     restart: () => exec('osascript -e \'tell application "Finder" to restart\''),
     lock: () => exec('osascript -e \'tell application "System Events" to keystroke "q" using {control down, command down}\''),
-    'check for updates': () => autoUpdater.checkForUpdatesAndNotify(),
+    'check for updates': () => this.update(),
     [`version v${version}`]: () => null,
   };
 
@@ -49,5 +49,17 @@ export class CorePlugin extends AbstractKeywordPlugin {
     if (this.actions.hasOwnProperty(key)) {
       this.actions[key].apply(this);
     }
+  }
+
+  async update () {
+    const updateCheckResult = await autoUpdater.checkForUpdates();
+
+    if (!updateCheckResult.downloadPromise) {
+      return;
+    }
+
+    await updateCheckResult.downloadPromise;
+
+    autoUpdater.quitAndInstall(false, true);
   }
 }
