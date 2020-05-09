@@ -14,8 +14,8 @@ export default class HttpCodePlugin extends AbstractKeywordPlugin {
 
   iconFetcher = new AppIconFetcher('/System/Library/CoreServices/Applications/Network Utility.app');
 
-  select (key) {
-    if (key !== null) {
+  select (key, meta) {
+    if (key) {
       exec(`open https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/${key}`);
     }
   }

@@ -5,6 +5,7 @@ module.exports = {
     electronBuilder: {
       builderOptions: {
         appId: 'at.ioexception.high-beam',
+        productName: 'High Beam',
         mac: {
           darkModeSupport: true,
         },
