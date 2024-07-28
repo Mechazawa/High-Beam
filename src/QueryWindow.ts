@@ -1,4 +1,4 @@
-import {BrowserWindow, globalShortcut, ipcMain} from 'electron';
+import {BrowserWindow, ipcMain} from 'electron';
 import path from "path";
 import PluginManager from "./PluginManager";
 import QueryResultRow from "./plugins/interfaces/QueryResultRow";
@@ -14,8 +14,6 @@ export default class QueryWindow {
 
   constructor(pluginManager: PluginManager) {
     this.pluginManager = pluginManager;
-
-    globalShortcut.register('Meta+Space', () => this.open());
   }
 
   isOpen() {
@@ -40,15 +38,16 @@ export default class QueryWindow {
       frame: false,
       resizable: false,
       center: true,
+      focusable: true,
     });
 
     if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
       await this.window.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
     } else {
       await this.window.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`));
-
-      this.window.on('blur', () => this.close());
     }
+
+    this.window.on('blur', () => this.close());
 
     this.window.once('closed', () => {
       this.window = null;
