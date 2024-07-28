@@ -6,6 +6,7 @@ import Fuse from 'fuse.js';
 import { highlightFuseMatches } from '../utils/data';
 import { dirname } from 'path';
 import { getFiles } from "../utils/fs";
+import process from "node:process";
 
 export default class SpotlightPlugin extends AbstractPlugin {
   name = 'spotlight';
@@ -48,6 +49,10 @@ export default class SpotlightPlugin extends AbstractPlugin {
   }
 
   async query (query) {
+    if (process.platform !== 'darwin') {
+      return [];
+    }
+
     query = query.trim().toLowerCase();
 
     if (!query.length) {
