@@ -33,6 +33,10 @@ export default class QueryWindow {
       webPreferences: {
         nodeIntegration: true,
         preload: path.join(__dirname, 'preload.js'),
+        disableHtmlFullscreenWindowResize: true,
+        spellcheck: false,
+        // enablePreferredSizeMode: true,
+        enableWebSQL: false,
       },
       opacity: 0,
       frame: false,
