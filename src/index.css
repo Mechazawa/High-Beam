@@ -1,7 +1,32 @@
+@import './themes/default.scss';
+
+#app {
+  font-family: Avenir, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  color: var(--main-font-color);
+  background: var(--background-color);
+}
+
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica,
-    Arial, sans-serif;
-  margin: auto;
-  max-width: 38rem;
-  padding: 2rem;
+  background: var(--background-color);
+  margin: 0;
+  padding: 0;
+}
+
+.query {
+  width: 100%;
+  font-size: 40pt;
+  padding: 4pt 8pt;
+
+  margin: 0;
+  outline: 0;
+  border: 0;
+  background: var(--background-color);
+  color: var(--main-font-color);
+
+  :focus {
+    outline: 0;
+    border: 0;
+  }
 }

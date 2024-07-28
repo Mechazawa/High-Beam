@@ -2,12 +2,23 @@
 <html>
   <head>
     <meta charset="UTF-8" />
-    <title>Hello World!</title>
-
+    <title>High Beam</title>
   </head>
   <body>
-    <h1>💖 Hello World!</h1>
-    <p>Welcome to your Electron application.</p>
-    <script type="module" src="/src/renderer.ts"></script>
+    <div id="app">
+      <!--suppress HtmlFormInputWithoutLabel -->
+      <input placeholder="Query..." class="query">
+      <div>
+<!--        <QueryResultRow-->
+<!--                v-for="(result, index) in sortedResults"-->
+<!--                :key="result.key"-->
+<!--                :index="index"-->
+<!--                v-bind="result"-->
+<!--                :highlight="highlighted === index"-->
+<!--                @click.native.meta.exact="select(index, true)"-->
+<!--                @click.native.exact="select(index)"-->
+<!--                @mouseover.native="hover(index)"/>-->
+      </div>
+    </div>
   </body>
 </html>
