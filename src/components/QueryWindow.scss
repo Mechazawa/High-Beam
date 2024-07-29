@@ -1,4 +1,4 @@
-@import './themes/default.scss';
+@import '../themes/default';
 
 #app {
   font-family: Avenir, Helvetica, Arial, sans-serif;
@@ -16,7 +16,7 @@ body {
 
 .query {
   width: 100%;
-  font-size: 40pt;
+  font-size: 30pt;
   padding: 4pt 8pt;
 
   margin: 0;

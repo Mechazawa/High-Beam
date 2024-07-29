@@ -1,7 +1,7 @@
-import Plugin, {QueryResult} from './plugins/interfaces/Plugin';
+import Plugin, {ResultCollection} from './plugins/interfaces/Plugin';
 import PluginLoaderException from "./exceptions/PluginLoaderException";
 
-type QueryFn = (...args: Parameters<Plugin['query']>) => Promise<QueryResult>;
+type QueryFn = (...args: Parameters<Plugin['query']>) => Promise<ResultCollection>;
 interface PluginEntry {
   plugin: Plugin,
   query: QueryFn,
@@ -24,7 +24,7 @@ export default class PluginManager {
   public load(target: Plugin | (new () => Plugin)): Plugin {
     try {
       const plugin: Plugin = typeof target === 'function' ? new target() : target;
-      const query = PluginManager.buildDebouncedQuery(plugin.query.bind(plugin), plugin.debounce);
+      const query = PluginManager.buildDebouncedQuery(plugin, plugin.debounce);
 
       this.plugins.set(plugin.name, {
         plugin, query,
@@ -44,7 +44,7 @@ export default class PluginManager {
    * Query the plugins
    * @param str query string
    */
-  public query(str: string): Promise<QueryResult>[] {
+  public query(str: string): Promise<ResultCollection>[] {
     return Array.from(this.plugins.values()).map(entry => entry.query(str));
   }
 
@@ -80,11 +80,13 @@ export default class PluginManager {
    */
   private static buildDebouncedQuery(plugin: Plugin, ms: number): QueryFn {
     let timeout: NodeJS.Timeout;
-    let promise: Promise<QueryResult>;
-    let resolve: (output: QueryResult) => void;
+    let promise: Promise<ResultCollection>;
+    let resolve: (output: ResultCollection) => void;
     let reject: (err?: unknown) => void;
 
-    return (...args: Parameters<Plugin['query']>): Promise<QueryResult> => {
+    const queryFn = plugin.query.bind(plugin);
+
+    return (...args: Parameters<Plugin['query']>): Promise<ResultCollection> => {
       clearTimeout(timeout);
 
       reject?.();
@@ -95,7 +97,7 @@ export default class PluginManager {
       });
 
       timeout = setTimeout(() => {
-        resolve?.(plugin.query(...args));
+        resolve?.(queryFn(...args));
       }, ms)
 
       return promise;

@@ -1,4 +1,4 @@
-export default interface QueryResultRow<T = never> {
+export default interface QueryResult<T = never> {
   call(meta: boolean): Promise<void> | void;
 
   title: string;
