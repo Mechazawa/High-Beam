@@ -31,7 +31,7 @@ export default class PluginManager {
       });
 
       console.log('PluginManager loaded', plugin.name);
-
+      
       return plugin;
     } catch (err) {
       const name = typeof target === 'function' ? target.prototype.name : target.name;
