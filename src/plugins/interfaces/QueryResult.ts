@@ -7,5 +7,6 @@ export default interface QueryResult<T = never> {
   descriptionExtended?: string;
   weight?: number;
   html?: boolean;
+  token?: string;
   meta?: T;
 }

@@ -1,6 +1,7 @@
 import React from 'react';
 import classNames from "classnames";
 import QueryResult from '../plugins/interfaces/QueryResult';
+import './QueryResultRow.scss';
 
 interface props extends Omit<QueryResult, 'call'> {
   highlight: boolean;
@@ -11,19 +12,18 @@ interface props extends Omit<QueryResult, 'call'> {
 export default function QueryResultRow({highlight, icon, title, description, extended, html, index}: props) {
   return (
     <div className={classNames('row', {highlight})}>
-      (icon
-      ? <img src={icon} className="icon cell" alt="icon"/>
-      : <div className="icon cell"/>
-      )
+      {icon
+        ? <img src={icon} className="icon cell" alt="icon"/>
+        : <div className="icon cell"/>
+      }
       <div className="cell">
         <strong className="cut-text">{title}</strong>
-        (description && (
+        {description && (
           <span className={classNames("description", {'cut-text': !extended})}>
-            { html ? <div dangerouslySetInnerHTML={{__html: description}}/> : description }
+            {html ? <div dangerouslySetInnerHTML={{__html: description}}/> : description}
           </span>
-        ))
+        )}
       </div>
-      <div className="index cell">{index + 1}</div>
     </div>
   )
 }

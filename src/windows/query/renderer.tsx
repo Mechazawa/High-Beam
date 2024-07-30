@@ -5,9 +5,18 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import QueryWindow from "../../components/QueryWindow";
+import AutoResize from "../../components/AutoResize";
 
-ReactDOM.createRoot(document.body).render(
+ReactDOM.createRoot(document.getElementById('app')).render(
   <React.StrictMode>
-    <QueryWindow />
+    <AutoResize>
+      <QueryWindow />
+    </AutoResize>
   </React.StrictMode>,
-)
+);
+
+window.addEventListener('keydown', (event: KeyboardEvent) => {
+  if (event.key === 'Escape') {
+    window.close();
+  }
+});

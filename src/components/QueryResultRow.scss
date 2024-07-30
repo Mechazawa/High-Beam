@@ -50,23 +50,13 @@ strong {
 .highlight {
   background: var(--background-color-highlight);
 
-  strong, .index {
+  strong {
     color: var(--main-font-color-highlight);
   }
 
   .description {
     color: var(--subtext-font-color-highlight);
   }
-}
-
-.index::before {
-  content: '⌘'
-}
-
-.index {
-  font-size: 24pt;
-  padding-right: .5em;
-  color: var(--main-font-color);
 }
 
 .cut-text {
