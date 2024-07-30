@@ -1,6 +1,4 @@
-import KeywordPlugin, {Keyword} from "./interfaces/KeywordPlugin";
 import Plugin, {ResultCollection} from "./interfaces/Plugin";
-import QueryResult from "./interfaces/QueryResult";
 import {evaluate} from "mathjs";
 // import clipboardy from "clipboardy";
 
