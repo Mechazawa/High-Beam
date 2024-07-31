@@ -1,6 +1,6 @@
 import Plugin, {ResultCollection} from "./interfaces/Plugin";
 import {evaluate} from "mathjs";
-// import clipboardy from "clipboardy";
+import ActionBuilder from "../ActionBuilder";
 
 export default class CalculatorPlugin extends Plugin {
   name = 'calculator';
@@ -13,8 +13,7 @@ export default class CalculatorPlugin extends Plugin {
         // icon: this.iconFetcher.icon,
         title: String(result),
         weight: 100,
-        call: () => void 0,
-        // call: () => clipboardy.writeSync(String(result)),
+        call: ActionBuilder.copy(String(result)),
       }];
     } catch {
       return [];

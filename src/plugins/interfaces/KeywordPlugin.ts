@@ -1,5 +1,5 @@
-import Plugin from './Plugin';
-import QueryResult from "./QueryResult";
+import Plugin, {ResultCollection} from './Plugin';
+import {PluginQueryResult} from "./QueryResult";
 
 export type Keyword = RegExp | string;
 
@@ -12,7 +12,7 @@ export default abstract class KeywordPlugin extends Plugin {
   /**
    * @inheritDoc
    */
-  public async query(query: string): Promise<QueryResult[]> {
+  public async query(query: string): Promise<PluginQueryResult[]> {
     const output = [];
 
     for (const keyword of this.keywords) {
@@ -38,5 +38,5 @@ export default abstract class KeywordPlugin extends Plugin {
   /**
    * Triggered when a keyword gets matched
    */
-  public abstract keyword(keyword: Keyword, match: string | RegExpMatchArray): Promise<QueryResult[]> | QueryResult[];
+  public abstract keyword(keyword: Keyword, match: string | RegExpMatchArray): ResultCollection;
 }

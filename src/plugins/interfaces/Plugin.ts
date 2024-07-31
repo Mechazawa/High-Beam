@@ -1,6 +1,6 @@
-import QueryResult from "./QueryResult";
+import {PluginQueryResult} from "./QueryResult";
 
-export type ResultCollection = QueryResult[] | Promise<QueryResult[]>;
+export type ResultCollection = PluginQueryResult[] | Promise<PluginQueryResult[]>;
 
 export default abstract class Plugin {
   /**

@@ -1,12 +1,16 @@
-export default interface QueryResult<T = never> {
-  call(meta: boolean): Promise<void> | void;
-
+export default interface QueryResult {
   title: string;
   icon?: string;
   description?: string;
-  descriptionExtended?: string;
+  descriptionAlt?: string;
   weight?: number;
   html?: boolean;
+}
+
+export interface PluginQueryResult extends QueryResult {
+  call(meta: boolean): unknown;
+}
+
+export interface DisplayQueryResult extends QueryResult {
   token?: string;
-  meta?: T;
 }
