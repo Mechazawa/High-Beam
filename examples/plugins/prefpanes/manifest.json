@@ -1,0 +1,11 @@
+{
+  "name": "prefpanes",
+  "displayName": "Preference Panes",
+  "version": "0.1.0",
+  "description": "Quick-open macOS System Settings panes — type a pane name like 'Displays' or 'Network'",
+  "debounceMs": 100,
+  "timeoutMs": 600,
+  "memoryMb": 32,
+  "platforms": ["macos"],
+  "capabilities": ["actions", "fs.read", "icons"]
+}
