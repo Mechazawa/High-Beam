@@ -13,7 +13,7 @@
 //! Stage 4 returns a [`JsError`] that the loader will surface to stderr.
 
 /// One row in the capability table.
-pub struct ModuleCap {
+pub(crate) struct ModuleCap {
     /// The `highbeam:foo` import specifier.
     pub specifier: &'static str,
     /// At least one of these caps must be declared for the module to load.
@@ -22,7 +22,7 @@ pub struct ModuleCap {
 
 /// All `highbeam:*` modules recognised by the host, mapped to the caps that
 /// grant them. The runtime walks this table when resolving a load.
-pub const MODULES: &[ModuleCap] = &[
+pub(crate) const MODULES: &[ModuleCap] = &[
     ModuleCap {
         specifier: "highbeam:actions",
         any_of: &["actions"],
@@ -40,7 +40,7 @@ pub const MODULES: &[ModuleCap] = &[
 /// Every capability string the host *recognises*. Anything outside this list
 /// is logged as an unknown-cap warning at plugin load time. Stage 4+ extends
 /// this; the underscore prefix is for Stage 7 "I exist but aren't wired" caps.
-pub const KNOWN_CAPABILITIES: &[&str] = &[
+pub(crate) const KNOWN_CAPABILITIES: &[&str] = &[
     "actions",
     "http",
     "clipboard.read",
@@ -56,13 +56,13 @@ pub const KNOWN_CAPABILITIES: &[&str] = &[
 
 /// Look up the capability requirements for a module specifier.
 #[must_use]
-pub fn for_module(specifier: &str) -> Option<&'static ModuleCap> {
+pub(crate) fn for_module(specifier: &str) -> Option<&'static ModuleCap> {
     MODULES.iter().find(|m| m.specifier == specifier)
 }
 
 /// True if `caps` grants *any* of the capability strings in `any_of`.
 #[must_use]
-pub fn grants_any(caps: &[String], any_of: &[&str]) -> bool {
+pub(crate) fn grants_any(caps: &[String], any_of: &[&str]) -> bool {
     caps.iter().any(|c| any_of.contains(&c.as_str()))
 }
 

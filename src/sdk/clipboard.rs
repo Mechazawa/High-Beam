@@ -29,8 +29,8 @@ use rquickjs::{Ctx, Function, Object, Result as JsResult, Value, module::ModuleD
 /// Where [`install`] stashes the read/write callables so the module's
 /// `evaluate()` can re-export them as `read` / `write`. Plugin code should
 /// never reach for these directly.
-pub const READ_GLOBAL: &str = "__highbeam_clipboard_read";
-pub const WRITE_GLOBAL: &str = "__highbeam_clipboard_write";
+const READ_GLOBAL: &str = "__highbeam_clipboard_read";
+const WRITE_GLOBAL: &str = "__highbeam_clipboard_write";
 
 /// Module definition registered against the `highbeam:clipboard` specifier.
 ///

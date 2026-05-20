@@ -87,14 +87,6 @@ impl Manifest {
     pub fn entry_path(&self, plugin_dir: &Path) -> PathBuf {
         plugin_dir.join(&self.entry)
     }
-
-    /// Capability lookup. Unknown capability strings count as not-granted so
-    /// future capabilities ignored at parse time are also ignored at gate
-    /// time (defense in depth — `loader::load_plugin` already logs a warning).
-    #[must_use]
-    pub fn has_capability(&self, cap: &str) -> bool {
-        self.capabilities.iter().any(|c| c == cap)
-    }
 }
 
 #[cfg(test)]
@@ -119,8 +111,7 @@ mod tests {
         assert_eq!(m.entry, "plugin.js");
         assert_eq!(m.timeout_ms, 750);
         assert_eq!(m.memory_mb, 16);
-        assert!(m.has_capability("actions"));
-        assert!(!m.has_capability("http"));
+        assert_eq!(m.capabilities, vec!["actions".to_owned()]);
     }
 
     #[test]

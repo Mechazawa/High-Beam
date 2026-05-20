@@ -16,7 +16,6 @@
 //! (`crate::app`) owns the scheduling — they get a token, ask the dispatcher
 //! to run, and observe yielded results plus stream-complete signals.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -29,11 +28,11 @@ use crate::plugins::runtime::LoadedPlugin;
 
 /// Maximum a manifest's `debounceMs` can claim. Clamp keeps a pathological
 /// plugin from holding up an otherwise responsive UI.
-pub const MAX_DEBOUNCE_MS: u64 = 2000;
+pub(crate) const MAX_DEBOUNCE_MS: u64 = 2000;
 
-/// One result, tagged with the plugin name and the dispatch id that
-/// produced it. The dispatcher caller uses these to merge + re-sort + render.
-pub struct StreamedResult {
+/// One result, tagged with the plugin name that produced it. The dispatcher
+/// caller uses these to merge + re-sort + render.
+pub(crate) struct StreamedResult {
     pub plugin_name: String,
     pub result: PluginResult,
 }
@@ -43,10 +42,7 @@ pub struct StreamedResult {
 /// returns immediately after spawning per-plugin tasks; it does NOT wait for
 /// every plugin to finish. Per-plugin tasks honor `cancel` and drain when it
 /// flips.
-///
-/// `dispatch_id` is opaque to the dispatcher — pass whatever monotonic id
-/// the caller uses to drop stale yields.
-pub fn dispatch_streaming(
+pub(crate) fn dispatch_streaming(
     plugins: &[Arc<LoadedPlugin>],
     input: &str,
     cancel: &CancellationToken,
@@ -60,58 +56,31 @@ pub fn dispatch_streaming(
         let plugin_input = input.to_owned();
         let tx_clone = tx.clone();
 
-        if debounce.is_zero() {
-            // Immediate dispatch — open the stream now, forward each yield.
-            let cancel_for_task = plugin_cancel.clone();
-            tokio::spawn(async move {
-                let mut rx_inner =
-                    plugin_arc.run_query_stream(&plugin_input, cancel_for_task.clone());
-                forward_stream(plugin_name, &mut rx_inner, tx_clone, cancel_for_task).await;
-            });
-        } else {
-            // Debounced dispatch — sleep first, abort sleep if a new
-            // keystroke arrives mid-debounce.
-            let cancel_for_sleep = plugin_cancel.clone();
-            tokio::spawn(async move {
+        tokio::spawn(async move {
+            if !debounce.is_zero() {
+                // Wait out the debounce; abort the sleep on a new keystroke
+                // so we never spawn a query whose result was already stale
+                // before it started.
                 tokio::select! {
-                    () = sleep(debounce) => {
-                        let mut rx_inner = plugin_arc
-                            .run_query_stream(&plugin_input, cancel_for_sleep.clone());
-                        forward_stream(plugin_name, &mut rx_inner, tx_clone, cancel_for_sleep).await;
-                    }
-                    () = cancel_for_sleep.cancelled() => {
-                        // Debounce period was cut short by a new keystroke;
-                        // skip dispatch entirely.
-                    }
+                    () = sleep(debounce) => {}
+                    () = plugin_cancel.cancelled() => return,
                 }
-            });
-        }
-    }
-}
-
-/// Forward each result from a per-plugin receiver into the merged channel.
-/// Terminates on cancel or when the plugin's stream closes.
-async fn forward_stream(
-    plugin_name: String,
-    rx: &mut mpsc::UnboundedReceiver<PluginResult>,
-    tx: mpsc::UnboundedSender<StreamedResult>,
-    cancel: CancellationToken,
-) {
-    loop {
-        tokio::select! {
-            () = cancel.cancelled() => return,
-            r = rx.recv() => match r {
-                Some(result) => {
-                    if tx.send(StreamedResult {
+            }
+            let mut rx_inner = plugin_arc.run_query_stream(&plugin_input, plugin_cancel);
+            // Plugin's stream_query honors cancel directly; when cancelled it
+            // drops its tx and we drop out of this loop naturally.
+            while let Some(result) = rx_inner.recv().await {
+                if tx_clone
+                    .send(StreamedResult {
                         plugin_name: plugin_name.clone(),
                         result,
-                    }).is_err() {
-                        return;
-                    }
+                    })
+                    .is_err()
+                {
+                    return;
                 }
-                None => return,
             }
-        }
+        });
     }
 }
 
@@ -124,7 +93,7 @@ fn clamp_debounce(ms: u64) -> Duration {
 ///
 /// Mutates `live` in place. The caller pushes the resulting state back to
 /// the UI.
-pub fn merge_into_live(
+pub(crate) fn merge_into_live(
     live: &mut Vec<RankedResult>,
     next_order: &mut usize,
     incoming: StreamedResult,
@@ -154,52 +123,33 @@ pub fn merge_into_live(
     });
 }
 
-/// Bookkeeping for per-plugin debounce scheduling. The app layer keeps one
-/// of these per loaded plugin and consults [`Schedule::should_dispatch_now`]
-/// (immediate) versus [`Schedule::cancel_pending`] (debounced).
-pub struct Schedule {
-    pending: HashMap<String, CancellationToken>,
-}
-
-impl Schedule {
-    /// Empty schedule.
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            pending: HashMap::new(),
-        }
-    }
-
-    /// Cancel any pending debounced dispatch for `plugin_name`. Idempotent.
-    pub fn cancel_pending(&mut self, plugin_name: &str) {
-        if let Some(token) = self.pending.remove(plugin_name) {
-            token.cancel();
-        }
-    }
-
-    /// Register a token under `plugin_name`. The caller should pass the same
-    /// token to `dispatch_streaming` so a follow-up call to `cancel_pending`
-    /// aborts both the sleep and any subsequently-spawned query.
-    pub fn register_pending(&mut self, plugin_name: String, token: CancellationToken) {
-        self.pending.insert(plugin_name, token);
-    }
-
-    /// Drop all pending tokens without cancelling — used when the dispatch
-    /// has actually fired and we want to recycle the schedule slot.
-    pub fn clear(&mut self) {
-        self.pending.clear();
-    }
-}
-
-impl Default for Schedule {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plugins::result::Action;
+
+    fn streamed(key: &str, weight: f64, pinned: bool) -> StreamedResult {
+        StreamedResult {
+            plugin_name: "a".into(),
+            result: PluginResult {
+                key: key.into(),
+                title: key.into(),
+                subtitle: None,
+                weight,
+                pinned,
+                action: Action::Copy { text: key.into() },
+            },
+        }
+    }
+
+    fn merge_all(items: Vec<StreamedResult>) -> Vec<String> {
+        let mut live = Vec::new();
+        let mut order = 0usize;
+        for it in items {
+            merge_into_live(&mut live, &mut order, it);
+        }
+        live.iter().map(|r| r.result.key.clone()).collect()
+    }
 
     #[test]
     fn clamp_debounce_caps_at_max() {
@@ -217,66 +167,52 @@ mod tests {
 
     #[test]
     fn merge_orders_pinned_then_weight_then_insertion() {
-        let mut live = Vec::new();
-        let mut order = 0usize;
-        merge_into_live(
-            &mut live,
-            &mut order,
-            StreamedResult {
-                plugin_name: "a".into(),
-                result: PluginResult {
-                    key: "z".into(),
-                    title: "z".into(),
-                    subtitle: None,
-                    weight: 1.0,
-                    pinned: false,
-                    action: crate::plugins::result::Action::Copy { text: "z".into() },
-                },
-            },
-        );
-        merge_into_live(
-            &mut live,
-            &mut order,
-            StreamedResult {
-                plugin_name: "a".into(),
-                result: PluginResult {
-                    key: "p".into(),
-                    title: "p".into(),
-                    subtitle: None,
-                    weight: 0.0,
-                    pinned: true,
-                    action: crate::plugins::result::Action::Copy { text: "p".into() },
-                },
-            },
-        );
-        merge_into_live(
-            &mut live,
-            &mut order,
-            StreamedResult {
-                plugin_name: "a".into(),
-                result: PluginResult {
-                    key: "m".into(),
-                    title: "m".into(),
-                    subtitle: None,
-                    weight: 10.0,
-                    pinned: false,
-                    action: crate::plugins::result::Action::Copy { text: "m".into() },
-                },
-            },
-        );
-        let keys: Vec<_> = live.iter().map(|r| r.result.key.clone()).collect();
+        let keys = merge_all(vec![
+            streamed("z", 1.0, false),
+            streamed("p", 0.0, true),
+            streamed("m", 10.0, false),
+        ]);
         assert_eq!(keys, ["p", "m", "z"]);
     }
 
     #[test]
-    fn schedule_cancel_pending_fires_token() {
-        let mut sched = Schedule::new();
-        let token = CancellationToken::new();
-        sched.register_pending("p".into(), token.clone());
-        assert!(!token.is_cancelled());
-        sched.cancel_pending("p");
-        assert!(token.is_cancelled());
-        // Idempotent.
-        sched.cancel_pending("p");
+    fn merge_pinned_sorts_above_unpinned_regardless_of_weight() {
+        let keys = merge_all(vec![
+            streamed("high", 100.0, false),
+            streamed("low-pinned", 0.0, true),
+        ]);
+        assert_eq!(keys, ["low-pinned", "high"]);
+    }
+
+    #[test]
+    fn merge_unpinned_sorts_by_descending_weight() {
+        let keys = merge_all(vec![
+            streamed("low", 1.0, false),
+            streamed("high", 10.0, false),
+            streamed("mid", 5.0, false),
+        ]);
+        assert_eq!(keys, ["high", "mid", "low"]);
+    }
+
+    #[test]
+    fn merge_equal_weight_ties_break_by_insertion_order() {
+        let keys = merge_all(vec![
+            streamed("first", 5.0, false),
+            streamed("second", 5.0, false),
+            streamed("third", 5.0, false),
+        ]);
+        assert_eq!(keys, ["first", "second", "third"]);
+    }
+
+    #[test]
+    fn merge_assigns_unique_order_per_yield() {
+        let mut live = Vec::new();
+        let mut order = 0usize;
+        for k in ["a", "b", "c"] {
+            merge_into_live(&mut live, &mut order, streamed(k, 0.0, false));
+        }
+        assert_eq!(order, 3);
+        let orders: Vec<_> = live.iter().map(|r| r.order).collect();
+        assert_eq!(orders, [0, 1, 2]);
     }
 }

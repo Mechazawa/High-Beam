@@ -76,83 +76,9 @@ impl RankedResult {
     }
 }
 
-/// Merge results from multiple plugins into a single ordered list.
-///
-/// Stage 3 ranking rules:
-///   1. pinned-first
-///   2. then by descending `weight`
-///   3. then by insertion order (stable)
-///
-/// Stage 5 will replace step 2 with a frecency-aware score.
-#[must_use]
-pub fn sort_merged(mut all: Vec<RankedResult>) -> Vec<RankedResult> {
-    all.sort_by(|a, b| {
-        b.result
-            .pinned
-            .cmp(&a.result.pinned)
-            .then_with(|| {
-                b.result
-                    .weight
-                    .partial_cmp(&a.result.weight)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .then_with(|| a.order.cmp(&b.order))
-    });
-    all
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn rr(name: &str, key: &str, weight: f64, pinned: bool, order: usize) -> RankedResult {
-        RankedResult {
-            plugin_name: name.to_owned(),
-            result: PluginResult {
-                key: key.to_owned(),
-                title: key.to_owned(),
-                subtitle: None,
-                weight,
-                pinned,
-                action: Action::Copy {
-                    text: key.to_owned(),
-                },
-            },
-            order,
-        }
-    }
-
-    #[test]
-    fn pinned_sorts_above_unpinned_regardless_of_weight() {
-        let merged = sort_merged(vec![
-            rr("a", "high", 100.0, false, 0),
-            rr("a", "low-pinned", 0.0, true, 1),
-        ]);
-        assert_eq!(merged[0].result.key, "low-pinned");
-        assert_eq!(merged[1].result.key, "high");
-    }
-
-    #[test]
-    fn unpinned_sorts_by_descending_weight() {
-        let merged = sort_merged(vec![
-            rr("a", "low", 1.0, false, 0),
-            rr("a", "high", 10.0, false, 1),
-            rr("a", "mid", 5.0, false, 2),
-        ]);
-        let keys: Vec<_> = merged.iter().map(|r| r.result.key.clone()).collect();
-        assert_eq!(keys, ["high", "mid", "low"]);
-    }
-
-    #[test]
-    fn equal_weight_ties_break_by_insertion_order() {
-        let merged = sort_merged(vec![
-            rr("a", "second", 5.0, false, 1),
-            rr("a", "first", 5.0, false, 0),
-            rr("a", "third", 5.0, false, 2),
-        ]);
-        let keys: Vec<_> = merged.iter().map(|r| r.result.key.clone()).collect();
-        assert_eq!(keys, ["first", "second", "third"]);
-    }
 
     #[test]
     fn action_roundtrip_open_url() {

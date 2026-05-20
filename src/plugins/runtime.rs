@@ -252,7 +252,7 @@ impl LoadedPlugin {
         let timeout = self.timeout;
 
         let cancel_for_timer = cancel.clone();
-        let _timer = tokio::spawn(async move {
+        tokio::spawn(async move {
             tokio::select! {
                 () = tokio::time::sleep(timeout) => {
                     flag_for_timer.store(true, Ordering::Relaxed);
