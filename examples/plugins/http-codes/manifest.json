@@ -1,0 +1,10 @@
+{
+  "name": "http-codes",
+  "displayName": "HTTP Codes",
+  "version": "0.1.0",
+  "description": "Look up HTTP status codes — type 'http <prefix>'",
+  "debounceMs": 10,
+  "timeoutMs": 100,
+  "memoryMb": 16,
+  "capabilities": ["actions", "fs.read"]
+}
