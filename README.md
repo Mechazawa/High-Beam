@@ -1,74 +1,156 @@
 # High Beam
 
-A keyboard launcher (Spotlight / Alfred / Raycast class) for macOS and Linux.
+A keyboard launcher in the Spotlight / Alfred / Raycast / Ulauncher class.
+Hit a global hotkey, an overlay window appears, type a query, ranked
+results stream in from plugins, Enter executes the chosen action.
 
-This is the v3 Rust rewrite. v1 (Electron + Vue, `legacy/`) and v2 (Electron + React + TS, `legacy-v2/`) are kept locally as porting reference but not tracked in git.
+<!-- TODO: screenshot -->
 
-Design docs and stage tracking live in `docs/` (also untracked working notes).
+## Status
 
-## Build
+Pre-release / personal-use. The Rust rewrite (this repository) supersedes
+two earlier iterations:
 
-    just check       # fmt + clippy + test
-    just run         # run the binary
+- v1 — Electron + Vue + JS (kept locally in `legacy/`)
+- v2 — Electron + React + TypeScript (kept locally in `legacy-v2/`)
+- v3 — this native Rust binary
 
-## Plugins
+The major v3 pieces — daemon, plugin runtime, SDK, frecency, theming,
+per-plugin logging — are all in. The pre-v1.0 backlog is in
+[Roadmap](#roadmap) below.
 
-JS plugins live in `plugins/<name>/` (untracked — they're user content). The
-host scans that directory at startup; each subdirectory needs a
-`manifest.json` and the entry file (default `plugin.js`). The plugin dir is
-resolved in this priority order:
+## Install
 
-1. `--plugins-dir <path>` CLI flag (test override)
-2. `./plugins` next to the binary's cwd (dev convenience), if it exists
-3. Platform default — `~/Library/Application Support/high-beam/plugins/` on
-   macOS, `$XDG_DATA_HOME/high-beam/plugins/` on Linux
+`cargo install --path .` builds the daemon binary. For local development:
 
-Stage 4 ships three example plugins to smoke-test the runtime; Stage 5
-adds a fourth that verifies frecency:
+    just check       # cargo fmt + clippy + tests
+    just run         # cargo run
+    just lint        # strict clippy (-D warnings)
+    just lint-pedantic   # clippy::pedantic suggestions
+    just test-plugins    # vitest in each example plugin
 
-    cp -r examples/plugins/echo plugins/echo                       # one-shot echo
-    cp -r examples/plugins/slow-echo plugins/slow-echo             # streaming + abort demo
-    cp -r examples/plugins/echo-ts plugins/echo-ts                 # TypeScript variant
-    cp -r examples/plugins/frecency-demo plugins/frecency-demo     # frecency re-ranker demo
-    just run
-    # Press Shift+Space (or run `highbeam --open`) and type — Enter copies
-    # the input to your clipboard. `slow-echo` yields three rows with a
-    # 300ms gap each so you can see streaming and abort behaviour.
-    # `frecency-demo` always returns Alpha/Beta/Gamma (equal weight):
-    # pick one, run another query, and watch it bubble to the top.
+Stable Rust, edition 2024. Pinned via `rust-toolchain.toml`.
 
-The manifest fields the host honors today (see `docs/02-plugin-sdk.md` for
-the full v1 spec):
+## Usage
 
-    {
-      "name": "echo",
-      "displayName": "Echo",
-      "version": "0.1.0",
-      "entry": "plugin.js",
-      "timeoutMs": 500,
-      "memoryMb": 32,
-      "debounceMs": 0,
-      "capabilities": ["actions"]
-    }
+- **macOS**: hit `Shift+Space` to open the launcher (default; not yet
+  user-configurable).
+- **Linux**: bind `highbeam --open` to a hotkey in your WM / DE keyboard
+  settings — there's no portable global hotkey API on Wayland, so High Beam
+  punts to the WM. See [docs/platform.md](docs/platform.md).
 
-Plugins can `import` only from the `highbeam:*` scheme — `import 'fs'` and
-`import 'lodash'` are rejected at load time. Currently shipped:
+Type into the input; results stream in. Up/down to highlight a row; Enter
+to invoke its action. Esc or click-away closes; the daemon stays running.
 
-| Module                | Functions                                        | Capability                              |
-| --------------------- | ------------------------------------------------ | --------------------------------------- |
-| `highbeam:actions`    | `openUrl`, `copy`, `exec`, `reveal`              | `actions`                               |
-| `highbeam:http`       | `get`, `post`                                    | `http`                                  |
-| `highbeam:clipboard`  | `read`, `write`                                  | `clipboard.read` / `clipboard.write`    |
-| `highbeam:fs`         | `readDir`, `readFile`, `readText`, `readCache`, `writeCache` | `fs.read` / `fs.cache`     |
-| `highbeam:icons`      | `forPath`                                        | `icons`                                 |
-| `highbeam:match`      | `fuzzy`                                          | — (pure compute)                        |
-| `highbeam:system`     | `exec`, `applescript`                            | `system.exec` / `system.applescript`    |
-| `highbeam:platform`   | `os`, `arch`, `version`, `isMacOS`, `isLinux`    | — (metadata)                            |
+## What ships
 
-System actions (`shutdown`, `sleep`, `restart`, `lock`, `exit High Beam`,
-`check for updates`, `version v…`) are implemented in the host as a built-in
-`core` plugin — they appear in the result list alongside JS plugins but
-can't be redefined at runtime.
+The host binary plus one in-process built-in (Core: shutdown / sleep /
+restart / lock / exit High Beam / version readout). Plus, in
+`examples/plugins/`, eight reference plugins you can drop into your
+plugins directory:
 
-TypeScript declarations live in `sdk/highbeam/`; see the README there for
-the `tsconfig.json` recipe.
+| Plugin           | What it does                                                         |
+|------------------|----------------------------------------------------------------------|
+| `echo`           | Minimal smoke test — copies your input to the clipboard.             |
+| `echo-ts`        | TypeScript variant of `echo` with a `tsconfig.json`.                 |
+| `slow-echo`      | Streaming + abort demo (three rows, 300ms apart).                    |
+| `frecency-demo`  | Three equal-weight rows; pick one and watch it bubble up.            |
+| `calculator`     | Pinned, inline math (`1+2*3`, `sqrt(2)`, etc.). npm-free.            |
+| `http-codes`     | Type `http 404`; opens MDN.                                          |
+| `paper-size`     | Type `paper A4`; copies `210 x 297 mm`.                              |
+| `dnd`            | Type `spell fireball`; opens the D&D 5e reference.                   |
+| `app-launcher`   | Cross-platform Spotlight equivalent (mac `.app`s + Linux `.desktop`). |
+
+Copy or symlink any of them into your plugin directory:
+
+```bash
+cp -r examples/plugins/echo ~/Library/Application\ Support/high-beam/plugins/echo  # macOS
+cp -r examples/plugins/echo "$XDG_DATA_HOME/high-beam/plugins/echo"                # Linux
+```
+
+…then restart High Beam.
+
+## Plugin authoring
+
+Plugins are single-file JS programs the host loads at startup. No npm at
+runtime, no bundler. Each plugin lives in its own directory with a
+`manifest.json` and a `plugin.js` exporting an `async function* query()`:
+
+```js
+import { copy } from 'highbeam:actions';
+
+export async function* query(input, signal) {
+  if (!input) return;
+  yield {
+    key: 'hello',
+    title: `hello: ${input}`,
+    action: copy(input),
+  };
+}
+```
+
+The full plugin authoring guide is in
+[docs/plugin-authoring.md](docs/plugin-authoring.md) — manifest schema, the
+`highbeam:*` module reference, capabilities, TypeScript setup, vitest
+testing recipe.
+
+## Theming
+
+Drop a `theme.toml` into the config dir to override the bundled default
+(which approximates macOS Yosemite Spotlight). Tokens cover colors, fonts,
+spacing, window width, and border radius. Restart to apply — there is no
+hot-reload in v1.
+
+See [docs/theming.md](docs/theming.md) for the full token reference and a
+dark-mode example.
+
+## Platform notes
+
+- macOS uses the `global-hotkey` crate for `Shift+Space`. AppleScript-backed
+  Core actions (sleep / restart / shutdown) may prompt for automation
+  permission the first time you invoke them.
+- Linux Wayland has no portable global-hotkey API; bind `highbeam --open`
+  in your WM / DE keyboard settings instead.
+- App data paths follow the platform conventions
+  (`~/Library/Application Support/high-beam/` on macOS,
+  `$XDG_CONFIG_HOME/high-beam/` / `$XDG_DATA_HOME/high-beam/` on Linux).
+
+Full details in [docs/platform.md](docs/platform.md).
+
+## Architecture
+
+[docs/architecture.md](docs/architecture.md) is the contributor's tour —
+stack, module map, threading model, the cancellation contract, and the
+Slint integration gotchas worth knowing before touching the UI layer.
+
+## Roadmap
+
+The v1 line: launcher + plugin runtime + bundled examples + theming +
+logging. After v1, in rough priority order:
+
+- Alt-action / modifier-key alternate action (Cmd+Enter = "open in finder"
+  vs Enter = "open")
+- `push` action / nested views (the `Action` enum reserves room)
+- Forms — multi-field input view dispatched by an `Action` variant
+- Detail / preview pane (Yosemite Spotlight's right-side preview)
+- Settings screen + a `PrefPanes` macOS plugin
+- Strike-out / auto-disable on repeated plugin failures
+- Plugin store / install-by-URL (Hammerspoon-style)
+- Theme live-reload (watch `theme.toml`)
+- Real macOS vibrancy via `NSVisualEffectView`
+- Logfile rotation
+- User-configurable global hotkey (currently hardcoded)
+- Wayland global hotkey via `xdg-desktop-portal`
+- Windows port
+
+Explicit non-goals:
+
+- Becoming Node — `highbeam:*` is the only import scheme; npm gravity is
+  the failure mode we're avoiding.
+- Plugin sandboxing — every major launcher we surveyed (Alfred, Raycast,
+  Albert, Ulauncher) relies on curation rather than isolation, so we're not
+  paying the DX cost for theatrical safety.
+
+## License
+
+MIT — see `Cargo.toml`.
