@@ -6,6 +6,10 @@ export default class CalculatorPlugin extends Plugin {
   name = 'calculator';
 
   query(query: string): ResultCollection {
+    if (query.trim() === '') {
+      return [];
+    }
+
     try {
       const result = evaluate(query.trim() || '0');
 
