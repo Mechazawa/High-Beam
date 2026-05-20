@@ -28,16 +28,33 @@ pub fn configure(window: &QueryWindow) {
         }
     });
 
-    // Blur-to-close fires whenever the window loses focus, in any build. The
-    // daemon stays running; only the window goes away.
+    // Handle window-level focus events:
+    //   * Focused(true)  — the OS just made our window the key window. Forward
+    //     focus to the TextInput now. Doing this from `show()` directly is too
+    //     early on macOS: even after `window.show()` returns, the NSWindow is
+    //     not yet the key window, so Slint's focus request gets dropped. By the
+    //     time we receive this event the window is actually mapped and active.
+    //   * Focused(false) — blur-to-close. Daemon keeps running; window hides.
+    // reason: winit Focused(true) is the earliest tick at which Slint's focus
+    // request is guaranteed to land on the input. Tried calling
+    // `invoke_focus_input` from `show()` — focus was lost before the window
+    // became key, so the user had to click into the field.
     let weak_for_focus = window.as_weak();
     window
         .window()
         .on_winit_window_event(move |_slint_win, event| {
-            if let winit::event::WindowEvent::Focused(false) = event
-                && let Some(w) = weak_for_focus.upgrade()
-            {
-                hide(&w);
+            match event {
+                winit::event::WindowEvent::Focused(true) => {
+                    if let Some(w) = weak_for_focus.upgrade() {
+                        w.invoke_focus_input();
+                    }
+                }
+                winit::event::WindowEvent::Focused(false) => {
+                    if let Some(w) = weak_for_focus.upgrade() {
+                        hide(&w);
+                    }
+                }
+                _ => {}
             }
             EventResult::Propagate
         });
@@ -53,6 +70,12 @@ pub fn configure(window: &QueryWindow) {
 /// Show the window, center it, and focus the input. Idempotent — calling this
 /// while the window is already visible just re-centers and re-focuses, which
 /// matches v2's behaviour and the spec ("focuses it if already open").
+///
+/// Focus on first show is driven by the `Focused(true)` winit event in
+/// `configure()` — that's the earliest point where the `NSWindow` is actually
+/// key on macOS. We also call `invoke_focus_input` here so a re-show while the
+/// window is already visible (and thus won't get a fresh Focused(true)) still
+/// pulls the caret back into the input.
 pub fn show(window: &QueryWindow) {
     if let Err(err) = window.show() {
         eprintln!("failed to show window: {err}");
@@ -62,9 +85,11 @@ pub fn show(window: &QueryWindow) {
     window.invoke_focus_input();
 }
 
-/// Hide the window. Clears the query text so the next open starts fresh.
+/// Hide the window. Clears the input text so the next open starts fresh —
+/// covers every close path (Esc, blur, and any future programmatic close)
+/// because they all funnel through here.
 pub fn hide(window: &QueryWindow) {
-    window.set_query_text(slint::SharedString::new());
+    window.invoke_clear_input();
     if let Err(err) = window.hide() {
         eprintln!("failed to hide window: {err}");
     }

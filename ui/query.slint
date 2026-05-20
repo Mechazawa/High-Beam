@@ -23,6 +23,17 @@ export component QueryWindow inherits Window {
         input.focus();
     }
 
+    // Reset the input's own `text` directly. The binding `text: root.query-text`
+    // is one-way and gets severed the moment the TextInput writes to its own
+    // `text` (which happens on every keystroke via the `edited` callback). After
+    // that, mutating `query-text` from Rust no longer propagates back into the
+    // input. Assigning `input.text` here side-steps the broken binding so the
+    // displayed content actually clears.
+    public function clear-input() {
+        input.text = "";
+        root.query-text = "";
+    }
+
     width: 760px;
     height: 80px;
 
