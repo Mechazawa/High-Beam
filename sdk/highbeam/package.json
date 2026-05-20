@@ -1,0 +1,8 @@
+{
+    "name": "@high-beam/sdk",
+    "version": "0.1.0",
+    "description": "TypeScript ambient declarations for the highbeam:* plugin SDK.",
+    "types": "index.d.ts",
+    "license": "MIT",
+    "private": true
+}

@@ -1,14 +1,16 @@
 //! Result + Action types — the cross-plugin schema rendered in the window.
 //!
-//! Stage 3 implements a subset of `docs/01-architecture.md`'s schema:
-//!   * No `icon` (Stage 7 wires up native icons).
-//!   * Only the `openUrl` and `copy` action variants (Stage 4 adds `exec` /
-//!     `reveal`).
+//! Stage 4 supports the full v1 action set: `openUrl`, `copy`, `exec`,
+//! `reveal`. (Stage 7 may add `push` for nested detail views, post-v1.)
+//!
+//! Icons are still unimplemented (Stage 7 wires up native icons).
 //!
 //! JS plugins yield objects that the host parses via `serde` into [`Result`].
 //! The wire shape mirrors the doc'd `Action` tagged-union (`kind` discriminator)
 //! so the SDK module exports in `crate::sdk::actions` and the Rust enum stay
 //! aligned without bespoke (de)serialization code.
+
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
@@ -32,6 +34,8 @@ pub struct PluginResult {
 /// ```json
 /// { "kind": "openUrl", "url": "https://…" }
 /// { "kind": "copy",    "text": "hello" }
+/// { "kind": "exec",    "cmd": "/usr/bin/say", "args": ["hello"] }
+/// { "kind": "reveal",  "path": "/Users/me/file.pdf" }
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind")]
@@ -40,6 +44,14 @@ pub enum Action {
     OpenUrl { url: String },
     #[serde(rename = "copy")]
     Copy { text: String },
+    #[serde(rename = "exec")]
+    Exec {
+        cmd: String,
+        #[serde(default)]
+        args: Vec<String>,
+    },
+    #[serde(rename = "reveal")]
+    Reveal { path: PathBuf },
 }
 
 /// A result enriched with the plugin name that produced it.
@@ -157,6 +169,39 @@ mod tests {
         let json = r#"{"kind":"copy","text":"hello"}"#;
         let parsed: Action = serde_json::from_str(json).unwrap();
         assert!(matches!(parsed, Action::Copy { text } if text == "hello"));
+    }
+
+    #[test]
+    fn action_roundtrip_exec() {
+        let json = r#"{"kind":"exec","cmd":"/usr/bin/say","args":["hello","world"]}"#;
+        let parsed: Action = serde_json::from_str(json).unwrap();
+        match parsed {
+            Action::Exec { cmd, args } => {
+                assert_eq!(cmd, "/usr/bin/say");
+                assert_eq!(args, vec!["hello".to_owned(), "world".to_owned()]);
+            }
+            other => panic!("expected Exec, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn action_exec_args_default_to_empty() {
+        let json = r#"{"kind":"exec","cmd":"/usr/bin/true"}"#;
+        let parsed: Action = serde_json::from_str(json).unwrap();
+        match parsed {
+            Action::Exec { args, .. } => assert!(args.is_empty()),
+            other => panic!("expected Exec, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn action_roundtrip_reveal() {
+        let json = r#"{"kind":"reveal","path":"/tmp/file.pdf"}"#;
+        let parsed: Action = serde_json::from_str(json).unwrap();
+        match parsed {
+            Action::Reveal { path } => assert_eq!(path, PathBuf::from("/tmp/file.pdf")),
+            other => panic!("expected Reveal, got {other:?}"),
+        }
     }
 
     #[test]

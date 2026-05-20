@@ -1,0 +1,11 @@
+{
+    "name": "slow-echo",
+    "displayName": "Slow Echo",
+    "version": "0.1.0",
+    "description": "Streaming + abort demo. Yields three rows with a 300ms pause between each so you can watch progressive rendering and confirm the abort cascade on a new keystroke.",
+    "entry": "plugin.js",
+    "timeoutMs": 5000,
+    "memoryMb": 32,
+    "debounceMs": 0,
+    "capabilities": ["actions"]
+}

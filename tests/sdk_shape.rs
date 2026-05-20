@@ -1,0 +1,128 @@
+//! CI: assert each `highbeam:*` module's runtime exports match the
+//! hand-written `.d.ts` declarations under `sdk/highbeam/`.
+//!
+//! Drift is the failure mode this guards against — a developer adds a new
+//! Rust-side export and forgets the TypeScript declaration (or vice versa),
+//! and plugin authors hit "Property 'foo' does not exist on type 'X'" or
+//! the equally cryptic runtime "`TypeError`: foo is not a function".
+//!
+//! We use rquickjs directly here (no plugin loader) so the test is independent
+//! of the wider runtime infrastructure. Each module gets loaded into a fresh
+//! context, its named exports listed, and compared against a hardcoded list
+//! that mirrors the `.d.ts` file.
+
+use rquickjs::loader::{Loader, Resolver};
+use rquickjs::{AsyncContext, AsyncRuntime, Ctx, Error as JsError, Module, Object, async_with};
+
+use high_beam::sdk::actions::ActionsModule;
+use high_beam::sdk::clipboard::ClipboardModule;
+use high_beam::sdk::http::HttpModule;
+
+/// Expected exports per module. Mirrors `sdk/highbeam/<name>.d.ts`.
+fn expected_for(name: &str) -> &'static [&'static str] {
+    match name {
+        "highbeam:actions" => &["openUrl", "copy", "exec", "reveal"],
+        "highbeam:http" => &["get", "post"],
+        "highbeam:clipboard" => &["read", "write"],
+        other => {
+            panic!("expected_for({other}): no expected list — keep this in sync with sdk/highbeam")
+        }
+    }
+}
+
+/// Tiny resolver that accepts only the specifier under test.
+struct OneShotResolver(&'static str);
+
+impl Resolver for OneShotResolver {
+    fn resolve(&mut self, _ctx: &Ctx<'_>, _base: &str, name: &str) -> Result<String, JsError> {
+        if name == self.0 || name == "shape:test" {
+            Ok(name.to_owned())
+        } else {
+            Err(JsError::new_resolving(
+                "<shape-test>",
+                format!("unexpected import: {name}"),
+            ))
+        }
+    }
+}
+
+/// Loader stub — only ever called for the specifier under test.
+enum OneShotLoader {
+    Actions,
+    Http,
+    Clipboard,
+}
+
+impl Loader for OneShotLoader {
+    fn load<'js>(&mut self, ctx: &Ctx<'js>, name: &str) -> Result<Module<'js>, JsError> {
+        match self {
+            Self::Actions => Module::declare_def::<ActionsModule, _>(ctx.clone(), name),
+            Self::Http => Module::declare_def::<HttpModule, _>(ctx.clone(), name),
+            Self::Clipboard => Module::declare_def::<ClipboardModule, _>(ctx.clone(), name),
+        }
+    }
+}
+
+fn assert_module_exports(specifier: &'static str, loader: OneShotLoader) {
+    let expected = expected_for(specifier);
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("tokio rt");
+    rt.block_on(async {
+        let async_rt = AsyncRuntime::new().expect("rt");
+        async_rt
+            .set_loader(OneShotResolver(specifier), loader)
+            .await;
+        let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
+        async_with!(ctx => |ctx| {
+            // Eval a tiny entry module that imports the SDK module and stashes
+            // its namespace on globalThis so we can introspect from JS.
+            let src = format!(
+                r#"
+                import * as ns from "{specifier}";
+                globalThis.__ns = ns;
+                "#
+            );
+            let declared = Module::declare(ctx.clone(), "shape:test", src.into_bytes())
+                .expect("declare");
+            let (_module, eval_promise) = declared.eval().expect("eval");
+            eval_promise.into_future::<()>().await.expect("await eval");
+
+            let ns: Object<'_> = ctx.globals().get("__ns").expect("read __ns");
+            let mut found: Vec<String> = ns
+                .keys::<String>()
+                .filter_map(Result::ok)
+                .collect();
+            found.sort();
+            let mut expected_sorted: Vec<String> =
+                expected.iter().map(|s| (*s).to_string()).collect();
+            expected_sorted.sort();
+
+            assert_eq!(
+                found, expected_sorted,
+                "{specifier}: runtime exports do not match the .d.ts list.\n\
+                 expected: {expected_sorted:?}\n\
+                 got:      {found:?}\n\
+                 (update either the Rust ModuleDef or sdk/highbeam/{name}.d.ts)",
+                name = specifier.trim_start_matches("highbeam:"),
+            );
+        })
+        .await;
+    });
+}
+
+#[test]
+fn actions_module_exports_match_dts() {
+    assert_module_exports("highbeam:actions", OneShotLoader::Actions);
+}
+
+#[test]
+fn http_module_exports_match_dts() {
+    assert_module_exports("highbeam:http", OneShotLoader::Http);
+}
+
+#[test]
+fn clipboard_module_exports_match_dts() {
+    assert_module_exports("highbeam:clipboard", OneShotLoader::Clipboard);
+}

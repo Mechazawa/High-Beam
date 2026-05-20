@@ -6,26 +6,28 @@
 //!     `AsyncRuntime` futures (`!Send` across `async_with`) can be polled
 //!     without crossing thread boundaries.
 //!   * Receives `query(input)` messages from the main thread (Slint event
-//!     loop), dispatches them across plugins, and routes the resulting
-//!     `Vec<RankedResult>` back to the Slint thread via
-//!     `slint::invoke_from_event_loop`.
+//!     loop), dispatches them to every plugin in parallel using the
+//!     streaming dispatcher, and routes each yielded row back to the Slint
+//!     thread via `slint::invoke_from_event_loop`.
+//!   * On every new keystroke, cancels the in-flight dispatch (`CancellationToken`)
+//!     and starts a fresh one. Stale yields are dropped via a monotonic
+//!     `query_id` check the receiver task performs before invoking the UI.
 //!   * Holds the latest result snapshot in an `Arc<Mutex<_>>` so the
 //!     `invoke-selected` callback can look up the highlighted row's action.
-//!
-//! Stage 4 will replace the "collect to Vec then render" model with
-//! streaming, `AbortSignal` cancellation, and per-plugin debounce.
 
 use std::error::Error;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
 use slint::{ComponentHandle, ModelRc, VecModel};
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 use crate::QueryWindow;
 use crate::plugins::actions;
-use crate::plugins::dispatch;
+use crate::plugins::dispatch::{self, StreamedResult};
 use crate::plugins::loader::{self, LoaderOptions};
 use crate::plugins::result::RankedResult;
 use crate::plugins::runtime::LoadedPlugin;
@@ -49,20 +51,21 @@ enum HostMessage {
 /// # Errors
 ///
 /// Returns an error if the background thread can't be spawned.
-pub fn start(window: &QueryWindow) -> Result<PluginHost, Box<dyn Error>> {
+pub fn start(
+    window: &QueryWindow,
+    plugins_override: Option<PathBuf>,
+) -> Result<PluginHost, Box<dyn Error>> {
     let (tx, mut rx) = mpsc::unbounded_channel::<HostMessage>();
 
     // Latest results: shared between the main thread (Enter looks up actions
-    // here) and the `invoke_from_event_loop` closure on the main thread that
-    // refreshes it after each dispatch. `Arc<Mutex>` rather than `Rc<RefCell>`
-    // so we can move a clone into the worker-spawned closure that runs on
-    // the main thread (which the borrow checker treats as a separate task).
+    // here) and the renderer closures that update it after each stream
+    // event. `Arc<Mutex>` is fine because the mutex is uncontended (every
+    // touch happens on the main thread).
     let latest: Arc<Mutex<Vec<RankedResult>>> = Arc::new(Mutex::new(Vec::new()));
 
-    // Monotonic query id used to drop stale results from slow plugins. The
-    // `AtomicU64` is bumped on every keystroke (main thread) and read by the
-    // worker so it can skip work entirely when a newer keystroke arrives
-    // before we finished the previous one.
+    // Monotonic query id used to drop stale results from slow plugins. Bumped
+    // on every keystroke; the renderer task carries the id with each yield
+    // and ignores anything where the id is older than the current value.
     let latest_id = Arc::new(AtomicU64::new(0));
 
     let weak_for_worker = window.as_weak();
@@ -84,33 +87,42 @@ pub fn start(window: &QueryWindow) -> Result<PluginHost, Box<dyn Error>> {
             };
 
             runtime.block_on(async move {
-                let plugins = loader::load_all(&LoaderOptions::dev_default()).await;
+                let opts = LoaderOptions::resolve(plugins_override);
+                let plugins = loader::load_all(&opts).await;
                 if plugins.is_empty() {
-                    eprintln!("plugins: no plugins loaded (drop one in ./plugins/)");
+                    eprintln!(
+                        "plugins: no plugins loaded (looked in {})",
+                        opts.plugins_dir.display()
+                    );
                 }
-                let plugins: Vec<LoadedPlugin> = plugins;
+                let plugins: Vec<Arc<LoadedPlugin>> = plugins;
+                let mut current_cancel: Option<CancellationToken> = None;
+
                 while let Some(msg) = rx.recv().await {
                     match msg {
                         HostMessage::Query { id, input } => {
                             if id < latest_id_for_worker.load(Ordering::Relaxed) {
                                 continue;
                             }
-                            let results = dispatch::dispatch(&plugins, &input).await;
-                            if id < latest_id_for_worker.load(Ordering::Relaxed) {
-                                continue;
+                            if let Some(prev) = current_cancel.take() {
+                                prev.cancel();
                             }
-                            let weak = weak_for_worker.clone();
-                            let latest = Arc::clone(&latest_for_worker);
-                            let _ = slint::invoke_from_event_loop(move || {
-                                if let Some(w) = weak.upgrade() {
-                                    render_results(&w, &results);
-                                    if let Ok(mut slot) = latest.lock() {
-                                        *slot = results;
-                                    }
-                                }
-                            });
+                            let cancel = handle_query(
+                                id,
+                                &input,
+                                &plugins,
+                                weak_for_worker.clone(),
+                                Arc::clone(&latest_for_worker),
+                                Arc::clone(&latest_id_for_worker),
+                            );
+                            current_cancel = Some(cancel);
                         }
-                        HostMessage::Shutdown => break,
+                        HostMessage::Shutdown => {
+                            if let Some(prev) = current_cancel.take() {
+                                prev.cancel();
+                            }
+                            break;
+                        }
                     }
                 }
             });
@@ -154,19 +166,78 @@ pub fn start(window: &QueryWindow) -> Result<PluginHost, Box<dyn Error>> {
         if let Err(err) = actions::execute(&action) {
             eprintln!("plugins: {plugin_name}: action failed: {err}");
         }
-        // Mirror v2's "run and close" behaviour. `window::hide` clears the
-        // input and result list via the slint-side `clear-input()`.
         window::hide(&w);
     });
 
     Ok(PluginHost { query_tx: tx })
 }
 
+/// Start a fresh query: clear the row list, kick off the streaming dispatch,
+/// and spawn a receiver task that merges yields into the UI as they arrive.
+/// Returns the dispatch's cancellation token so the next keystroke can fire
+/// it.
+fn handle_query(
+    id: u64,
+    input: &str,
+    plugins: &[Arc<LoadedPlugin>],
+    weak: slint::Weak<QueryWindow>,
+    latest: Arc<Mutex<Vec<RankedResult>>>,
+    latest_id: Arc<AtomicU64>,
+) -> CancellationToken {
+    let cancel = CancellationToken::new();
+
+    // Reset the live row list on the main thread.
+    let weak_reset = weak.clone();
+    let _ = slint::invoke_from_event_loop(move || {
+        if let Some(w) = weak_reset.upgrade() {
+            w.set_results(ModelRc::new(VecModel::from(Vec::<ResultRow>::new())));
+            w.set_selected_index(0);
+        }
+    });
+
+    let (yield_tx, mut yield_rx) = mpsc::unbounded_channel::<StreamedResult>();
+    dispatch::dispatch_streaming(plugins, input, &cancel, &yield_tx);
+
+    let cancel_for_recv = cancel.clone();
+    tokio::spawn(async move {
+        let mut live: Vec<RankedResult> = Vec::new();
+        let mut order: usize = 0;
+        loop {
+            tokio::select! {
+                () = cancel_for_recv.cancelled() => break,
+                next = yield_rx.recv() => match next {
+                    Some(streamed) => {
+                        if id < latest_id.load(Ordering::Relaxed) {
+                            continue;
+                        }
+                        dispatch::merge_into_live(&mut live, &mut order, streamed);
+                        let snapshot = live.clone();
+                        if let Ok(mut slot) = latest.lock() {
+                            slot.clone_from(&snapshot);
+                        }
+                        let weak = weak.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(w) = weak.upgrade() {
+                                render_results(&w, &snapshot);
+                            }
+                        });
+                    }
+                    None => break,
+                }
+            }
+        }
+    });
+
+    cancel
+}
+
 /// Push the dispatch results into the window's row model.
 ///
-/// Resets `selected-index` to 0 so the first row is highlighted whenever a
-/// new result set lands.
+/// Preserves `selected-index` if the previously-selected row still exists;
+/// otherwise resets to 0. (Stage 3 always reset; Stage 4's streaming model
+/// would make that thrash the user's selection.)
 fn render_results(window: &QueryWindow, results: &[RankedResult]) {
+    let previously_selected = window.get_selected_index();
     let rows: Vec<ResultRow> = results
         .iter()
         .map(|r| ResultRow {
@@ -176,8 +247,11 @@ fn render_results(window: &QueryWindow, results: &[RankedResult]) {
             has_subtitle: r.result.subtitle.is_some(),
         })
         .collect();
+    let row_count = i32::try_from(rows.len()).unwrap_or(i32::MAX);
     window.set_results(ModelRc::new(VecModel::from(rows)));
-    window.set_selected_index(0);
+    if previously_selected >= row_count || previously_selected < 0 {
+        window.set_selected_index(0);
+    }
 }
 
 impl Drop for PluginHost {

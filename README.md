@@ -15,17 +15,26 @@ Design docs and stage tracking live in `docs/` (also untracked working notes).
 
 JS plugins live in `plugins/<name>/` (untracked — they're user content). The
 host scans that directory at startup; each subdirectory needs a
-`manifest.json` and the entry file (default `plugin.js`).
+`manifest.json` and the entry file (default `plugin.js`). The plugin dir is
+resolved in this priority order:
 
-Stage 3 ships an `echo` example plugin to smoke-test the runtime:
+1. `--plugins-dir <path>` CLI flag (test override)
+2. `./plugins` next to the binary's cwd (dev convenience), if it exists
+3. Platform default — `~/Library/Application Support/high-beam/plugins/` on
+   macOS, `$XDG_DATA_HOME/high-beam/plugins/` on Linux
 
-    cp -r examples/plugins/echo plugins/echo
+Stage 4 ships three example plugins to smoke-test the runtime:
+
+    cp -r examples/plugins/echo plugins/echo               # one-shot echo
+    cp -r examples/plugins/slow-echo plugins/slow-echo     # streaming + abort demo
+    cp -r examples/plugins/echo-ts plugins/echo-ts         # TypeScript variant
     just run
     # Press Shift+Space (or run `highbeam --open`) and type — Enter copies
-    # the input to your clipboard.
+    # the input to your clipboard. `slow-echo` yields three rows with a
+    # 300ms gap each so you can see streaming and abort behaviour.
 
-The minimum manifest fields the host honors today (see `docs/02-plugin-sdk.md`
-for the full v1 spec):
+The manifest fields the host honors today (see `docs/02-plugin-sdk.md` for
+the full v1 spec):
 
     {
       "name": "echo",
@@ -34,10 +43,18 @@ for the full v1 spec):
       "entry": "plugin.js",
       "timeoutMs": 500,
       "memoryMb": 32,
+      "debounceMs": 0,
       "capabilities": ["actions"]
     }
 
 Plugins can `import` only from the `highbeam:*` scheme — `import 'fs'` and
-`import 'lodash'` are rejected at load time. Stage 3 implements
-`highbeam:actions` (`openUrl`, `copy`); Stage 4 adds `highbeam:http`,
-`highbeam:clipboard`, etc.
+`import 'lodash'` are rejected at load time. Stage 4 ships:
+
+| Module                | Functions                              | Capability                              |
+| --------------------- | -------------------------------------- | --------------------------------------- |
+| `highbeam:actions`    | `openUrl`, `copy`, `exec`, `reveal`    | `actions`                               |
+| `highbeam:http`       | `get`, `post`                          | `http`                                  |
+| `highbeam:clipboard`  | `read`, `write`                        | `clipboard.read` / `clipboard.write`    |
+
+TypeScript declarations live in `sdk/highbeam/`; see the README there for
+the `tsconfig.json` recipe.

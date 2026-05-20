@@ -1,22 +1,27 @@
 //! Discover and load plugins from a directory.
 //!
-//! Stage 3 scans `plugins/` (the repo-root one in dev; Stage 4+ swaps to the
-//! platform config dir from `directories`) for subdirectories containing a
-//! `manifest.json` and the entry file the manifest names. Each plugin gets
-//! its own [`LoadedPlugin`] (independent JS runtime + context).
+//! Stage 4 prefers the platform plugin dir from `docs/04-platform.md`:
+//!   * macOS: `~/Library/Application Support/high-beam/plugins/`
+//!   * Linux: `$XDG_DATA_HOME/high-beam/plugins/`
 //!
-//! Failures during load are logged to stderr and the bad plugin is skipped —
-//! one syntax error shouldn't take the whole launcher down. Stage 9 routes
-//! these to per-plugin logfiles.
+//! …but if a `./plugins` directory exists next to the binary's cwd, that
+//! wins (dev convenience). A `--plugins-dir <path>` CLI flag overrides
+//! everything for testing. See [`LoaderOptions::resolve`].
+//!
+//! Each plugin gets its own [`LoadedPlugin`] (independent JS runtime +
+//! context), wrapped in `Arc` so the dispatcher can clone the handle into
+//! per-plugin spawned tasks. Failures during load are logged to stderr and
+//! the bad plugin is skipped; one syntax error shouldn't take the whole
+//! launcher down. Stage 9 routes these to per-plugin logfiles.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use directories::ProjectDirs;
 
 use crate::plugins::manifest::Manifest;
 use crate::plugins::runtime::LoadedPlugin;
-
-/// Names of capabilities the host understands today. Anything else is parsed
-/// but logged as a warning at load time. Stage 4 expands this list.
-const KNOWN_CAPABILITIES: &[&str] = &["actions"];
+use crate::sdk::capability::KNOWN_CAPABILITIES;
 
 /// Where to look for plugins.
 #[derive(Debug, Clone)]
@@ -25,23 +30,46 @@ pub struct LoaderOptions {
 }
 
 impl LoaderOptions {
-    /// Default Stage 3 location: `<repo-root>/plugins`.
+    /// Resolve the effective plugin directory.
     ///
-    /// We deliberately use the *current working directory*'s `plugins/`, not
-    /// the platform config dir. Stage 4+ moves this to the proper config dir.
+    /// Priority order:
+    ///   1. `cli_override` from `--plugins-dir <path>` (always wins)
+    ///   2. `./plugins` next to the binary's cwd, if that dir exists
+    ///   3. Platform default from `directories::ProjectDirs` data dir
+    ///
+    /// We don't *create* the platform dir if it's missing — letting the
+    /// directory not exist (and the loader yield zero plugins) is fine,
+    /// and creating it eagerly would litter the user's filesystem with
+    /// empty dirs on a first run that never installs a plugin.
     #[must_use]
-    pub fn dev_default() -> Self {
+    pub fn resolve(cli_override: Option<PathBuf>) -> Self {
+        if let Some(p) = cli_override {
+            return Self { plugins_dir: p };
+        }
+        let dev = PathBuf::from("plugins");
+        if dev.is_dir() {
+            return Self { plugins_dir: dev };
+        }
+        let platform = platform_plugins_dir().unwrap_or_else(|| PathBuf::from("plugins"));
         Self {
-            plugins_dir: PathBuf::from("plugins"),
+            plugins_dir: platform,
         }
     }
+}
+
+/// Platform plugin dir per `docs/04-platform.md`. Returns `None` if
+/// `ProjectDirs` couldn't be resolved (extremely unusual).
+fn platform_plugins_dir() -> Option<PathBuf> {
+    let dirs = ProjectDirs::from("", "", "high-beam")?;
+    Some(dirs.data_dir().join("plugins"))
 }
 
 /// Scan `plugins/` and async-load every valid plugin we find.
 ///
 /// Plugins that fail to load are skipped with a stderr message; the returned
-/// vec only contains plugins ready to handle queries.
-pub async fn load_all(options: &LoaderOptions) -> Vec<LoadedPlugin> {
+/// vec only contains plugins ready to handle queries. Each plugin is wrapped
+/// in `Arc` so the dispatcher can hand clones to per-plugin spawned tasks.
+pub async fn load_all(options: &LoaderOptions) -> Vec<Arc<LoadedPlugin>> {
     let entries = match std::fs::read_dir(&options.plugins_dir) {
         Ok(e) => e,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
@@ -67,7 +95,7 @@ pub async fn load_all(options: &LoaderOptions) -> Vec<LoadedPlugin> {
                     plugin.manifest.name,
                     plugin.manifest.capabilities.len(),
                 );
-                plugins.push(plugin);
+                plugins.push(Arc::new(plugin));
             }
             Err(err) => {
                 eprintln!("plugins: skipping {}: {err}", path.display());
@@ -86,7 +114,7 @@ async fn load_one(plugin_dir: &Path) -> Result<LoadedPlugin, Box<dyn std::error:
     for cap in &manifest.capabilities {
         if !KNOWN_CAPABILITIES.contains(&cap.as_str()) {
             eprintln!(
-                "plugins: {}: ignoring unknown capability {cap:?} (Stage 3 only knows {KNOWN_CAPABILITIES:?})",
+                "plugins: {}: ignoring unknown capability {cap:?} (known: {KNOWN_CAPABILITIES:?})",
                 manifest.name,
             );
         }
@@ -105,13 +133,28 @@ mod tests {
         let opts = LoaderOptions {
             plugins_dir: PathBuf::from("/tmp/high-beam-does-not-exist-xyzzy"),
         };
-        // Drive the future on a small current-thread runtime; we just want to
-        // observe the empty-vec branch.
         let plugins = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("tokio rt")
             .block_on(load_all(&opts));
         assert!(plugins.is_empty());
+    }
+
+    #[test]
+    fn cli_override_wins() {
+        let p = PathBuf::from("/tmp/forced");
+        let opts = LoaderOptions::resolve(Some(p.clone()));
+        assert_eq!(opts.plugins_dir, p);
+    }
+
+    #[test]
+    fn resolve_returns_a_path() {
+        // We can't assert much about the resolved path without messing with
+        // CWD, but it should always produce *some* path the loader can read.
+        let opts = LoaderOptions::resolve(None);
+        // The plugins dir under our control either exists or doesn't —
+        // either way `resolve` should hand us a non-empty PathBuf.
+        assert!(!opts.plugins_dir.as_os_str().is_empty());
     }
 }

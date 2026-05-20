@@ -25,6 +25,7 @@ fn main() -> ExitCode {
     let options = Options {
         open_on_start: args.open,
         socket_path,
+        plugins_dir: args.plugins_dir,
     };
 
     match daemon::run(options) {

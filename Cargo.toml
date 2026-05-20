@@ -34,6 +34,20 @@ rquickjs = { version = "0.11", features = ["loader", "futures", "macro", "parall
 # thread today; we'll revisit when streaming lands in Stage 4.
 tokio = { version = "1", features = ["rt", "macros", "time", "sync"] }
 
+# CancellationToken — the canonical async cancellation primitive in the tokio
+# ecosystem. Stage 4 wires JS-side `AbortSignal` polyfill to a `CancellationToken`
+# so a plugin's `signal` cascades cleanly into in-flight `http.get`/timeouts.
+tokio-util = { version = "0.7", default-features = false, features = ["rt"] }
+
+# Async HTTP for the `highbeam:http` SDK module. `rustls-tls` keeps openssl out
+# of the dep tree; `json` is for the convenience `response.json()` path; no
+# default features so we don't drag in cookies/blocking/etc we don't use.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+
+# Async stream adapters — used by the streaming dispatcher to merge per-plugin
+# result streams into a single ordered stream the renderer consumes.
+futures = { version = "0.3", default-features = false, features = ["std"] }
+
 # Clipboard. `arboard` is the obvious choice — actively maintained, cross-platform
 # (macOS / X11 / Wayland / Windows), and the docs sample line up exactly with our
 # one-shot "set text" use case. `copypasta` is the other contender but ships

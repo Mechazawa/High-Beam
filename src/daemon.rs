@@ -18,6 +18,9 @@ pub struct Options {
     pub open_on_start: bool,
     /// Path to the unix socket we'll bind for single-instance.
     pub socket_path: PathBuf,
+    /// Override for the plugins directory. `None` falls back to
+    /// [`crate::plugins::loader::LoaderOptions::resolve`]'s defaults.
+    pub plugins_dir: Option<PathBuf>,
 }
 
 /// Run the daemon. Blocks until the Slint event loop exits.
@@ -46,7 +49,7 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     // runtime and wires the per-keystroke `query_edited` and `Enter`
     // `invoke_selected` callbacks. We hold onto the handle so it lives as
     // long as the daemon does — `Drop` sends Shutdown to the worker.
-    let _plugin_host = app::start(&window)?;
+    let _plugin_host = app::start(&window, options.plugins_dir.clone())?;
 
     spawn_ipc_listener(&options.socket_path, window.as_weak())?;
 

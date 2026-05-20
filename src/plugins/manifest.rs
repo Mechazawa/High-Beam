@@ -26,6 +26,7 @@ use serde::Deserialize;
 const DEFAULT_ENTRY: &str = "plugin.js";
 const DEFAULT_TIMEOUT_MS: u64 = 500;
 const DEFAULT_MEMORY_MB: u32 = 32;
+const DEFAULT_DEBOUNCE_MS: u64 = 0;
 
 /// Plugin metadata as it appears on disk.
 #[derive(Debug, Clone, Deserialize)]
@@ -44,6 +45,12 @@ pub struct Manifest {
     pub timeout_ms: u64,
     #[serde(default = "default_memory_mb")]
     pub memory_mb: u32,
+    /// Per-plugin debounce in milliseconds — the dispatcher waits this long
+    /// after the latest keystroke before invoking `query()`. `0` (the
+    /// default) dispatches every keystroke immediately. Stage 4 clamps the
+    /// effective value to [`crate::plugins::dispatch::MAX_DEBOUNCE_MS`].
+    #[serde(default = "default_debounce_ms")]
+    pub debounce_ms: u64,
     #[serde(default)]
     pub capabilities: Vec<String>,
 }
@@ -58,6 +65,10 @@ const fn default_timeout_ms() -> u64 {
 
 const fn default_memory_mb() -> u32 {
     DEFAULT_MEMORY_MB
+}
+
+const fn default_debounce_ms() -> u64 {
+    DEFAULT_DEBOUNCE_MS
 }
 
 impl Manifest {
@@ -119,7 +130,15 @@ mod tests {
         assert_eq!(m.entry, "plugin.js");
         assert_eq!(m.timeout_ms, 500);
         assert_eq!(m.memory_mb, 32);
+        assert_eq!(m.debounce_ms, 0);
         assert!(m.capabilities.is_empty());
+    }
+
+    #[test]
+    fn parses_debounce_ms() {
+        let json = br#"{ "name": "slow", "debounceMs": 250 }"#;
+        let m = Manifest::parse(json).expect("parse");
+        assert_eq!(m.debounce_ms, 250);
     }
 
     #[test]
