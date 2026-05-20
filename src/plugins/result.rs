@@ -21,6 +21,12 @@ pub struct PluginResult {
     pub title: String,
     #[serde(default)]
     pub subtitle: Option<String>,
+    /// Optional icon for the row. Plugins should populate this with a
+    /// `data:image/...;base64,...` URI — typically from
+    /// `highbeam:icons.forPath(...)`. Bare filesystem paths are treated as
+    /// missing by the renderer; resolution is the plugin's job.
+    #[serde(default)]
+    pub icon: Option<String>,
     #[serde(default)]
     pub weight: f64,
     #[serde(default)]

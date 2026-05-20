@@ -14,12 +14,18 @@ import { ScrollView } from "std-widgets.slint";
 
 // Wire shape sent across Rust -> Slint for each row. `key` is the composite
 // `<plugin>:<result_key>` so two plugins emitting the same `key` string don't
-// collide and the row keying is stable on re-renders.
+// collide and the row keying is stable on re-renders. `icon` is set by the
+// Rust renderer to either a decoded pixmap or the default (empty) image —
+// Slint structs need fixed types so "no icon" is encoded as the empty image,
+// and the row paints a muted placeholder square in that case to keep title
+// columns aligned across rows.
 export struct ResultRow {
     key: string,
     title: string,
     subtitle: string,    // empty string when absent — Slint structs need fixed types
     has-subtitle: bool,
+    icon: image,
+    has-icon: bool,
 }
 
 export component QueryWindow inherits Window {
@@ -167,24 +173,50 @@ export component QueryWindow inherits Window {
                         }
                         Rectangle {
                             background: idx == root.selected-index ? #0a84ff33 : transparent;
-                            VerticalLayout {
+                            HorizontalLayout {
                                 padding-left: 20px;
                                 padding-right: 20px;
                                 padding-top: 8px;
                                 padding-bottom: 8px;
-                                spacing: 2px;
-                                Text {
-                                    text: row.title;
-                                    color: #1d1d1f;
-                                    font-size: 14px;
-                                    overflow: elide;
+                                spacing: 12px;
+                                alignment: start;
+
+                                // Icon slot — fixed 24x24 regardless of whether the row has an
+                                // icon, so the title column lines up across rows. Image always
+                                // paints (defaults to a transparent empty image); the muted
+                                // outline behind it is what reads as "no icon" when present.
+                                Rectangle {
+                                    width: 24px;
+                                    height: 24px;
+                                    y: (parent.height - self.height) / 2;
+                                    border-radius: 4px;
+                                    border-width: row.has-icon ? 0px : 1px;
+                                    border-color: #86868b40;
+                                    Image {
+                                        x: 0; y: 0;
+                                        width: parent.width;
+                                        height: parent.height;
+                                        source: row.icon;
+                                        image-fit: contain;
+                                    }
                                 }
 
-                                if row.has-subtitle: Text {
-                                    text: row.subtitle;
-                                    color: #86868b;
-                                    font-size: 12px;
-                                    overflow: elide;
+                                VerticalLayout {
+                                    spacing: 2px;
+                                    alignment: center;
+                                    Text {
+                                        text: row.title;
+                                        color: #1d1d1f;
+                                        font-size: 14px;
+                                        overflow: elide;
+                                    }
+
+                                    if row.has-subtitle: Text {
+                                        text: row.subtitle;
+                                        color: #86868b;
+                                        font-size: 12px;
+                                        overflow: elide;
+                                    }
                                 }
                             }
                         }

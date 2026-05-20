@@ -174,6 +174,7 @@ pub(crate) fn query(input: &str) -> Vec<StreamedResult> {
                     key: label.to_owned(),
                     title: label.to_owned(),
                     subtitle: subtitle.map(str::to_owned),
+                    icon: None,
                     weight,
                     pinned: false,
                     action,
