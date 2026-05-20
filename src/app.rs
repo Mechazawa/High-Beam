@@ -23,6 +23,7 @@ use crate::plugins::dispatch::{self, StreamedResult};
 use crate::plugins::loader::{self, LoaderOptions};
 use crate::plugins::result::RankedResult;
 use crate::plugins::runtime::LoadedPlugin;
+use crate::settings::Settings;
 use crate::ui::ResultRow;
 use crate::window;
 
@@ -94,7 +95,8 @@ fn spawn_runtime_thread(
 
             runtime.block_on(async move {
                 let opts = LoaderOptions::resolve(plugins_override);
-                let plugins = loader::load_all(&opts).await;
+                let settings = Settings::load_or_default();
+                let plugins = loader::load_all(&opts, &settings).await;
                 if plugins.is_empty() {
                     tracing::warn!(
                         plugins_dir = %opts.plugins_dir.display(),

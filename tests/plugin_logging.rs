@@ -247,7 +247,8 @@ export async function* query(input, _signal) {
         plugins_dir: scratch_parent.clone(),
     };
     let runtime = rt();
-    let plugins = runtime.block_on(high_beam::plugins::loader::load_all(&opts));
+    let settings = high_beam::settings::Settings::default();
+    let plugins = runtime.block_on(high_beam::plugins::loader::load_all(&opts, &settings));
     assert!(
         plugins.is_empty(),
         "plugin missing the http capability must not load",

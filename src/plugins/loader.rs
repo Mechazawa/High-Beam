@@ -14,6 +14,7 @@ use crate::plugins::log::{LogLevel, PluginLog};
 use crate::plugins::manifest::Manifest;
 use crate::plugins::runtime::LoadedPlugin;
 use crate::sdk::capability::KNOWN_CAPABILITIES;
+use crate::settings::Settings;
 
 /// Where to look for plugins.
 #[derive(Debug, Clone)]
@@ -56,7 +57,11 @@ fn platform_plugins_dir() -> Option<PathBuf> {
 /// Scan `plugins/` and async-load every valid plugin we find. Plugins that
 /// fail to load are skipped with a stderr message; the returned vec only
 /// contains plugins ready to handle queries.
-pub async fn load_all(options: &LoaderOptions) -> Vec<Arc<LoadedPlugin>> {
+///
+/// The default `settings` of [`Settings::default()`] treats every plugin as
+/// enabled, so callers that don't care about user settings can pass it
+/// directly.
+pub async fn load_all(options: &LoaderOptions, settings: &Settings) -> Vec<Arc<LoadedPlugin>> {
     let entries = match std::fs::read_dir(&options.plugins_dir) {
         Ok(e) => e,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
@@ -76,7 +81,7 @@ pub async fn load_all(options: &LoaderOptions) -> Vec<Arc<LoadedPlugin>> {
         if !path.is_dir() {
             continue;
         }
-        match load_one(&path).await {
+        match load_one(&path, settings).await {
             Ok(plugin) => {
                 tracing::info!(
                     plugin = %plugin.manifest.name,
@@ -97,7 +102,7 @@ pub async fn load_all(options: &LoaderOptions) -> Vec<Arc<LoadedPlugin>> {
     plugins
 }
 
-async fn load_one(plugin_dir: &Path) -> Result<LoadedPlugin, LoadError> {
+async fn load_one(plugin_dir: &Path, settings: &Settings) -> Result<LoadedPlugin, LoadError> {
     let manifest_path = plugin_dir.join("manifest.json");
     let bytes = std::fs::read(&manifest_path).map_err(|err| {
         LoadError::Failed(format!("read {}: {err}", manifest_path.display()).into())
@@ -144,6 +149,16 @@ async fn load_one(plugin_dir: &Path) -> Result<LoadedPlugin, LoadError> {
         });
     }
 
+    // User-disabled plugins: same INFO-log shape as the platform gate so the
+    // skip path is consistent. Restart-to-apply for v1 — disabling a plugin
+    // while the daemon is running has no effect until the next launch.
+    if !settings.is_plugin_enabled(&manifest.name) {
+        return Err(LoadError::Skipped {
+            name: manifest.name,
+            reason: "disabled in settings".to_owned(),
+        });
+    }
+
     let cache_dir = crate::plugins::runtime::default_cache_dir(&manifest.name);
     let loaded = LoadedPlugin::load_with_log(plugin_dir, manifest, cache_dir, Arc::clone(&log))
         .await
@@ -175,7 +190,7 @@ mod tests {
             .enable_all()
             .build()
             .expect("tokio rt")
-            .block_on(load_all(&opts));
+            .block_on(load_all(&opts, &Settings::default()));
         assert!(plugins.is_empty());
     }
 
@@ -244,7 +259,7 @@ mod tests {
             .enable_all()
             .build()
             .expect("tokio rt")
-            .block_on(load_all(&opts));
+            .block_on(load_all(&opts, &Settings::default()));
 
         let names: Vec<_> = plugins.iter().map(|p| p.manifest.name.as_str()).collect();
         assert!(
@@ -282,7 +297,7 @@ mod tests {
             .enable_all()
             .build()
             .expect("tokio rt")
-            .block_on(load_all(&opts));
+            .block_on(load_all(&opts, &Settings::default()));
         assert_eq!(plugins.len(), 1, "matching host OS keeps the plugin loaded");
 
         let log_path = root.join("mixed").join("plugin.log");
@@ -295,6 +310,47 @@ mod tests {
         assert!(
             body.contains("haiku"),
             "warning should name the offender: {body}"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn disabled_plugin_is_skipped_by_loader() {
+        let root = fresh_tmp("disabled");
+        write_plugin(
+            &root,
+            "echo",
+            r#"{ "name": "echo", "entry": "plugin.js" }"#,
+            "export async function* query() {}",
+        );
+        write_plugin(
+            &root,
+            "keep",
+            r#"{ "name": "keep", "entry": "plugin.js" }"#,
+            "export async function* query() {}",
+        );
+
+        let mut settings = Settings::default();
+        settings.set_plugin_enabled("echo", false);
+
+        let opts = LoaderOptions {
+            plugins_dir: root.clone(),
+        };
+        let plugins = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio rt")
+            .block_on(load_all(&opts, &settings));
+
+        let names: Vec<_> = plugins.iter().map(|p| p.manifest.name.as_str()).collect();
+        assert!(
+            !names.contains(&"echo"),
+            "echo should be skipped when disabled, got {names:?}",
+        );
+        assert!(
+            names.contains(&"keep"),
+            "keep should still load, got {names:?}",
         );
 
         let _ = std::fs::remove_dir_all(&root);
@@ -317,7 +373,7 @@ mod tests {
             .enable_all()
             .build()
             .expect("tokio rt")
-            .block_on(load_all(&opts));
+            .block_on(load_all(&opts, &Settings::default()));
 
         assert!(
             plugins.is_empty(),
