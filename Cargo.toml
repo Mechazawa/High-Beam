@@ -1,0 +1,13 @@
+[package]
+name = "high-beam"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[[bin]]
+name = "high-beam"
+path = "src/main.rs"
+
+[lib]
+name = "high_beam"
+path = "src/lib.rs"
