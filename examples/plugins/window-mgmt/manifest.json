@@ -1,0 +1,10 @@
+{
+    "name": "window-mgmt",
+    "displayName": "Window Management",
+    "version": "0.1.0",
+    "description": "Snap the frontmost window — `left half`, `maximize`, `center`, etc.",
+    "timeoutMs": 1000,
+    "memoryMb": 16,
+    "platforms": ["macos"],
+    "capabilities": ["actions"]
+}
