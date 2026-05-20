@@ -1,0 +1,66 @@
+// Stage 2 placeholder query window. Stage 3 replaces the single TextInput with
+// the real input + result rows layout. Tokens here are hard-coded; theming
+// (Stage 8) will bind them to runtime properties from theme.toml.
+
+export component QueryWindow inherits Window {
+    title: "High Beam";
+    no-frame: true;
+    always-on-top: true;
+    background: transparent;
+    default-font-size: 18px;
+
+    in-out property <string> query-text;
+    callback query-edited(string);
+    callback escape-pressed();
+
+    public function focus-input() {
+        input.focus();
+    }
+
+    width: 760px;
+    height: 80px;
+
+    // Translucent rounded panel sits inside a transparent window so the corner
+    // radius reads cleanly on the desktop.
+    Rectangle {
+        background: #ffffffea;
+        border-radius: 14px;
+        border-width: 1px;
+        border-color: #00000010;
+
+        input := TextInput {
+            x: 20px;
+            y: (parent.height - self.height) / 2;
+            width: parent.width - 40px;
+            font-size: 32px;
+            color: #1d1d1f;
+            single-line: true;
+            text: root.query-text;
+            // Placeholder text rendered behind the input when empty.
+            // TextInput has no native placeholder; emulate with a sibling Text.
+
+            edited => {
+                root.query-text = self.text;
+                root.query-edited(self.text);
+            }
+
+            key-pressed(event) => {
+                if (event.text == Key.Escape) {
+                    root.escape-pressed();
+                    return accept;
+                }
+                reject
+            }
+        }
+
+        // Faux placeholder: only visible when the input is empty.
+        Text {
+            x: 20px;
+            y: (parent.height - self.height) / 2;
+            text: "Query…";
+            font-size: 32px;
+            color: #86868b;
+            visible: root.query-text == "";
+        }
+    }
+}

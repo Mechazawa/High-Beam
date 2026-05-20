@@ -3,6 +3,23 @@ name = "high-beam"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+build = "build.rs"
+
+[dependencies]
+# UI toolkit; unstable-winit-030 gives us focus/blur events and winit window access
+# for setting native window properties not exposed via .slint markup.
+slint = { version = "1.16", features = ["unstable-winit-030"] }
+clap = { version = "4", features = ["derive"] }
+directories = "6"
+
+# macOS-only: global hotkey registration via the Tauri global-hotkey crate.
+# reason: only Rust crate that actually works on modern macOS for app-level
+# global hotkeys without an Accessibility prompt; Linux is punted to the WM.
+[target.'cfg(target_os = "macos")'.dependencies]
+global-hotkey = "0.8"
+
+[build-dependencies]
+slint-build = "1.16"
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }

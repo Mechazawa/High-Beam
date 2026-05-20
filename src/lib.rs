@@ -1,14 +1,15 @@
-#[must_use]
-pub fn placeholder() -> &'static str {
-    "high-beam"
-}
+//! High Beam — native Rust keyboard launcher.
+//!
+//! See `docs/` for the design notes. The crate is split into a binary front
+//! door (`main.rs`) and these modules so they can be unit-tested without
+//! standing up the whole daemon.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub mod cli;
+pub mod daemon;
+pub mod ipc;
+pub mod paths;
+pub mod window;
 
-    #[test]
-    fn placeholder_returns_crate_name() {
-        assert_eq!(placeholder(), "high-beam");
-    }
-}
+// Pull the Slint-generated component types into scope so other modules can
+// refer to them as `crate::QueryWindow` without re-running the macro.
+slint::include_modules!();
