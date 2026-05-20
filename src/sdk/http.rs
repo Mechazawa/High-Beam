@@ -23,7 +23,7 @@ fn client() -> &'static Client {
     static CLIENT: OnceLock<Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
         Client::builder()
-            .user_agent("high-beam/0.1")
+            .user_agent(concat!("high-beam/", env!("CARGO_PKG_VERSION")))
             .timeout(DEFAULT_TIMEOUT)
             // Default is on; spelled out for auditability.
             .redirect(reqwest::redirect::Policy::limited(10))
@@ -273,5 +273,14 @@ mod tests {
         let a: *const Client = client();
         let b: *const Client = client();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn user_agent_tracks_crate_version() {
+        // The literal lives at the builder; check it's wired through the
+        // `concat!` form (compile-time, no allocation).
+        let expected: &'static str = concat!("high-beam/", env!("CARGO_PKG_VERSION"));
+        assert!(expected.starts_with("high-beam/"));
+        assert_eq!(expected, format!("high-beam/{}", env!("CARGO_PKG_VERSION")));
     }
 }
