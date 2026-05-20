@@ -63,14 +63,9 @@ pub async fn load_all(options: &LoaderOptions) -> Vec<LoadedPlugin> {
         match load_one(&path).await {
             Ok(plugin) => {
                 eprintln!(
-                    "plugins: loaded {} ({} cap{})",
+                    "plugins: loaded {} ({} caps)",
                     plugin.manifest.name,
                     plugin.manifest.capabilities.len(),
-                    if plugin.manifest.capabilities.len() == 1 {
-                        ""
-                    } else {
-                        "s"
-                    },
                 );
                 plugins.push(plugin);
             }

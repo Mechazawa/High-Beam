@@ -32,15 +32,20 @@ use crate::sdk::actions::ActionsModule;
 
 const HIGHBEAM_SCHEME: &str = "highbeam:";
 const ACTIONS_MODULE: &str = "highbeam:actions";
+/// Slot on `globalThis` where we stash the plugin's `query` export at load
+/// time. Re-importing the plugin module inside `run_query` would require a
+/// `Module<'js>` reference that can't survive the `.await` on each iteration
+/// step; `Persistent<Function<'static>>` would be cleaner but is `!Send`
+/// under the `parallel` feature so it can't cross the `async_with!` boundary.
+/// Keep the name unusual so plugin code can't accidentally collide.
+const QUERY_GLOBAL: &str = "__highbeam_query";
 
 /// A loaded, evaluated plugin ready to handle queries.
+///
+/// `AsyncContext` keeps the underlying `AsyncRuntime` alive via its own
+/// internal `Arc`, so we only hold the context here.
 pub struct LoadedPlugin {
     pub manifest: Manifest,
-    // Stored to anchor the runtime's lifetime to the plugin's. `AsyncContext`
-    // holds an internal `Arc` to its runtime so this field isn't strictly
-    // required for correctness, but keeping it explicit reads better and
-    // future-proofs against rquickjs internals changing.
-    _runtime: AsyncRuntime,
     context: AsyncContext,
     timeout: Duration,
     // Held to keep the interrupt flag alive for the runtime's lifetime; the
@@ -121,7 +126,7 @@ impl LoadedPlugin {
             .await;
 
         let resolver = HighbeamResolver;
-        let loader = HighbeamLoader::new(manifest.has_capability("actions"));
+        let loader = HighbeamLoader::new(manifest.capabilities.clone());
         runtime.set_loader(resolver, loader).await;
 
         let context = AsyncContext::full(&runtime)
@@ -129,12 +134,12 @@ impl LoadedPlugin {
             .map_err(|err| PluginError::Js(err.to_string()))?;
 
         // Evaluate the entry module. We name it `plugin:main` so error
-        // backtraces print something sensible. The `evaluate_main_module`
-        // pattern (declare + eval) lets us await the eval-promise so
-        // top-level imports finish before we look up `query`.
+        // backtraces print something sensible. The declare + eval split lets
+        // us await the eval-promise so top-level imports (e.g.
+        // `import 'highbeam:actions'`) finish before we look up `query`.
         let entry_path_str = entry_path.display().to_string();
         let source_bytes = source.into_bytes();
-        let outcome: Result<(), PluginError> = async_with!(context => |ctx| {
+        async_with!(context => |ctx| {
             let declared = Module::declare(ctx.clone(), "plugin:main", source_bytes)
                 .catch(&ctx)
                 .map_err(|err| PluginError::Js(format!("declare {entry_path_str}: {err}")))?;
@@ -142,36 +147,26 @@ impl LoadedPlugin {
                 .eval()
                 .catch(&ctx)
                 .map_err(|err| PluginError::Js(format!("eval {entry_path_str}: {err}")))?;
-            // Await the module's evaluation promise so top-level awaits and
-            // host module loads (e.g. `import 'highbeam:actions'`) complete
-            // before we look up `query`.
             eval_promise
                 .into_future::<()>()
                 .await
                 .catch(&ctx)
                 .map_err(|err| PluginError::Js(format!("await eval {entry_path_str}: {err}")))?;
-            // Hoist the `query` export onto `globalThis` so `run_query` can
-            // grab it without re-importing (re-importing across awaits fights
-            // the borrow checker on the rquickjs `Module` lifetime). The name
-            // is intentionally weird to avoid clashing with anything user
-            // code might do on its own globals.
             let query: Function<'_> = module
                 .get("query")
                 .catch(&ctx)
                 .map_err(|err| PluginError::Js(format!("missing `query` export: {err}")))?;
             ctx.globals()
-                .set("__highbeam_query", query)
+                .set(QUERY_GLOBAL, query)
                 .catch(&ctx)
                 .map_err(|err| PluginError::Js(format!("stash query global: {err}")))?;
-            Ok(())
+            Ok::<_, PluginError>(())
         })
-        .await;
-        outcome?;
+        .await?;
 
         let timeout = Duration::from_millis(manifest.timeout_ms);
         Ok(Self {
             manifest,
-            _runtime: runtime,
             context,
             timeout,
             interrupt_flag,
@@ -230,45 +225,30 @@ async fn collect_query_results<'js>(
     ctx: Ctx<'js>,
     input: &str,
 ) -> Result<Vec<PluginResult>, PluginError> {
-    // Grab the `query` function we hoisted onto globalThis during load. We
-    // can't re-import the plugin module inside this closure cleanly because
-    // the `Module<'js>` borrow can't survive the `.await` on the next-step
-    // promise; the global stash side-steps that.
     let query: Function<'js> = ctx
         .globals()
-        .get("__highbeam_query")
+        .get(QUERY_GLOBAL)
         .catch(&ctx)
         .map_err(|err| PluginError::Js(format!("`query` is not callable: {err}")))?;
 
-    // Build a stub `AbortSignal` so plugin authors writing for Stage 4+ don't
-    // crash on Stage 3. Just enough surface to read `aborted` and call
-    // `addEventListener(…)` without exploding.
-    let signal = Object::new(ctx.clone())
+    // Resolve `JSON.stringify` once and reuse for every yielded result;
+    // calling `eval("JSON.stringify")` per-result was needless hot-path work.
+    let stringify: Function<'js> = ctx
+        .globals()
+        .get::<_, Object<'js>>("JSON")
         .catch(&ctx)
-        .map_err(|err| PluginError::Js(format!("build signal stub: {err}")))?;
-    signal
-        .set("aborted", false)
+        .map_err(|err| PluginError::Js(format!("resolve JSON global: {err}")))?
+        .get("stringify")
         .catch(&ctx)
-        .map_err(|err| PluginError::Js(format!("set signal.aborted: {err}")))?;
-    let noop = Function::new(ctx.clone(), || {})
-        .catch(&ctx)
-        .map_err(|err| PluginError::Js(format!("build signal noop: {err}")))?;
-    signal
-        .set("addEventListener", noop.clone())
-        .catch(&ctx)
-        .map_err(|err| PluginError::Js(format!("set signal.addEventListener: {err}")))?;
-    signal
-        .set("removeEventListener", noop)
-        .catch(&ctx)
-        .map_err(|err| PluginError::Js(format!("set signal.removeEventListener: {err}")))?;
+        .map_err(|err| PluginError::Js(format!("resolve JSON.stringify: {err}")))?;
 
+    let signal = build_signal_stub(&ctx)?;
     let input_js = input
         .into_js(&ctx)
         .catch(&ctx)
         .map_err(|err| PluginError::Js(format!("convert input: {err}")))?;
-    let signal_value: Value<'js> = signal.into_value();
     let iter_or_iterable: Value<'js> = query
-        .call((input_js, signal_value))
+        .call((input_js, signal.into_value()))
         .catch(&ctx)
         .map_err(|err| PluginError::Js(format!("call query(): {err}")))?;
 
@@ -308,12 +288,41 @@ async fn collect_query_results<'js>(
             .get("value")
             .catch(&ctx)
             .map_err(|err| PluginError::Js(format!("read step.value: {err}")))?;
-        let json_str = value_to_json(&ctx, &value)?;
+        let json_str: String = stringify
+            .call((value,))
+            .catch(&ctx)
+            .map_err(|err| PluginError::Js(format!("JSON.stringify yielded value: {err}")))?;
         let parsed: PluginResult = serde_json::from_str(&json_str)
             .map_err(|err| PluginError::InvalidResult(format!("{err}: {json_str}")))?;
         results.push(parsed);
     }
     Ok(results)
+}
+
+/// Build a minimal `AbortSignal`-shaped stub so plugin authors writing for
+/// Stage 4+ don't crash on Stage 3. Just enough surface to read `aborted`
+/// and call `addEventListener(…)` / `removeEventListener(…)` without
+/// exploding.
+fn build_signal_stub<'js>(ctx: &Ctx<'js>) -> Result<Object<'js>, PluginError> {
+    let signal = Object::new(ctx.clone())
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("build signal stub: {err}")))?;
+    signal
+        .set("aborted", false)
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("set signal.aborted: {err}")))?;
+    let noop = Function::new(ctx.clone(), || {})
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("build signal noop: {err}")))?;
+    signal
+        .set("addEventListener", noop.clone())
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("set signal.addEventListener: {err}")))?;
+    signal
+        .set("removeEventListener", noop)
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("set signal.removeEventListener: {err}")))?;
+    Ok(signal)
 }
 
 /// If the value is already an async iterator (has `next`), return it as-is.
@@ -349,22 +358,6 @@ fn normalize_async_iterator<'js>(
     Ok(iter)
 }
 
-fn value_to_json<'js>(ctx: &Ctx<'js>, value: &Value<'js>) -> Result<String, PluginError> {
-    // Round-trip through the JS-side `JSON.stringify` instead of writing a
-    // bespoke Value -> serde_json::Value walker. QuickJS's stringify already
-    // handles every edge case (nested objects, escaping, etc.).
-    let stringify: Function<'js> = ctx
-        .clone()
-        .eval::<Function<'js>, _>("JSON.stringify")
-        .catch(ctx)
-        .map_err(|err| PluginError::Js(format!("resolve JSON.stringify: {err}")))?;
-    let s: String = stringify
-        .call((value.clone(),))
-        .catch(ctx)
-        .map_err(|err| PluginError::Js(format!("JSON.stringify: {err}")))?;
-    Ok(s)
-}
-
 /// Resolves `highbeam:*` specifiers; rejects everything else.
 struct HighbeamResolver;
 
@@ -384,20 +377,27 @@ impl Resolver for HighbeamResolver {
 }
 
 /// Loads exactly the `highbeam:*` modules the plugin's capabilities permit.
+///
+/// Stage 4 will register additional modules (`http`, `clipboard`, …); each
+/// arm in `load` keys off the matching capability string.
 struct HighbeamLoader {
-    actions_enabled: bool,
+    capabilities: Vec<String>,
 }
 
 impl HighbeamLoader {
-    const fn new(actions_enabled: bool) -> Self {
-        Self { actions_enabled }
+    fn new(capabilities: Vec<String>) -> Self {
+        Self { capabilities }
+    }
+
+    fn has(&self, cap: &str) -> bool {
+        self.capabilities.iter().any(|c| c == cap)
     }
 }
 
 impl Loader for HighbeamLoader {
     fn load<'js>(&mut self, ctx: &Ctx<'js>, name: &str) -> Result<Module<'js>, JsError> {
         match name {
-            ACTIONS_MODULE if self.actions_enabled => {
+            ACTIONS_MODULE if self.has("actions") => {
                 Module::declare_def::<ActionsModule, _>(ctx.clone(), name)
             }
             ACTIONS_MODULE => Err(JsError::new_loading_message(
