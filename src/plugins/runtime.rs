@@ -192,6 +192,7 @@ impl LoadedPlugin {
         let entry_path_str = entry_path.display().to_string();
         let source_bytes = source.into_bytes();
         let plugin_caps = manifest.capabilities.clone();
+        let plugin_dir_owned = plugin_dir.to_path_buf();
         async_with!(context => |ctx| {
             // Install the JS-side AbortController polyfill so plugins can do
             // `new AbortController()` for their own cancellation flows.
@@ -220,9 +221,15 @@ impl LoadedPlugin {
 
             let can_fs_read = plugin_caps.iter().any(|c| c == "fs.read");
             let can_fs_cache = plugin_caps.iter().any(|c| c == "fs.cache");
-            fs::install(&ctx, can_fs_read, can_fs_cache, cache_dir.clone())
-                .catch(&ctx)
-                .map_err(|err| PluginError::Js(format!("install fs: {err}")))?;
+            fs::install(
+                &ctx,
+                can_fs_read,
+                can_fs_cache,
+                cache_dir.clone(),
+                plugin_dir_owned.clone(),
+            )
+            .catch(&ctx)
+            .map_err(|err| PluginError::Js(format!("install fs: {err}")))?;
 
             let can_icons = plugin_caps.iter().any(|c| c == "icons");
             icons::install(&ctx, can_icons)

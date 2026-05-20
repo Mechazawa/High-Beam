@@ -54,8 +54,9 @@ async fn run_script(can_read: bool, can_cache: bool, cache_dir: PathBuf, src: Ve
     let async_rt = AsyncRuntime::new().expect("rt");
     async_rt.set_loader(OnlyFs, OnlyFs).await;
     let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
+    let plugin_dir = std::env::temp_dir();
     async_with!(ctx => |ctx| {
-        install(&ctx, can_read, can_cache, cache_dir).catch(&ctx).expect("install");
+        install(&ctx, can_read, can_cache, cache_dir, plugin_dir).catch(&ctx).expect("install");
         let declared = Module::declare(ctx.clone(), "test:harness", src)
             .catch(&ctx).expect("declare");
         let (_m, eval) = declared.eval().catch(&ctx).expect("eval");

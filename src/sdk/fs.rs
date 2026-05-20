@@ -93,9 +93,13 @@ pub fn install<'js>(
     can_read: bool,
     can_cache: bool,
     cache_dir: PathBuf,
+    plugin_dir: PathBuf,
 ) -> JsResult<()> {
     let cache_dir_for_read = cache_dir.clone();
     let cache_dir_for_write = cache_dir;
+    let plugin_dir_for_dir = plugin_dir.clone();
+    let plugin_dir_for_file = plugin_dir.clone();
+    let plugin_dir_for_text = plugin_dir;
 
     let read_dir = Function::new(
         ctx.clone(),
@@ -104,34 +108,39 @@ pub fn install<'js>(
                 return Err(throw_cap(&ctx, "fs.read"));
             }
             let opts_val = opts.0.unwrap_or_else(|| Value::new_undefined(ctx.clone()));
-            build_dir_async_iterator(&ctx, &path, &opts_val)
+            let resolved = resolve_plugin_path(&plugin_dir_for_dir, &path);
+            build_dir_async_iterator(&ctx, &resolved, &opts_val)
         },
     )?;
 
     let read_file = Function::new(
         ctx.clone(),
-        Async(
-            move |ctx: Ctx<'js>, path: String, opts: Opt<Value<'js>>| async move {
+        Async(move |ctx: Ctx<'js>, path: String, opts: Opt<Value<'js>>| {
+            let dir = plugin_dir_for_file.clone();
+            async move {
                 if !can_read {
                     return Err::<TypedArray<'js, u8>, _>(throw_cap(&ctx, "fs.read"));
                 }
                 let opts_val = opts.0.unwrap_or_else(|| Value::new_undefined(ctx.clone()));
-                read_file_impl(ctx, path, opts_val).await
-            },
-        ),
+                let resolved = resolve_plugin_path(&dir, &path);
+                read_file_impl(ctx, resolved, opts_val).await
+            }
+        }),
     )?;
 
     let read_text = Function::new(
         ctx.clone(),
-        Async(
-            move |ctx: Ctx<'js>, path: String, opts: Opt<Value<'js>>| async move {
+        Async(move |ctx: Ctx<'js>, path: String, opts: Opt<Value<'js>>| {
+            let dir = plugin_dir_for_text.clone();
+            async move {
                 if !can_read {
                     return Err::<String, _>(throw_cap(&ctx, "fs.read"));
                 }
                 let opts_val = opts.0.unwrap_or_else(|| Value::new_undefined(ctx.clone()));
-                read_text_impl(ctx, path, opts_val).await
-            },
-        ),
+                let resolved = resolve_plugin_path(&dir, &path);
+                read_text_impl(ctx, resolved, opts_val).await
+            }
+        }),
     )?;
 
     let read_cache = Function::new(
@@ -194,7 +203,7 @@ fn readdir_iterator_js() -> &'static str {
 
 fn build_dir_async_iterator<'js>(
     ctx: &Ctx<'js>,
-    path: &str,
+    path: &Path,
     opts: &Value<'js>,
 ) -> JsResult<Object<'js>> {
     let recursive = opts
@@ -209,7 +218,7 @@ fn build_dir_async_iterator<'js>(
 
     // The walker stack: each entry is a directory we still need to read.
     let walker = std::sync::Arc::new(std::sync::Mutex::new(DirWalker::new(
-        PathBuf::from(path),
+        path.to_path_buf(),
         recursive,
     )));
 
@@ -323,7 +332,7 @@ impl DirEntryOut {
 
 async fn read_file_impl<'js>(
     ctx: Ctx<'js>,
-    path: String,
+    path: PathBuf,
     opts: Value<'js>,
 ) -> JsResult<TypedArray<'js, u8>> {
     let token = signal_to_token(&ctx, &opts)?;
@@ -338,7 +347,7 @@ async fn read_file_impl<'js>(
     TypedArray::new(ctx, bytes)
 }
 
-async fn read_text_impl<'js>(ctx: Ctx<'js>, path: String, opts: Value<'js>) -> JsResult<String> {
+async fn read_text_impl<'js>(ctx: Ctx<'js>, path: PathBuf, opts: Value<'js>) -> JsResult<String> {
     let token = signal_to_token(&ctx, &opts)?;
     let s = tokio::select! {
         biased;
@@ -349,6 +358,19 @@ async fn read_text_impl<'js>(ctx: Ctx<'js>, path: String, opts: Value<'js>) -> J
         }
     };
     Ok(s)
+}
+
+/// Resolve a JS-side path against the plugin's directory: absolute paths pass
+/// through, relative paths are joined onto the plugin dir. Plugins that
+/// `readText('./bundled.json')` get the file alongside their `plugin.js`
+/// regardless of the daemon's cwd.
+fn resolve_plugin_path(plugin_dir: &Path, path: &str) -> PathBuf {
+    let p = Path::new(path);
+    if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        plugin_dir.join(p)
+    }
 }
 
 async fn read_cache_impl(ctx: Ctx<'_>, name: String, cache_dir: PathBuf) -> JsResult<Value<'_>> {
