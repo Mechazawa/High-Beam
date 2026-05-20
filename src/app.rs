@@ -132,8 +132,8 @@ fn spawn_runtime_thread(
                             if let Some(prev) = current_cancel.take() {
                                 prev.cancel();
                             }
-                            // Eager per-query snapshot (Stage 5 architecture A):
-                            // simple, one source of truth, fast enough.
+                            // Eager per-query snapshot: one source of truth for
+                            // this query's ranking, fast enough at our row scale.
                             let snapshot = frecency_db.as_ref().map(FrecencyDb::snapshot);
                             let cancel = handle_query(
                                 id,
@@ -274,7 +274,7 @@ fn handle_query(
     weak: slint::Weak<QueryWindow>,
     latest: Arc<Mutex<Vec<RankedResult>>>,
     latest_id: Arc<AtomicU64>,
-    frecency_snapshot: Option<crate::frecency::Snapshot>,
+    frecency_snapshot: Option<frecency::Snapshot>,
 ) -> CancellationToken {
     let cancel = CancellationToken::new();
 

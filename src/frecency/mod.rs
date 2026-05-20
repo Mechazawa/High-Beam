@@ -8,8 +8,11 @@
 //! See `docs/01-architecture.md` (frecency section) for the design and
 //! `docs/06-stages.md` (Stage 5) for the spec.
 
-pub mod db;
-pub mod score;
+mod db;
+mod score;
 
-pub use db::{FrecencyDb, PickRow, Snapshot, default_db_path, now_seconds};
-pub use score::frecency_modifier;
+pub(crate) use db::{FrecencyDb, Snapshot, default_db_path, now_seconds};
+pub(crate) use score::frecency_modifier;
+
+#[cfg(test)]
+pub(crate) use db::PickRow;

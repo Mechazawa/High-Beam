@@ -116,8 +116,7 @@ pub(crate) fn merge_into_live(
     *next_order += 1;
     live.push(entry);
     // With nine rows max this is trivially cheap; accepting the per-yield
-    // cost saves us a priority structure and matches the merge_into_live
-    // contract from Stage 4.
+    // sort saves us a priority structure.
     live.sort_by(|a, b| {
         b.result
             .pinned

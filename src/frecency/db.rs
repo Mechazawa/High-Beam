@@ -18,6 +18,9 @@ use rusqlite::{Connection, params};
 
 use crate::paths::ensure_parent_dir;
 
+// The composite PRIMARY KEY already generates an implicit unique index on
+// (plugin_name, result_key); SQLite uses it for both lookups and upserts.
+// No additional index is needed.
 const SCHEMA_SQL: &str = "\
 CREATE TABLE IF NOT EXISTS picks (
     plugin_name      TEXT    NOT NULL,
@@ -26,23 +29,22 @@ CREATE TABLE IF NOT EXISTS picks (
     last_picked_at   INTEGER NOT NULL,
     PRIMARY KEY (plugin_name, result_key)
 );
-CREATE INDEX IF NOT EXISTS idx_picks_lookup ON picks (plugin_name, result_key);
 ";
 
 /// One row's worth of pick history. Plain tuple in the snapshot map.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PickRow {
-    pub picks: u32,
-    pub last_picked_at: i64,
+pub(crate) struct PickRow {
+    pub(crate) picks: u32,
+    pub(crate) last_picked_at: i64,
 }
 
 /// Composite key used by both the schema and the snapshot map.
-pub type ResultId = (String, String);
+type ResultId = (String, String);
 
 /// Owned handle to the frecency database. `Arc<Mutex>` is enough — picks
 /// happen at most a few times per second from one thread.
 #[derive(Clone)]
-pub struct FrecencyDb {
+pub(crate) struct FrecencyDb {
     inner: Arc<Mutex<Connection>>,
 }
 
@@ -55,7 +57,7 @@ impl FrecencyDb {
     /// Returns an error if the file/parent can't be created or `SQLite` can't
     /// open or initialize the schema. Callers are expected to treat a failure
     /// as "continue without frecency" rather than aborting the daemon.
-    pub fn open(path: &Path) -> rusqlite::Result<Self> {
+    pub(crate) fn open(path: &Path) -> rusqlite::Result<Self> {
         ensure_parent_dir(path).map_err(|err| {
             rusqlite::Error::SqliteFailure(
                 rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
@@ -75,7 +77,7 @@ impl FrecencyDb {
     ///
     /// Returns the same SQL error set as [`Self::open`].
     #[cfg(test)]
-    pub fn open_in_memory() -> rusqlite::Result<Self> {
+    pub(crate) fn open_in_memory() -> rusqlite::Result<Self> {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch(SCHEMA_SQL)?;
         Ok(Self {
@@ -91,7 +93,7 @@ impl FrecencyDb {
     /// On any SQL/lock failure we log and return an empty map so the daemon
     /// stays functional with default ranking.
     #[must_use]
-    pub fn snapshot(&self) -> Snapshot {
+    pub(crate) fn snapshot(&self) -> Snapshot {
         let guard = match self.inner.lock() {
             Ok(g) => g,
             Err(err) => {
@@ -145,7 +147,7 @@ impl FrecencyDb {
     /// # Errors
     ///
     /// Returns a SQL error if the upsert can't run (locked db, etc.).
-    pub fn bump_with_now(
+    pub(crate) fn bump_with_now(
         &self,
         plugin_name: &str,
         result_key: &str,
@@ -170,7 +172,7 @@ impl FrecencyDb {
     /// # Errors
     ///
     /// Returns the same SQL error set as [`Self::bump_with_now`].
-    pub fn bump(&self, plugin_name: &str, result_key: &str) -> rusqlite::Result<()> {
+    pub(crate) fn bump(&self, plugin_name: &str, result_key: &str) -> rusqlite::Result<()> {
         self.bump_with_now(plugin_name, result_key, now_seconds())
     }
 
@@ -198,7 +200,7 @@ impl FrecencyDb {
 /// Wall-clock seconds since Unix epoch. Saturates to 0 on (impossible) pre-epoch
 /// system clocks rather than panicking.
 #[must_use]
-pub fn now_seconds() -> i64 {
+pub(crate) fn now_seconds() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
@@ -209,7 +211,7 @@ pub fn now_seconds() -> i64 {
 /// Holds an owned `HashMap` rather than a `&` into the DB so the dispatcher
 /// can pass it around without juggling lifetimes.
 #[derive(Debug, Default, Clone)]
-pub struct Snapshot {
+pub(crate) struct Snapshot {
     picks: HashMap<ResultId, PickRow>,
 }
 
@@ -217,7 +219,7 @@ impl Snapshot {
     /// Look up a `(plugin, key)` pair. Returns `None` when the result has
     /// never been picked (the caller treats that as "no bonus").
     #[must_use]
-    pub fn get(&self, plugin_name: &str, result_key: &str) -> Option<PickRow> {
+    pub(crate) fn get(&self, plugin_name: &str, result_key: &str) -> Option<PickRow> {
         self.picks
             .get(&(plugin_name.to_owned(), result_key.to_owned()))
             .copied()
@@ -227,7 +229,7 @@ impl Snapshot {
     /// stand up a `Connection`.
     #[cfg(test)]
     #[must_use]
-    pub fn from_rows(rows: Vec<(String, String, PickRow)>) -> Self {
+    pub(crate) fn from_rows(rows: Vec<(String, String, PickRow)>) -> Self {
         let picks = rows.into_iter().map(|(p, k, r)| ((p, k), r)).collect();
         Self { picks }
     }
@@ -236,7 +238,7 @@ impl Snapshot {
 /// Resolve the on-disk path for the frecency DB. Mirrors the layout in
 /// `docs/04-platform.md`. Returns `None` if `ProjectDirs` won't resolve.
 #[must_use]
-pub fn default_db_path() -> Option<PathBuf> {
+pub(crate) fn default_db_path() -> Option<PathBuf> {
     let dirs = directories::ProjectDirs::from("", "", "high-beam")?;
     Some(dirs.data_dir().join("frecency.sqlite"))
 }

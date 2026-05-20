@@ -34,7 +34,7 @@ const PICKS_BONUS_PER_PICK: f64 = 0.10;
 /// for `(plugin_name, result_key)` the caller passes `picks = 0`, which
 /// makes the modifier exactly 1.0.
 #[must_use]
-pub fn frecency_modifier(picks: u32, age_seconds: i64) -> f64 {
+pub(crate) fn frecency_modifier(picks: u32, age_seconds: i64) -> f64 {
     if picks == 0 {
         return 1.0;
     }
@@ -42,7 +42,6 @@ pub fn frecency_modifier(picks: u32, age_seconds: i64) -> f64 {
     // (i32 → f64 is lossless). Ages > ~68 years saturate to ~68 years,
     // which is well past the point where decay → 0 anyway.
     let clamped = age_seconds.max(0).min(i64::from(i32::MAX));
-    // SAFETY: clamped is in [0, i32::MAX] so the conversion is lossless.
     let age = f64::from(i32::try_from(clamped).unwrap_or(i32::MAX));
     let decay = 2.0_f64.powf(-age / HALF_LIFE_SECONDS);
     1.0 + PICKS_BONUS_PER_PICK * f64::from(picks) * decay
