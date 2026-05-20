@@ -172,6 +172,52 @@ export async function* query(_input, _signal) {
 }
 
 #[test]
+fn tight_sync_loop_still_hits_timeout() {
+    // Regression: a `while(true){}` body never yields, so a tokio-scheduled
+    // watchdog on the same executor never wakes. The watchdog now runs on
+    // the blocking pool; this proves the deadline still fires.
+    let dir = unique_tmp_dir("tight-loop");
+    write_plugin(
+        &dir,
+        r#"{"name":"tightloop","entry":"plugin.js","timeoutMs":50,"capabilities":[]}"#,
+        r#"
+export async function* query(_input, _signal) {
+    while (true) {}
+    yield { key: "never", title: "unreachable", action: { kind: "copy", text: "" } };
+}
+"#,
+    );
+    let manifest = Manifest::parse(&fs::read(dir.join("manifest.json")).unwrap()).unwrap();
+    let runtime = rt();
+    let start = std::time::Instant::now();
+    runtime.block_on(async {
+        let plugin = LoadedPlugin::load(&dir, manifest).await.expect("load");
+        let mut rx = plugin.run_query_stream("spin", CancellationToken::new());
+        // 500ms cap is generous; budget is 50ms. If the watchdog can't
+        // interrupt the tight loop this hangs forever.
+        tokio::time::timeout(Duration::from_millis(500), drain(&mut rx))
+            .await
+            .expect("plugin should be killed within the test budget");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    });
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed < Duration::from_millis(500),
+        "plugin took {elapsed:?} to die — watchdog did not interrupt the tight loop",
+    );
+
+    let body = read_log(&dir);
+    assert_well_formed_lines(&body);
+    assert!(
+        body.contains("[WARN ] query timed out"),
+        "expected timeout warning, got:\n{body}",
+    );
+    assert!(body.contains("50ms"), "expected budget echo, got:\n{body}");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn capability_violation_at_load_writes_to_plugin_log() {
     // Plugin imports `highbeam:http` without declaring `http`. The loader
     // must reject AND write the failure into plugin.log so users can debug.

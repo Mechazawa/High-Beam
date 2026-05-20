@@ -306,19 +306,24 @@ impl LoadedPlugin {
         let timed_out_for_timer = Arc::clone(&timed_out);
 
         let cancel_for_timer = cancel.clone();
-        tokio::spawn(async move {
-            tokio::select! {
-                () = tokio::time::sleep(timeout) => {
-                    timed_out_for_timer.store(true, Ordering::Relaxed);
+        // Interrupting tight JS loops requires a thread off the executor: if
+        // the watchdog rode the tokio scheduler, a plugin spinning on
+        // `while(true){}` would starve it forever. `spawn_blocking` parks on
+        // the dedicated blocking pool so the deadline always fires.
+        tokio::task::spawn_blocking(move || {
+            const TICK: Duration = Duration::from_millis(10);
+            let start = std::time::Instant::now();
+            while start.elapsed() < timeout {
+                if cancel_for_timer.is_cancelled() {
                     flag_for_timer.store(true, Ordering::Relaxed);
-                    cancel_for_timer.cancel();
+                    return;
                 }
-                () = cancel_for_timer.cancelled() => {
-                    // Caller cancelled — still flip the interrupt flag so
-                    // blocking CPU loops inside QuickJS wake up.
-                    flag_for_timer.store(true, Ordering::Relaxed);
-                }
+                let remaining = timeout.saturating_sub(start.elapsed());
+                std::thread::sleep(remaining.min(TICK));
             }
+            timed_out_for_timer.store(true, Ordering::Relaxed);
+            flag_for_timer.store(true, Ordering::Relaxed);
+            cancel_for_timer.cancel();
         });
 
         let input_owned = input.to_owned();
