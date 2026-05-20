@@ -1,5 +1,8 @@
 # High Beam
 
+[![CI](https://github.com/Mechazawa/high-beam/actions/workflows/ci.yml/badge.svg)](https://github.com/Mechazawa/high-beam/actions/workflows/ci.yml)
+[![Plugins](https://github.com/Mechazawa/high-beam/actions/workflows/plugins.yml/badge.svg)](https://github.com/Mechazawa/high-beam/actions/workflows/plugins.yml)
+
 A keyboard launcher in the Spotlight / Alfred / Raycast / Ulauncher class.
 Hit a global hotkey, an overlay window appears, type a query, ranked
 results stream in from plugins, Enter executes the chosen action.

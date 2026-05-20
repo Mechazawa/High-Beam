@@ -1,0 +1,68 @@
+# macOS-only by deliberate choice: the host targets macOS first (global-hotkey,
+# AppleScript-backed Core actions, NSVisualEffectView ambitions). Linux support
+# is best-effort and is left out of CI v1 — adding a `ubuntu-latest` matrix slot
+# is a follow-up once the Linux path stabilises.
+name: CI
+
+on:
+  push:
+    branches: [master, rust]
+  pull_request:
+    branches: [master, rust]
+
+# Cancel superseded runs on the same ref. Saves runner-minutes when a PR
+# is force-pushed during review.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cargo:
+    name: cargo (macos)
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # rust-toolchain.toml pins channel=stable + clippy + rustfmt, so
+      # dtolnay/rust-toolchain@stable resolves to the same toolchain that
+      # local devs run. No `with: toolchain:` override on purpose.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      # Keys cache by Cargo.lock + rustc version; hits on most PRs.
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install just
+        uses: taiki-e/install-action@just
+
+      # Step order mirrors `just check` (fmt → lint → test) plus the extras
+      # the local dev policy asks for (pedantic clippy + release build).
+
+      - name: cargo fmt --check
+        run: cargo fmt -- --check
+
+      # `just lint` is strict clippy with -D warnings -A clippy::pedantic.
+      - name: just lint
+        run: just lint
+
+      # Local policy is "zero pedantic findings or addressed inline". CI
+      # enforces strict (fail on pedantic) so the bar can't drift on PRs.
+      # We override `just lint-pedantic` here to add -D warnings — the
+      # Justfile recipe runs advisory-only for local iteration.
+      - name: clippy pedantic (strict)
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      # `cargo test` over `cargo nextest run` on purpose — matches what
+      # local devs run, consistency over a marginal speed win.
+      - name: cargo test --all
+        run: cargo test --all
+
+      # Sanity check that the production profile compiles too. Caught
+      # locally by `just run --release` but devs rarely do that.
+      - name: cargo build --release
+        run: cargo build --release
