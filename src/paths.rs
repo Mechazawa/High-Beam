@@ -70,12 +70,7 @@ pub fn socket_path() -> io::Result<PathBuf> {
 
 /// Best-effort parent-directory creation for paths we own. Returns `Ok` if the
 /// directory already exists or was created.
-///
-/// # Errors
-///
-/// Returns whatever [`std::fs::create_dir_all`] returns when the parent
-/// directory can't be created.
-pub fn ensure_parent_dir(path: &std::path::Path) -> io::Result<()> {
+pub(crate) fn ensure_parent_dir(path: &std::path::Path) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }

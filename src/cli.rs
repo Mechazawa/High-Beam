@@ -19,31 +19,19 @@ pub struct Args {
     pub open: bool,
 }
 
-impl Args {
-    /// Convenience used by both `main` and the test suite.
-    #[must_use]
-    pub fn parse_from_iter<I, S>(iter: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<std::ffi::OsString> + Clone,
-    {
-        Self::parse_from(iter)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn defaults_to_not_open() {
-        let args = Args::parse_from_iter(["highbeam"]);
+        let args = Args::parse_from(["highbeam"]);
         assert!(!args.open);
     }
 
     #[test]
     fn open_flag_parses() {
-        let args = Args::parse_from_iter(["highbeam", "--open"]);
+        let args = Args::parse_from(["highbeam", "--open"]);
         assert!(args.open);
     }
 

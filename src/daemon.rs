@@ -83,26 +83,28 @@ fn spawn_ipc_listener(socket_path: &Path, weak: slint::Weak<QueryWindow>) -> io:
 }
 
 #[cfg(target_os = "macos")]
-fn spawn_hotkey_listener(weak: slint::Weak<QueryWindow>) -> HotkeyGuard {
+fn spawn_hotkey_listener(
+    weak: slint::Weak<QueryWindow>,
+) -> Option<global_hotkey::GlobalHotKeyManager> {
     use global_hotkey::hotkey::{Code, HotKey, Modifiers};
     use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 
     // GlobalHotKeyManager has to be created and kept alive on the same thread
     // for the duration we want hotkey events. We construct it on the main
-    // thread (current thread) and stash it in the returned guard so it stays
+    // thread (current thread) and hand it back so the caller can keep it
     // alive for the life of the daemon.
     let manager = match GlobalHotKeyManager::new() {
         Ok(m) => m,
         Err(err) => {
             eprintln!("failed to create global hotkey manager: {err}");
-            return HotkeyGuard { _manager: None };
+            return None;
         }
     };
 
     let hotkey = HotKey::new(Some(Modifiers::SHIFT), Code::Space);
     if let Err(err) = manager.register(hotkey) {
         eprintln!("failed to register Shift+Space hotkey: {err}");
-        return HotkeyGuard { _manager: None };
+        return None;
     }
     let hotkey_id = hotkey.id();
 
@@ -125,12 +127,5 @@ fn spawn_hotkey_listener(weak: slint::Weak<QueryWindow>) -> HotkeyGuard {
         })
         .expect("spawn hotkey thread");
 
-    HotkeyGuard {
-        _manager: Some(manager),
-    }
-}
-
-#[cfg(target_os = "macos")]
-struct HotkeyGuard {
-    _manager: Option<global_hotkey::GlobalHotKeyManager>,
+    Some(manager)
 }

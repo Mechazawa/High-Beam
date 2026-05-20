@@ -13,7 +13,7 @@ use crate::QueryWindow;
 ///
 /// Caller is responsible for showing/hiding the window in response to hotkey
 /// or IPC events. This function only attaches handlers.
-pub fn configure(window: &QueryWindow) {
+pub(crate) fn configure(window: &QueryWindow) {
     // Typing in the input prints to stdout. Stage 3 replaces this with the
     // dispatch into the plugin runtime.
     window.on_query_edited(|text| {
@@ -79,7 +79,7 @@ pub fn configure(window: &QueryWindow) {
 /// visually (or not at all) and typing goes nowhere. We replicate what
 /// Spotlight/Alfred/Raycast do: activate the app process and make the
 /// `NSWindow` key + frontmost ourselves before asking Slint for focus.
-pub fn show(window: &QueryWindow) {
+pub(crate) fn show(window: &QueryWindow) {
     if let Err(err) = window.show() {
         eprintln!("failed to show window: {err}");
         return;
@@ -93,7 +93,7 @@ pub fn show(window: &QueryWindow) {
 /// Hide the window. Clears the input text so the next open starts fresh —
 /// covers every close path (Esc, blur, and any future programmatic close)
 /// because they all funnel through here.
-pub fn hide(window: &QueryWindow) {
+pub(crate) fn hide(window: &QueryWindow) {
     window.invoke_clear_input();
     if let Err(err) = window.hide() {
         eprintln!("failed to hide window: {err}");
@@ -105,14 +105,16 @@ fn center_on_focused_display(window: &QueryWindow) {
     // Resolve the monitor under the current cursor; on macOS that's the screen
     // the user is actively looking at, which matches what users expect from
     // Spotlight. Falls back to the primary monitor if winit can't tell us.
+    // We work in physical pixels throughout, so the monitor's scale factor is
+    // irrelevant here.
     let slint_window = window.window();
-    let Some((monitor_pos, monitor_size, scale)) = slint_window
+    let Some((monitor_pos, monitor_size)) = slint_window
         .with_winit_window(|w: &winit::window::Window| {
             let monitor = w
                 .current_monitor()
                 .or_else(|| w.primary_monitor())
                 .or_else(|| w.available_monitors().next())?;
-            Some((monitor.position(), monitor.size(), monitor.scale_factor()))
+            Some((monitor.position(), monitor.size()))
         })
         .flatten()
     else {
@@ -132,7 +134,6 @@ fn center_on_focused_display(window: &QueryWindow) {
     // sits above center the way Spotlight does, regardless of window height.
     let y = monitor_pos.y + (monitor_h / 3) - (win_h / 2);
 
-    let _ = scale; // physical coords; we don't need to scale further here.
     slint_window.set_position(slint::PhysicalPosition::new(x, y));
 }
 

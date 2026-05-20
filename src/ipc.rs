@@ -18,18 +18,13 @@ pub enum Command {
 }
 
 impl Command {
-    #[must_use]
-    pub fn as_wire(self) -> &'static str {
+    fn as_wire(self) -> &'static str {
         match self {
             Self::Open => "open",
         }
     }
 
-    /// # Errors
-    ///
-    /// Returns [`ParseError::Unknown`] if the line doesn't match a known
-    /// command.
-    pub fn parse(line: &str) -> Result<Self, ParseError> {
+    fn parse(line: &str) -> Result<Self, ParseError> {
         match line.trim() {
             "open" => Ok(Self::Open),
             other => Err(ParseError::Unknown(other.to_owned())),
@@ -38,7 +33,7 @@ impl Command {
 }
 
 #[derive(Debug)]
-pub enum ParseError {
+enum ParseError {
     Unknown(String),
 }
 
@@ -56,9 +51,9 @@ impl std::error::Error for ParseError {}
 ///
 /// `bind` removes a stale socket file if it exists and the previous owner is
 /// gone; if a live daemon is listening, `bind` returns an error and callers
-/// should switch to `Client::send`.
+/// should switch to `send`.
 #[derive(Debug)]
-pub struct Server {
+pub(crate) struct Server {
     listener: UnixListener,
     path: PathBuf,
 }
@@ -66,13 +61,7 @@ pub struct Server {
 impl Server {
     /// Bind to `path`. If a daemon is already listening, returns
     /// `io::ErrorKind::AddrInUse` so the caller can fall back to client mode.
-    ///
-    /// # Errors
-    ///
-    /// Returns an [`io::Error`] if the parent directory can't be created, if
-    /// another daemon is already bound to this path, or if the bind syscall
-    /// itself fails.
-    pub fn bind(path: &Path) -> io::Result<Self> {
+    pub(crate) fn bind(path: &Path) -> io::Result<Self> {
         crate::paths::ensure_parent_dir(path)?;
 
         match UnixListener::bind(path) {
@@ -106,11 +95,7 @@ impl Server {
     /// Returns only on accept-loop error. The intended pattern is to spawn a
     /// dedicated thread that owns the `Server` and forwards commands to the
     /// main thread (which owns the UI).
-    ///
-    /// # Errors
-    ///
-    /// Propagates the first I/O error from the underlying accept loop.
-    pub fn run<F>(self, mut handler: F) -> io::Result<()>
+    pub(crate) fn run<F>(self, mut handler: F) -> io::Result<()>
     where
         F: FnMut(Command) + Send + 'static,
     {
