@@ -1,3 +1,4 @@
+#[must_use]
 pub fn placeholder() -> &'static str {
     "high-beam"
 }
