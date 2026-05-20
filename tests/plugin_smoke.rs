@@ -15,13 +15,16 @@ use tokio_util::sync::CancellationToken;
 const SMOKE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Example plugins under `examples/plugins/` whose code is loadable today.
-/// `http-codes` is intentionally skipped — its directory is a placeholder
-/// for Stage 8 and contains no manifest yet.
 const EXAMPLES: &[&str] = &[
+    "examples/plugins/calculator",
+    "examples/plugins/dnd",
     "examples/plugins/echo",
     "examples/plugins/echo-ts",
     "examples/plugins/frecency-demo",
+    "examples/plugins/http-codes",
+    "examples/plugins/paper-size",
     "examples/plugins/slow-echo",
+    "examples/plugins/spotlight",
 ];
 
 fn rt() -> tokio::runtime::Runtime {
@@ -48,6 +51,16 @@ fn smoke_test(dir: &str) {
 }
 
 #[test]
+fn calculator_loads_in_rquickjs() {
+    smoke_test("examples/plugins/calculator");
+}
+
+#[test]
+fn dnd_loads_in_rquickjs() {
+    smoke_test("examples/plugins/dnd");
+}
+
+#[test]
 fn echo_loads_in_rquickjs() {
     smoke_test("examples/plugins/echo");
 }
@@ -63,8 +76,23 @@ fn frecency_demo_loads_in_rquickjs() {
 }
 
 #[test]
+fn http_codes_loads_in_rquickjs() {
+    smoke_test("examples/plugins/http-codes");
+}
+
+#[test]
+fn paper_size_loads_in_rquickjs() {
+    smoke_test("examples/plugins/paper-size");
+}
+
+#[test]
 fn slow_echo_loads_in_rquickjs() {
     smoke_test("examples/plugins/slow-echo");
+}
+
+#[test]
+fn spotlight_loads_in_rquickjs() {
+    smoke_test("examples/plugins/spotlight");
 }
 
 #[test]
