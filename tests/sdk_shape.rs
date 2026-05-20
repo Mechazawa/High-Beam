@@ -16,7 +16,12 @@ use rquickjs::{AsyncContext, AsyncRuntime, Ctx, Error as JsError, Module, Object
 
 use high_beam::sdk::actions::ActionsModule;
 use high_beam::sdk::clipboard::ClipboardModule;
+use high_beam::sdk::fs::FsModule;
 use high_beam::sdk::http::HttpModule;
+use high_beam::sdk::icons::IconsModule;
+use high_beam::sdk::r#match::MatchModule;
+use high_beam::sdk::platform::PlatformModule;
+use high_beam::sdk::system::SystemModule;
 
 /// Expected exports per module. Mirrors `sdk/highbeam/<name>.d.ts`.
 fn expected_for(name: &str) -> &'static [&'static str] {
@@ -24,6 +29,11 @@ fn expected_for(name: &str) -> &'static [&'static str] {
         "highbeam:actions" => &["openUrl", "copy", "exec", "reveal"],
         "highbeam:http" => &["get", "post"],
         "highbeam:clipboard" => &["read", "write"],
+        "highbeam:fs" => &["readDir", "readFile", "readText", "readCache", "writeCache"],
+        "highbeam:icons" => &["forPath"],
+        "highbeam:match" => &["fuzzy"],
+        "highbeam:system" => &["exec", "applescript"],
+        "highbeam:platform" => &["os", "arch", "version", "isMacOS", "isLinux"],
         other => {
             panic!("expected_for({other}): no expected list — keep this in sync with sdk/highbeam")
         }
@@ -51,6 +61,11 @@ enum OneShotLoader {
     Actions,
     Http,
     Clipboard,
+    Fs,
+    Icons,
+    Match,
+    System,
+    Platform,
 }
 
 impl Loader for OneShotLoader {
@@ -59,6 +74,11 @@ impl Loader for OneShotLoader {
             Self::Actions => Module::declare_def::<ActionsModule, _>(ctx.clone(), name),
             Self::Http => Module::declare_def::<HttpModule, _>(ctx.clone(), name),
             Self::Clipboard => Module::declare_def::<ClipboardModule, _>(ctx.clone(), name),
+            Self::Fs => Module::declare_def::<FsModule, _>(ctx.clone(), name),
+            Self::Icons => Module::declare_def::<IconsModule, _>(ctx.clone(), name),
+            Self::Match => Module::declare_def::<MatchModule, _>(ctx.clone(), name),
+            Self::System => Module::declare_def::<SystemModule, _>(ctx.clone(), name),
+            Self::Platform => Module::declare_def::<PlatformModule, _>(ctx.clone(), name),
         }
     }
 }
@@ -125,4 +145,29 @@ fn http_module_exports_match_dts() {
 #[test]
 fn clipboard_module_exports_match_dts() {
     assert_module_exports("highbeam:clipboard", OneShotLoader::Clipboard);
+}
+
+#[test]
+fn fs_module_exports_match_dts() {
+    assert_module_exports("highbeam:fs", OneShotLoader::Fs);
+}
+
+#[test]
+fn icons_module_exports_match_dts() {
+    assert_module_exports("highbeam:icons", OneShotLoader::Icons);
+}
+
+#[test]
+fn match_module_exports_match_dts() {
+    assert_module_exports("highbeam:match", OneShotLoader::Match);
+}
+
+#[test]
+fn system_module_exports_match_dts() {
+    assert_module_exports("highbeam:system", OneShotLoader::System);
+}
+
+#[test]
+fn platform_module_exports_match_dts() {
+    assert_module_exports("highbeam:platform", OneShotLoader::Platform);
 }

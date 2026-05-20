@@ -44,11 +44,16 @@ files to know what those modules export at compile time; nothing from
 
 ## What's included
 
-| Module                | Purpose                                         | Capability                              |
-| --------------------- | ----------------------------------------------- | --------------------------------------- |
-| `highbeam:actions`    | Action builders (`openUrl`, `copy`, `exec`, …) | `actions`                               |
-| `highbeam:http`       | Async HTTP client (`get`, `post`)               | `http`                                  |
-| `highbeam:clipboard`  | Read/write the system clipboard                 | `clipboard.read` / `clipboard.write`    |
+| Module                | Purpose                                                | Capability                              |
+| --------------------- | ------------------------------------------------------ | --------------------------------------- |
+| `highbeam:actions`    | Action builders (`openUrl`, `copy`, `exec`, …)         | `actions`                               |
+| `highbeam:http`       | Async HTTP client (`get`, `post`)                      | `http`                                  |
+| `highbeam:clipboard`  | Read/write the system clipboard                        | `clipboard.read` / `clipboard.write`    |
+| `highbeam:fs`         | Walk dirs, read files, plugin-scoped cache             | `fs.read` / `fs.cache`                  |
+| `highbeam:icons`      | Native data-URI icons                                  | `icons`                                 |
+| `highbeam:match`      | Fuzzy ranking with highlight ranges                    | —                                       |
+| `highbeam:system`     | Subprocess + AppleScript escape hatches                | `system.exec` / `system.applescript`    |
+| `highbeam:platform`   | OS / arch / version metadata                           | —                                       |
 
 The `types.d.ts` file has the shared shapes (`Result`, `Action`,
 `AbortSignal`, `HttpResponse`) every module uses.

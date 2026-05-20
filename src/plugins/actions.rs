@@ -27,17 +27,13 @@ pub fn execute(action: &Action) -> Result<(), Box<dyn Error>> {
             Ok(())
         }
         Action::Copy { text } => {
-            // arboard's Clipboard is connection-per-call style; cheap enough
-            // for the one-shot case. The Stage 4 `highbeam:clipboard` module
-            // creates its own instance per call too.
             let mut clipboard = arboard::Clipboard::new()?;
             clipboard.set_text(text.clone())?;
             Ok(())
         }
         Action::Exec { cmd, args } => {
-            // Stage 4 fire-and-forget: spawn and forget. Stage 7's
-            // `highbeam:system.exec(...)` (the *live* call, not the action
-            // variant) is where stdout/stderr/code capture lives.
+            // Fire-and-forget spawn. The live capture variant lives in
+            // `highbeam:system.exec`.
             Command::new(cmd).args(args).spawn()?;
             Ok(())
         }
@@ -45,6 +41,14 @@ pub fn execute(action: &Action) -> Result<(), Box<dyn Error>> {
             reveal(path)?;
             Ok(())
         }
+        Action::Quit => {
+            // Hard exit — bypasses Drop for in-flight resources but matches
+            // the v1 "exit High Beam" contract. The daemon's tokio runtime,
+            // SQLite handles, and rquickjs contexts are all designed to
+            // survive abrupt termination.
+            std::process::exit(0);
+        }
+        Action::Noop => Ok(()),
     }
 }
 

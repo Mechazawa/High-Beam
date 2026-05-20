@@ -39,7 +39,12 @@ use crate::sdk::abort::{Abort, install_global_controller};
 use crate::sdk::actions::ActionsModule;
 use crate::sdk::capability;
 use crate::sdk::clipboard;
+use crate::sdk::fs;
 use crate::sdk::http::HttpModule;
+use crate::sdk::icons;
+use crate::sdk::r#match::MatchModule;
+use crate::sdk::platform::PlatformModule;
+use crate::sdk::system;
 use crate::sdk::timers;
 
 /// JS-side iterator normalizer (turns a value returned from `query()` into a
@@ -51,6 +56,11 @@ const HIGHBEAM_SCHEME: &str = "highbeam:";
 const ACTIONS_MODULE: &str = "highbeam:actions";
 const HTTP_MODULE: &str = "highbeam:http";
 const CLIPBOARD_MODULE: &str = "highbeam:clipboard";
+const FS_MODULE: &str = "highbeam:fs";
+const ICONS_MODULE: &str = "highbeam:icons";
+const SYSTEM_MODULE: &str = "highbeam:system";
+const MATCH_MODULE: &str = "highbeam:match";
+const PLATFORM_MODULE: &str = "highbeam:platform";
 /// Slot on `globalThis` where we stash the plugin's `query` export at load
 /// time. Re-importing the plugin module inside `run_query` would require a
 /// `Module<'js>` reference that can't survive the `.await` on each iteration
@@ -115,12 +125,30 @@ impl From<std::io::Error> for PluginError {
 impl LoadedPlugin {
     /// Build a runtime for the plugin and evaluate its entry module.
     ///
+    /// `cache_dir` is the plugin's own slot under the host's cache directory.
+    /// The host pre-creates the path; the SDK only writes into it.
+    ///
     /// # Errors
     ///
     /// Fails if the entry file can't be read, the JS source has a syntax
     /// error, the module imports anything outside the `highbeam:` scheme,
     /// or the `query` export is missing / not a function.
     pub async fn load(plugin_dir: &Path, manifest: Manifest) -> Result<Self, PluginError> {
+        let cache_dir = default_cache_dir(&manifest.name);
+        Self::load_with_cache_dir(plugin_dir, manifest, cache_dir).await
+    }
+
+    /// Variant of [`Self::load`] with an explicit cache directory — used by
+    /// the test harness to keep cache writes inside a tmpdir.
+    ///
+    /// # Errors
+    ///
+    /// Same conditions as [`Self::load`].
+    pub async fn load_with_cache_dir(
+        plugin_dir: &Path,
+        manifest: Manifest,
+        cache_dir: std::path::PathBuf,
+    ) -> Result<Self, PluginError> {
         let entry_path = manifest.entry_path(plugin_dir);
         let source = std::fs::read_to_string(&entry_path).map_err(|err| {
             PluginError::Io(std::io::Error::new(
@@ -189,6 +217,23 @@ impl LoadedPlugin {
             clipboard::install(&ctx, can_read, can_write)
                 .catch(&ctx)
                 .map_err(|err| PluginError::Js(format!("install clipboard: {err}")))?;
+
+            let can_fs_read = plugin_caps.iter().any(|c| c == "fs.read");
+            let can_fs_cache = plugin_caps.iter().any(|c| c == "fs.cache");
+            fs::install(&ctx, can_fs_read, can_fs_cache, cache_dir.clone())
+                .catch(&ctx)
+                .map_err(|err| PluginError::Js(format!("install fs: {err}")))?;
+
+            let can_icons = plugin_caps.iter().any(|c| c == "icons");
+            icons::install(&ctx, can_icons)
+                .catch(&ctx)
+                .map_err(|err| PluginError::Js(format!("install icons: {err}")))?;
+
+            let can_system_exec = plugin_caps.iter().any(|c| c == "system.exec");
+            let can_system_applescript = plugin_caps.iter().any(|c| c == "system.applescript");
+            system::install(&ctx, can_system_exec, can_system_applescript)
+                .catch(&ctx)
+                .map_err(|err| PluginError::Js(format!("install system: {err}")))?;
 
             let declared = Module::declare(ctx.clone(), "plugin:main", source_bytes)
                 .catch(&ctx)
@@ -416,6 +461,22 @@ fn normalize_async_iterator<'js>(
     Ok(iter)
 }
 
+/// Resolve the per-plugin cache directory under the host's cache root.
+///
+/// `~/Library/Caches/high-beam/plugins/<name>/` on macOS,
+/// `$XDG_CACHE_HOME/high-beam/plugins/<name>/` on Linux. Falls back to a
+/// temp-dir-rooted path if `ProjectDirs` can't resolve (CI, exotic env).
+fn default_cache_dir(plugin_name: &str) -> std::path::PathBuf {
+    if let Some(dirs) = directories::ProjectDirs::from("", "", "high-beam") {
+        dirs.cache_dir().join("plugins").join(plugin_name)
+    } else {
+        std::env::temp_dir()
+            .join("high-beam")
+            .join("plugins")
+            .join(plugin_name)
+    }
+}
+
 /// Resolves `highbeam:*` specifiers; rejects everything else.
 struct HighbeamResolver;
 
@@ -458,21 +519,24 @@ impl Loader for HighbeamLoader {
         }
 
         // Capability gate: lookup the module in the central table, check that
-        // at least one of its required caps is in the plugin's set.
-        let Some(module_cap) = capability::for_module(name) else {
-            return Err(JsError::new_loading_message(
-                name,
-                format!("`{name}` is not a recognised highbeam module"),
-            ));
-        };
-        if !capability::grants_any(&self.capabilities, module_cap.any_of) {
-            return Err(JsError::new_loading_message(
-                name,
-                format!(
-                    "missing capability for `{name}`; declare one of {:?} in manifest.json",
-                    module_cap.any_of
-                ),
-            ));
+        // at least one of its required caps is in the plugin's set. Modules
+        // marked uncapped (match, platform) skip this gate entirely.
+        if !capability::is_uncapped_module(name) {
+            let Some(module_cap) = capability::for_module(name) else {
+                return Err(JsError::new_loading_message(
+                    name,
+                    format!("`{name}` is not a recognised highbeam module"),
+                ));
+            };
+            if !capability::grants_any(&self.capabilities, module_cap.any_of) {
+                return Err(JsError::new_loading_message(
+                    name,
+                    format!(
+                        "missing capability for `{name}`; declare one of {:?} in manifest.json",
+                        module_cap.any_of
+                    ),
+                ));
+            }
         }
 
         match name {
@@ -481,6 +545,11 @@ impl Loader for HighbeamLoader {
             CLIPBOARD_MODULE => {
                 Module::declare_def::<clipboard::ClipboardModule, _>(ctx.clone(), name)
             }
+            FS_MODULE => Module::declare_def::<fs::FsModule, _>(ctx.clone(), name),
+            ICONS_MODULE => Module::declare_def::<icons::IconsModule, _>(ctx.clone(), name),
+            SYSTEM_MODULE => Module::declare_def::<system::SystemModule, _>(ctx.clone(), name),
+            MATCH_MODULE => Module::declare_def::<MatchModule, _>(ctx.clone(), name),
+            PLATFORM_MODULE => Module::declare_def::<PlatformModule, _>(ctx.clone(), name),
             other => Err(JsError::new_loading_message(
                 name,
                 format!("`{other}` is registered in the capability table but not in the loader"),

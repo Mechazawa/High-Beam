@@ -1,16 +1,15 @@
 //! Capability gating — central truth for which `highbeam:*` modules a plugin
 //! is allowed to import, plus the per-function gates within a module.
 //!
-//! Stage 4 generalizes Stage 3's one-off `if cap == "actions"` check. Each
-//! `highbeam:*` module advertises the set of capabilities that grant it. A
-//! plugin can import the module if *any* of those caps is in its declared
+//! Each `highbeam:*` module advertises the set of capabilities that grant it.
+//! A plugin can import the module if *any* of those caps is in its declared
 //! list; within the module, individual functions can still gate themselves
 //! tighter (e.g. `clipboard` loads if the plugin has either `clipboard.read`
 //! or `clipboard.write`, but `write()` will throw if only `clipboard.read`
 //! was declared).
 //!
-//! Stage 9 will route capability-violation errors to the per-plugin logfile;
-//! Stage 4 returns a [`JsError`] that the loader will surface to stderr.
+//! `highbeam:match` and `highbeam:platform` are not gated — they are pure
+//! compute / metadata and require no capability declaration to import.
 
 /// One row in the capability table.
 pub(crate) struct ModuleCap {
@@ -20,8 +19,9 @@ pub(crate) struct ModuleCap {
     pub any_of: &'static [&'static str],
 }
 
-/// All `highbeam:*` modules recognised by the host, mapped to the caps that
-/// grant them. The runtime walks this table when resolving a load.
+/// All cap-gated `highbeam:*` modules recognised by the host. `highbeam:match`
+/// and `highbeam:platform` are intentionally absent — they load
+/// unconditionally and are looked up by [`is_uncapped_module`] instead.
 pub(crate) const MODULES: &[ModuleCap] = &[
     ModuleCap {
         specifier: "highbeam:actions",
@@ -35,18 +35,30 @@ pub(crate) const MODULES: &[ModuleCap] = &[
         specifier: "highbeam:clipboard",
         any_of: &["clipboard.read", "clipboard.write"],
     },
+    ModuleCap {
+        specifier: "highbeam:fs",
+        any_of: &["fs.read", "fs.cache"],
+    },
+    ModuleCap {
+        specifier: "highbeam:icons",
+        any_of: &["icons"],
+    },
+    ModuleCap {
+        specifier: "highbeam:system",
+        any_of: &["system.exec", "system.applescript"],
+    },
 ];
 
+/// `highbeam:*` modules that load without any capability declaration.
+const UNCAPPED_MODULES: &[&str] = &["highbeam:match", "highbeam:platform"];
+
 /// Every capability string the host *recognises*. Anything outside this list
-/// is logged as an unknown-cap warning at plugin load time. Stage 4+ extends
-/// this; the underscore prefix is for Stage 7 "I exist but aren't wired" caps.
+/// is logged as an unknown-cap warning at plugin load time.
 pub(crate) const KNOWN_CAPABILITIES: &[&str] = &[
     "actions",
     "http",
     "clipboard.read",
     "clipboard.write",
-    // Reserved for future stages — accepted in manifests without warning,
-    // but no module gates on them yet.
     "fs.read",
     "fs.cache",
     "system.exec",
@@ -58,6 +70,12 @@ pub(crate) const KNOWN_CAPABILITIES: &[&str] = &[
 #[must_use]
 pub(crate) fn for_module(specifier: &str) -> Option<&'static ModuleCap> {
     MODULES.iter().find(|m| m.specifier == specifier)
+}
+
+/// True if the module loads without any capability declaration.
+#[must_use]
+pub(crate) fn is_uncapped_module(specifier: &str) -> bool {
+    UNCAPPED_MODULES.contains(&specifier)
 }
 
 /// True if `caps` grants *any* of the capability strings in `any_of`.

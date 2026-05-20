@@ -11,6 +11,7 @@
 //! `crate::daemon` / `crate::window`.
 
 pub mod actions;
+pub mod builtin;
 pub mod dispatch;
 pub mod loader;
 pub mod manifest;

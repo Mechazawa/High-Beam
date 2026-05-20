@@ -52,13 +52,23 @@ the full v1 spec):
     }
 
 Plugins can `import` only from the `highbeam:*` scheme — `import 'fs'` and
-`import 'lodash'` are rejected at load time. Stage 4 ships:
+`import 'lodash'` are rejected at load time. Currently shipped:
 
-| Module                | Functions                              | Capability                              |
-| --------------------- | -------------------------------------- | --------------------------------------- |
-| `highbeam:actions`    | `openUrl`, `copy`, `exec`, `reveal`    | `actions`                               |
-| `highbeam:http`       | `get`, `post`                          | `http`                                  |
-| `highbeam:clipboard`  | `read`, `write`                        | `clipboard.read` / `clipboard.write`    |
+| Module                | Functions                                        | Capability                              |
+| --------------------- | ------------------------------------------------ | --------------------------------------- |
+| `highbeam:actions`    | `openUrl`, `copy`, `exec`, `reveal`              | `actions`                               |
+| `highbeam:http`       | `get`, `post`                                    | `http`                                  |
+| `highbeam:clipboard`  | `read`, `write`                                  | `clipboard.read` / `clipboard.write`    |
+| `highbeam:fs`         | `readDir`, `readFile`, `readText`, `readCache`, `writeCache` | `fs.read` / `fs.cache`     |
+| `highbeam:icons`      | `forPath`                                        | `icons`                                 |
+| `highbeam:match`      | `fuzzy`                                          | — (pure compute)                        |
+| `highbeam:system`     | `exec`, `applescript`                            | `system.exec` / `system.applescript`    |
+| `highbeam:platform`   | `os`, `arch`, `version`, `isMacOS`, `isLinux`    | — (metadata)                            |
+
+System actions (`shutdown`, `sleep`, `restart`, `lock`, `exit High Beam`,
+`check for updates`, `version v…`) are implemented in the host as a built-in
+`core` plugin — they appear in the result list alongside JS plugins but
+can't be redefined at runtime.
 
 TypeScript declarations live in `sdk/highbeam/`; see the README there for
 the `tsconfig.json` recipe.

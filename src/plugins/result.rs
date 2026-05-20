@@ -1,14 +1,14 @@
 //! Result + Action types — the cross-plugin schema rendered in the window.
 //!
-//! Stage 4 supports the full v1 action set: `openUrl`, `copy`, `exec`,
-//! `reveal`. (Stage 7 may add `push` for nested detail views, post-v1.)
-//!
-//! Icons are still unimplemented (Stage 7 wires up native icons).
-//!
 //! JS plugins yield objects that the host parses via `serde` into [`Result`].
-//! The wire shape mirrors the doc'd `Action` tagged-union (`kind` discriminator)
+//! The wire shape mirrors the `Action` tagged-union (`kind` discriminator)
 //! so the SDK module exports in `crate::sdk::actions` and the Rust enum stay
 //! aligned without bespoke (de)serialization code.
+//!
+//! `Quit` is host-only: the Core built-in is the sole producer; the
+//! `highbeam:actions` module never exposes a builder for it. Keeping it as
+//! a regular `Action` variant lets the existing dispatch + executor pipeline
+//! handle it without a parallel control path.
 
 use std::path::PathBuf;
 
@@ -52,6 +52,13 @@ pub enum Action {
     },
     #[serde(rename = "reveal")]
     Reveal { path: PathBuf },
+    /// Quit the High Beam daemon. Host-only: never serialised over the JS
+    /// boundary, only produced by built-in plugins.
+    #[serde(rename = "quit")]
+    Quit,
+    /// A no-op result that just sits in the list (e.g. version readout).
+    #[serde(rename = "noop")]
+    Noop,
 }
 
 /// A result enriched with the plugin name that produced it.

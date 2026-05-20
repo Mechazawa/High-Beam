@@ -32,7 +32,7 @@ rquickjs = { version = "0.11", features = ["loader", "futures", "macro", "parall
 # Async executor for driving the rquickjs AsyncRuntime per query. Single-thread
 # current-thread flavor — every plugin query collects on the Slint event-loop
 # thread today; we'll revisit when streaming lands in Stage 4.
-tokio = { version = "1", features = ["rt", "macros", "time", "sync"] }
+tokio = { version = "1", features = ["rt", "macros", "time", "sync", "process", "io-util"] }
 
 # CancellationToken — the canonical async cancellation primitive in the tokio
 # ecosystem. Stage 4 wires JS-side `AbortSignal` polyfill to a `CancellationToken`
@@ -67,6 +67,15 @@ open = "5"
 # one thread, so we wrap the `Connection` in `std::sync::Mutex` rather than
 # pulling in `tokio-rusqlite` or sharded pools.
 rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Fuzzy matcher behind `highbeam:match`. Helix-editor's `nucleo-matcher` —
+# Smith-Waterman with bonus heuristics tuned for filename-style ranking, and
+# exposes the per-match character indices we need to round-trip highlights to
+# JS. Self-contained (no transient deps that double the runtime weight).
+nucleo-matcher = "0.3"
+
+# Base64 encoding for `highbeam:icons` data URIs. Tiny crate, no transitives.
+base64 = "0.22"
 
 # macOS-only deps:
 #   * `global-hotkey` — the only Rust crate that actually works on modern macOS

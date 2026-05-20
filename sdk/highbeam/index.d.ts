@@ -16,4 +16,24 @@ declare module 'highbeam:clipboard' {
     export * from './clipboard';
 }
 
+declare module 'highbeam:fs' {
+    export * from './fs';
+}
+
+declare module 'highbeam:icons' {
+    export * from './icons';
+}
+
+declare module 'highbeam:match' {
+    export * from './match';
+}
+
+declare module 'highbeam:system' {
+    export * from './system';
+}
+
+declare module 'highbeam:platform' {
+    export * from './platform';
+}
+
 export * from './types';

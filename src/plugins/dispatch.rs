@@ -33,6 +33,7 @@ pub(crate) const MAX_DEBOUNCE_MS: u64 = 2000;
 
 /// One result, tagged with the plugin name that produced it. The dispatcher
 /// caller uses these to merge + re-sort + render.
+#[derive(Debug)]
 pub(crate) struct StreamedResult {
     pub plugin_name: String,
     pub result: PluginResult,
@@ -49,6 +50,14 @@ pub(crate) fn dispatch_streaming(
     cancel: &CancellationToken,
     tx: &mpsc::UnboundedSender<StreamedResult>,
 ) {
+    // Built-in plugins emit synchronously; spawning them on the same channel
+    // before the JS pipeline runs gives Core results a chance to land before
+    // the first keystroke-debounced JS plugin even starts.
+    for result in crate::plugins::builtin::core::query(input) {
+        if tx.send(result).is_err() {
+            return;
+        }
+    }
     for plugin in plugins {
         let plugin_name = plugin.manifest.name.clone();
         let debounce = clamp_debounce(plugin.manifest.debounce_ms);
