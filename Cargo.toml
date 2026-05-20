@@ -115,8 +115,8 @@ base64 = "0.22"
 # and JPEG icons, so disabling defaults trims the transitive tree.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
-# `parse` feature is the default — no serialisation path needed.
-toml = { version = "0.8", default-features = false, features = ["parse"] }
+# `parse` for theme.toml reads; `display` adds write-back for settings.toml.
+toml = { version = "0.8", default-features = false, features = ["parse", "display"] }
 
 # `chrono` is already in the transitive tree via slint; clock + std is all
 # the plugin.log writer needs.

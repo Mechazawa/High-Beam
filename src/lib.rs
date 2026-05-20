@@ -10,6 +10,7 @@ pub mod logging;
 pub mod paths;
 pub mod plugins;
 pub mod sdk;
+pub mod settings;
 pub mod theme;
 pub mod ui;
 pub mod window;
