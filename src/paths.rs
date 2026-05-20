@@ -68,6 +68,20 @@ pub fn socket_path() -> io::Result<PathBuf> {
     }
 }
 
+/// Platform-specific config directory used for `theme.toml` and other
+/// user-edited settings.
+///
+/// - macOS: `~/Library/Application Support/high-beam/`
+/// - Linux: `$XDG_CONFIG_HOME/high-beam/` (default `~/.config/high-beam/`)
+///
+/// # Errors
+///
+/// Returns an [`io::Error`] if the platform's project directories can't be
+/// resolved (no `$HOME` etc.).
+pub fn config_dir() -> io::Result<PathBuf> {
+    Ok(project_dirs()?.config_dir().to_path_buf())
+}
+
 /// Best-effort parent-directory creation for paths we own. Returns `Ok` if the
 /// directory already exists or was created.
 pub(crate) fn ensure_parent_dir(path: &std::path::Path) -> io::Result<()> {

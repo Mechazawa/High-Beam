@@ -1,0 +1,38 @@
+# High Beam — bundled default theme. Mirrors the macOS Yosemite Spotlight
+# (2014) look: translucent white panel, dark grey text, blue selection wash.
+#
+# To customise: copy this file to the platform config path and edit. High
+# Beam reads the theme once at startup — restart the app after editing.
+#
+#   macOS:  ~/Library/Application Support/high-beam/theme.toml
+#   Linux:  $XDG_CONFIG_HOME/high-beam/theme.toml
+#           (default ~/.config/high-beam/theme.toml)
+#
+# Any field you omit falls back to the value shown here. Missing or malformed
+# files are ignored with a warning; the app always starts.
+#
+# Color values accept three hex shapes:
+#   "#rgb"        — short form, alpha = ff
+#   "#rrggbb"     — alpha = ff
+#   "#rrggbbaa"   — explicit alpha
+
+[colors]
+background = "#ffffffea"   # panel fill (translucent white)
+foreground = "#1d1d1f"     # input + row title text
+muted      = "#86868b"     # placeholder + subtitle + empty-icon outline
+highlight  = "#0a84ff"     # reserved for future use
+selection  = "#0a84ff33"   # highlighted row background wash
+border     = "#00000010"   # panel outline + row separator
+
+[font]
+# Empty family lets the platform pick its default system font, which is
+# what the pre-theming UI used. Set e.g. "SF Pro Display, Inter, system-ui"
+# to override.
+family        = ""
+size_query    = 32    # input field, px
+size_title    = 14    # row title, px
+size_subtitle = 12    # row subtitle, px
+
+[window]
+width         = 760   # panel width, px
+border_radius = 14    # panel corner radius, px

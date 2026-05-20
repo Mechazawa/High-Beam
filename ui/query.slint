@@ -1,7 +1,12 @@
 // Query input + result rows. The single source of truth for what's displayed
 // sits on the Rust side; Slint-side state is just `query-text`, `results`,
-// and `selected-index`. Theme tokens are hard-coded today — Stage 9 will
-// bind them to runtime properties from `theme.toml`.
+// and `selected-index`.
+//
+// Colors and dimensions exposed as `in-out` tokens at the top of `QueryWindow`.
+// Defaults match the bundled yosemite-spotlight theme so a theme-free run is
+// visually identical to the pre-theming build. Layout-load-bearing constants
+// (row height, icon size, input padding) remain inline — theming layout is
+// out of scope for v1.
 
 import { ScrollView } from "std-widgets.slint";
 
@@ -25,11 +30,29 @@ export component QueryWindow inherits Window {
     always-on-top: true;
     background: transparent;
     default-font-size: 18px;
+    default-font-family: root.font-family;
 
     in-out property <string> query-text;
     in-out property <[ResultRow]> results: [];
     in-out property <int> selected-index: 0;
     in-out property <int> max-rows: 9;
+
+    // Theme tokens. Defaults reproduce the bundled yosemite-spotlight theme so
+    // a missing theme.toml is byte-identical to the pre-theming build.
+    in-out property <color> background-color: #ffffffea;
+    in-out property <color> foreground-color: #1d1d1f;
+    in-out property <color> muted-color: #86868b;
+    // `highlight` is part of the documented token surface but not yet bound in
+    // markup — kept so user themes can set it without parse errors.
+    in-out property <color> highlight-color: #0a84ff;
+    in-out property <color> selection-color: #0a84ff33;
+    in-out property <color> border-color: #00000010;
+    in-out property <string> font-family: "";
+    in-out property <length> font-size-query: 32px;
+    in-out property <length> font-size-title: 14px;
+    in-out property <length> font-size-subtitle: 12px;
+    in-out property <length> window-width: 760px;
+    in-out property <length> window-border-radius: 14px;
 
     callback query-edited(string);
     callback escape-pressed();
@@ -66,16 +89,16 @@ export component QueryWindow inherits Window {
     property <length> rows-height: visible-row-count * 56px;
     property <length> input-height: 80px;
 
-    width: 760px;
+    width: root.window-width;
     height: input-height + (results.length > 0 ? rows-height + 1px : 0);
 
     // Translucent rounded panel sits inside a transparent window so the corner
     // radius reads cleanly on the desktop.
     Rectangle {
-        background: #ffffffea;
-        border-radius: 14px;
+        background: root.background-color;
+        border-radius: root.window-border-radius;
         border-width: 1px;
-        border-color: #00000010;
+        border-color: root.border-color;
 
         VerticalLayout {
             // Input area
@@ -90,8 +113,8 @@ export component QueryWindow inherits Window {
                     y: 0;
                     width: parent.width - 40px;
                     height: parent.height;
-                    font-size: 32px;
-                    color: #1d1d1f;
+                    font-size: root.font-size-query;
+                    color: root.foreground-color;
                     single-line: true;
                     vertical-alignment: center;
                     text: root.query-text;
@@ -135,8 +158,8 @@ export component QueryWindow inherits Window {
                     width: parent.width - 40px;
                     height: parent.height;
                     text: "Query…";
-                    font-size: 32px;
-                    color: #86868b;
+                    font-size: root.font-size-query;
+                    color: root.muted-color;
                     vertical-alignment: center;
                     visible: root.query-text == "";
                 }
@@ -145,7 +168,7 @@ export component QueryWindow inherits Window {
             // Separator line — only visible when there are results.
             Rectangle {
                 height: results.length > 0 ? 1px : 0;
-                background: #00000010;
+                background: root.border-color;
             }
 
             // Result rows
@@ -163,7 +186,7 @@ export component QueryWindow inherits Window {
                             root.invoke-selected();
                         }
                         Rectangle {
-                            background: idx == root.selected-index ? #0a84ff33 : transparent;
+                            background: idx == root.selected-index ? root.selection-color : transparent;
                             HorizontalLayout {
                                 padding-left: 20px;
                                 padding-right: 20px;
@@ -182,7 +205,7 @@ export component QueryWindow inherits Window {
                                     y: (parent.height - self.height) / 2;
                                     border-radius: 4px;
                                     border-width: row.has-icon ? 0px : 1px;
-                                    border-color: #86868b40;
+                                    border-color: root.muted-color.with-alpha(0.25);
                                     Image {
                                         x: 0; y: 0;
                                         width: parent.width;
@@ -197,15 +220,15 @@ export component QueryWindow inherits Window {
                                     alignment: center;
                                     Text {
                                         text: row.title;
-                                        color: #1d1d1f;
-                                        font-size: 14px;
+                                        color: root.foreground-color;
+                                        font-size: root.font-size-title;
                                         overflow: elide;
                                     }
 
                                     if row.has-subtitle: Text {
                                         text: row.subtitle;
-                                        color: #86868b;
-                                        font-size: 12px;
+                                        color: root.muted-color;
+                                        font-size: root.font-size-subtitle;
                                         overflow: elide;
                                     }
                                 }

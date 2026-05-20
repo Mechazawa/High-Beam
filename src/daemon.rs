@@ -11,6 +11,7 @@ use slint::ComponentHandle;
 use crate::QueryWindow;
 use crate::app;
 use crate::ipc::{Command, Server};
+use crate::theme::Theme;
 use crate::window;
 
 pub struct Options {
@@ -44,6 +45,7 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
 
     let window = QueryWindow::new()?;
     window::configure(&window);
+    window::apply_theme(&window, &Theme::load_or_default());
 
     // Start the plugin runtime. The host owns a background thread + tokio
     // runtime and wires the per-keystroke `query_edited` and `Enter`

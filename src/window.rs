@@ -11,6 +11,7 @@ use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
 
 use crate::QueryWindow;
+use crate::theme::Theme;
 
 /// Wire up the `QueryWindow` callbacks and native-window behaviour.
 ///
@@ -66,6 +67,23 @@ pub(crate) fn configure(window: &QueryWindow) {
     // a real .app target). Independent from the activation logic below: that
     // call only governs frontmost/key state, not whether we appear in
     // Cmd-Tab / Dock.
+}
+
+/// Push theme tokens into the window's `in-out` properties. Runs once at
+/// startup; theme reload is restart-only (no file watcher).
+pub(crate) fn apply_theme(window: &QueryWindow, theme: &Theme) {
+    window.set_background_color(theme.colors.background);
+    window.set_foreground_color(theme.colors.foreground);
+    window.set_muted_color(theme.colors.muted);
+    window.set_highlight_color(theme.colors.highlight);
+    window.set_selection_color(theme.colors.selection);
+    window.set_border_color(theme.colors.border);
+    window.set_font_family(theme.font.family.clone().into());
+    window.set_font_size_query(theme.font.size_query);
+    window.set_font_size_title(theme.font.size_title);
+    window.set_font_size_subtitle(theme.font.size_subtitle);
+    window.set_window_width(theme.window.width);
+    window.set_window_border_radius(theme.window.border_radius);
 }
 
 /// Show the window, center it, and focus the input. Idempotent — calling this

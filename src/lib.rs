@@ -12,6 +12,7 @@ pub mod ipc;
 pub mod paths;
 pub mod plugins;
 pub mod sdk;
+pub mod theme;
 pub mod ui;
 pub mod window;
 
