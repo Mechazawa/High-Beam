@@ -6,6 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
+use serde_json::Value as JsonValue;
 
 const DEFAULT_ENTRY: &str = "plugin.js";
 const DEFAULT_TIMEOUT_MS: u64 = 500;
@@ -49,6 +50,141 @@ pub struct Manifest {
     ///     Unknown strings parse but never match.
     #[serde(default)]
     pub platforms: Option<Vec<String>>,
+    /// User-facing options the settings UI will render. Each entry declares
+    /// a `key`, a primitive `type`, a human label, and a typed default. The
+    /// raw shape is permissive so we can warn-and-drop malformed entries
+    /// rather than failing to load — see [`Manifest::parsed_options`].
+    #[serde(default)]
+    pub options: Vec<JsonValue>,
+}
+
+/// One option a plugin author declared in `manifest.json` and the settings
+/// UI should render.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OptionDef {
+    pub key: String,
+    pub label: String,
+    pub kind: OptionKind,
+}
+
+/// Primitive option types the settings UI knows how to render.
+///
+/// Unknown types declared in a manifest get logged + dropped — they don't
+/// fail the load. New variants need a matching input widget on the UI side.
+#[derive(Debug, Clone, PartialEq)]
+pub enum OptionKind {
+    String {
+        default: String,
+    },
+    Bool {
+        default: bool,
+    },
+    Int {
+        default: i64,
+        min: Option<i64>,
+        max: Option<i64>,
+    },
+    Enum {
+        default: String,
+        choices: Vec<String>,
+    },
+}
+
+impl OptionDef {
+    /// Default value rendered as a JSON-friendly scalar, so callers can stash
+    /// it next to user-set values without needing to branch on `kind`.
+    #[must_use]
+    pub fn default_json(&self) -> JsonValue {
+        match &self.kind {
+            OptionKind::String { default } | OptionKind::Enum { default, .. } => {
+                JsonValue::String(default.clone())
+            }
+            OptionKind::Bool { default } => JsonValue::Bool(*default),
+            OptionKind::Int { default, .. } => JsonValue::Number((*default).into()),
+        }
+    }
+}
+
+/// Result of validating [`Manifest::options`]: the option definitions the
+/// host should expose to the settings UI, plus any warnings the loader should
+/// surface in `plugin.log`.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct ParsedOptions {
+    pub defs: Vec<OptionDef>,
+    pub warnings: Vec<String>,
+}
+
+fn parse_option(raw: &JsonValue) -> Result<OptionDef, String> {
+    let obj = raw
+        .as_object()
+        .ok_or_else(|| "expected an object".to_owned())?;
+    let key = obj
+        .get("key")
+        .and_then(JsonValue::as_str)
+        .ok_or_else(|| "missing or non-string `key`".to_owned())?
+        .to_owned();
+    if key.is_empty() {
+        return Err("`key` must be non-empty".to_owned());
+    }
+    let type_str = obj
+        .get("type")
+        .and_then(JsonValue::as_str)
+        .ok_or_else(|| "missing or non-string `type`".to_owned())?;
+    let label = obj
+        .get("label")
+        .and_then(JsonValue::as_str)
+        .map_or_else(|| key.clone(), str::to_owned);
+
+    let kind = match type_str {
+        "string" => OptionKind::String {
+            default: obj
+                .get("default")
+                .and_then(JsonValue::as_str)
+                .map(str::to_owned)
+                .unwrap_or_default(),
+        },
+        "bool" => OptionKind::Bool {
+            default: obj
+                .get("default")
+                .and_then(JsonValue::as_bool)
+                .unwrap_or(false),
+        },
+        "int" => OptionKind::Int {
+            default: obj.get("default").and_then(JsonValue::as_i64).unwrap_or(0),
+            min: obj.get("min").and_then(JsonValue::as_i64),
+            max: obj.get("max").and_then(JsonValue::as_i64),
+        },
+        "enum" => {
+            let choices_raw = obj
+                .get("choices")
+                .and_then(JsonValue::as_array)
+                .ok_or_else(|| "enum option missing `choices` array".to_owned())?;
+            let choices: Vec<String> = choices_raw
+                .iter()
+                .filter_map(JsonValue::as_str)
+                .map(str::to_owned)
+                .collect();
+            if choices.is_empty() {
+                return Err("enum option needs at least one string in `choices`".to_owned());
+            }
+            // Default falls back to the first choice — every enum is guaranteed
+            // a renderable value so the settings UI never has to special-case
+            // a missing default.
+            let default = obj
+                .get("default")
+                .and_then(JsonValue::as_str)
+                .map_or_else(|| choices[0].clone(), str::to_owned);
+            if !choices.contains(&default) {
+                return Err(format!(
+                    "enum default {default:?} not present in choices {choices:?}",
+                ));
+            }
+            OptionKind::Enum { default, choices }
+        }
+        other => return Err(format!("unknown option type {other:?}")),
+    };
+
+    Ok(OptionDef { key, label, kind })
 }
 
 fn default_entry() -> String {
@@ -95,6 +231,25 @@ impl Manifest {
         let current = std::env::consts::OS;
         list.iter()
             .any(|entry| KNOWN_PLATFORMS.contains(&entry.as_str()) && entry == current)
+    }
+
+    /// Validated option list + any warnings about malformed/unknown entries.
+    /// Malformed entries are dropped (not load failures) so a plugin author
+    /// shipping a typo in `manifest.json` still gets their plugin loaded,
+    /// just without the offending option.
+    #[must_use]
+    pub fn parsed_options(&self) -> ParsedOptions {
+        let mut defs = Vec::new();
+        let mut warnings = Vec::new();
+        for (idx, raw) in self.options.iter().enumerate() {
+            match parse_option(raw) {
+                Ok(def) => defs.push(def),
+                Err(reason) => {
+                    warnings.push(format!("options[{idx}]: {reason}"));
+                }
+            }
+        }
+        ParsedOptions { defs, warnings }
     }
 
     /// Diagnostic strings the loader should record for this manifest, one per
@@ -274,5 +429,157 @@ mod tests {
     fn platform_warnings_empty_for_only_known_entries() {
         let m = Manifest::parse(br#"{ "name": "x", "platforms": ["macos", "linux"] }"#).unwrap();
         assert!(m.platform_warnings().is_empty());
+    }
+
+    #[test]
+    fn options_absent_parses_to_empty() {
+        let m = Manifest::parse(br#"{ "name": "x" }"#).unwrap();
+        let parsed = m.parsed_options();
+        assert!(parsed.defs.is_empty());
+        assert!(parsed.warnings.is_empty());
+    }
+
+    #[test]
+    fn options_parses_string_bool_int_enum() {
+        let json = br#"{
+            "name": "x",
+            "options": [
+                { "key": "user", "type": "string", "label": "User", "default": "alice" },
+                { "key": "live", "type": "bool", "label": "Live?", "default": true },
+                { "key": "limit", "type": "int", "label": "Max", "default": 5, "min": 1, "max": 50 },
+                { "key": "engine", "type": "enum", "label": "Engine", "default": "ddg", "choices": ["ddg", "google"] }
+            ]
+        }"#;
+        let m = Manifest::parse(json).unwrap();
+        let parsed = m.parsed_options();
+        assert!(parsed.warnings.is_empty(), "got {:?}", parsed.warnings);
+        assert_eq!(parsed.defs.len(), 4);
+
+        assert_eq!(parsed.defs[0].key, "user");
+        assert_eq!(parsed.defs[0].label, "User");
+        assert!(matches!(
+            &parsed.defs[0].kind,
+            OptionKind::String { default } if default == "alice"
+        ));
+
+        assert!(matches!(
+            &parsed.defs[1].kind,
+            OptionKind::Bool { default: true },
+        ));
+
+        assert!(matches!(
+            &parsed.defs[2].kind,
+            OptionKind::Int {
+                default: 5,
+                min: Some(1),
+                max: Some(50),
+            },
+        ));
+
+        match &parsed.defs[3].kind {
+            OptionKind::Enum { default, choices } => {
+                assert_eq!(default, "ddg");
+                assert_eq!(choices, &vec!["ddg".to_owned(), "google".to_owned()]);
+            }
+            other => panic!("expected Enum, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn options_unknown_type_warns_and_drops_entry() {
+        let json = br##"{
+            "name": "x",
+            "options": [
+                { "key": "ok", "type": "string", "default": "" },
+                { "key": "bad", "type": "color", "default": "#fff" }
+            ]
+        }"##;
+        let m = Manifest::parse(json).unwrap();
+        let parsed = m.parsed_options();
+        assert_eq!(parsed.defs.len(), 1, "only the well-typed option survives");
+        assert_eq!(parsed.defs[0].key, "ok");
+        assert_eq!(parsed.warnings.len(), 1);
+        assert!(
+            parsed.warnings[0].contains("color"),
+            "warning should name the offender: {:?}",
+            parsed.warnings,
+        );
+    }
+
+    #[test]
+    fn options_missing_key_drops_entry() {
+        let json = br#"{
+            "name": "x",
+            "options": [
+                { "type": "string", "default": "x" }
+            ]
+        }"#;
+        let m = Manifest::parse(json).unwrap();
+        let parsed = m.parsed_options();
+        assert!(parsed.defs.is_empty());
+        assert_eq!(parsed.warnings.len(), 1);
+    }
+
+    #[test]
+    fn options_enum_without_choices_drops_entry() {
+        let json = br#"{
+            "name": "x",
+            "options": [{ "key": "e", "type": "enum", "default": "a" }]
+        }"#;
+        let m = Manifest::parse(json).unwrap();
+        let parsed = m.parsed_options();
+        assert!(parsed.defs.is_empty());
+        assert_eq!(parsed.warnings.len(), 1);
+    }
+
+    #[test]
+    fn options_string_default_falls_back_to_empty() {
+        let json = br#"{
+            "name": "x",
+            "options": [{ "key": "u", "type": "string", "label": "U" }]
+        }"#;
+        let m = Manifest::parse(json).unwrap();
+        let parsed = m.parsed_options();
+        assert_eq!(parsed.defs.len(), 1);
+        assert!(matches!(
+            &parsed.defs[0].kind,
+            OptionKind::String { default } if default.is_empty()
+        ));
+    }
+
+    #[test]
+    fn options_label_falls_back_to_key() {
+        let json = br#"{
+            "name": "x",
+            "options": [{ "key": "username", "type": "string" }]
+        }"#;
+        let m = Manifest::parse(json).unwrap();
+        let parsed = m.parsed_options();
+        assert_eq!(parsed.defs.len(), 1);
+        assert_eq!(parsed.defs[0].label, "username");
+    }
+
+    #[test]
+    fn options_default_json_matches_kind() {
+        let m = Manifest::parse(
+            br#"{
+            "name": "x",
+            "options": [
+                { "key": "s", "type": "string", "default": "hi" },
+                { "key": "b", "type": "bool", "default": true },
+                { "key": "i", "type": "int", "default": 7 },
+                { "key": "e", "type": "enum", "choices": ["a", "b"], "default": "b" }
+            ]
+        }"#,
+        )
+        .unwrap();
+        let parsed = m.parsed_options();
+        assert_eq!(
+            parsed.defs[0].default_json(),
+            JsonValue::String("hi".into())
+        );
+        assert_eq!(parsed.defs[1].default_json(), JsonValue::Bool(true));
+        assert_eq!(parsed.defs[2].default_json(), JsonValue::Number(7.into()));
+        assert_eq!(parsed.defs[3].default_json(), JsonValue::String("b".into()));
     }
 }

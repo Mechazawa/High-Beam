@@ -114,6 +114,10 @@ async fn load_one(plugin_dir: &Path) -> Result<LoadedPlugin, LoadError> {
         log.write(LogLevel::Warn, &warning);
     }
 
+    for warning in manifest.parsed_options().warnings {
+        log.write(LogLevel::Warn, &warning);
+    }
+
     for cap in &manifest.capabilities {
         if !KNOWN_CAPABILITIES.contains(&cap.as_str()) {
             log.write(
