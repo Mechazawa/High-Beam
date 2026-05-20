@@ -1,0 +1,10 @@
+{
+  "name": "xkcd",
+  "displayName": "xkcd",
+  "version": "0.1.0",
+  "description": "Find xkcd comics — `xkcd <num>`, `xkcd latest`, `xkcd random`, or `xkcd <text>` (title search)",
+  "debounceMs": 200,
+  "timeoutMs": 5000,
+  "memoryMb": 32,
+  "capabilities": ["actions", "http", "fs.cache"]
+}
