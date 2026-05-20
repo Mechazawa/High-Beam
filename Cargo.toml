@@ -4,6 +4,67 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 build = "build.rs"
+description = "Native Rust keyboard launcher (Spotlight / Alfred / Raycast / Ulauncher class)."
+authors = ["Bas Bieling"]
+homepage = "https://github.com/Mechazawa/high-beam"
+
+# `cargo packager` (the Tauri team's bundler) reads this table to produce
+# `target/release/HighBeam.app` + `target/release/HighBeam_<ver>_*.dmg`.
+# Install once with `cargo install cargo-packager --locked`, then
+# `just bundle` produces both artifacts.
+[package.metadata.packager]
+product-name = "HighBeam"
+identifier = "com.high-beam.HighBeam"
+# `binaries` tells the packager which build outputs to bundle; the path is
+# relative to `out-dir` and resolved against the cargo target dir at runtime.
+binaries = [{ path = "high-beam", main = true }]
+icons = ["bundle/icon.png"]
+# The plugins land in `Contents/Resources/plugins/<name>/...` at bundle
+# time; `src/daemon.rs::install_default_plugins_if_needed` copies them to
+# the user's plugin dir on first launch. Dev-only fixtures
+# (`echo`, `echo-ts`, `slow-echo`, `frecency-demo`) deliberately stay out
+# of the shipped bundle.
+# When `src` resolves to a single file, cargo-packager uses `target`
+# verbatim as the destination filename inside Contents/Resources — so each
+# entry spells out its full target path. Dev-only files (package.json,
+# vitest configs, node_modules, *.test.*, lockfiles) stay out of the
+# bundle by simply not being listed.
+resources = [
+    { src = "examples/plugins/calculator/manifest.json",   target = "plugins/calculator/manifest.json" },
+    { src = "examples/plugins/calculator/plugin.js",       target = "plugins/calculator/plugin.js" },
+    { src = "examples/plugins/http-codes/manifest.json",   target = "plugins/http-codes/manifest.json" },
+    { src = "examples/plugins/http-codes/plugin.js",       target = "plugins/http-codes/plugin.js" },
+    { src = "examples/plugins/http-codes/http.json",       target = "plugins/http-codes/http.json" },
+    { src = "examples/plugins/app-launcher/manifest.json", target = "plugins/app-launcher/manifest.json" },
+    { src = "examples/plugins/app-launcher/plugin.js",     target = "plugins/app-launcher/plugin.js" },
+    { src = "examples/plugins/paper-size/manifest.json",   target = "plugins/paper-size/manifest.json" },
+    { src = "examples/plugins/paper-size/plugin.js",       target = "plugins/paper-size/plugin.js" },
+    { src = "examples/plugins/dnd/manifest.json",          target = "plugins/dnd/manifest.json" },
+    { src = "examples/plugins/dnd/plugin.js",              target = "plugins/dnd/plugin.js" },
+    { src = "examples/plugins/dnd/5eSpells.json",          target = "plugins/dnd/5eSpells.json" },
+    { src = "themes/yosemite-spotlight.toml",              target = "themes/yosemite-spotlight.toml" },
+]
+# `app` is the .app bundle; `dmg` wraps it in a drag-to-Applications disk
+# image. Both are macOS-only.
+formats = ["app", "dmg"]
+
+[package.metadata.packager.macos]
+# Ad-hoc signing — enough to run locally; real distribution to other Macs
+# needs a Developer ID Application certificate (see docs/distribution.md).
+signing-identity = "-"
+# Hides the daemon from the Dock and Cmd-Tab. Pairs with the runtime
+# `NSApp.setActivationPolicy(.accessory)` fallback for `cargo run`.
+background-app = true
+minimum-system-version = "14.0"
+info-plist-path = "bundle/Info.plist"
+
+[package.metadata.packager.dmg]
+# Default drag-to-Applications layout; cargo-packager auto-adds the
+# Applications shortcut symlink when no app-folder-position is set, so we
+# only need to position the .app itself.
+window-size = { width = 660, height = 400 }
+app-position = { x = 180, y = 170 }
+application-folder-position = { x = 480, y = 170 }
 
 [dependencies]
 # `unstable-winit-030` exposes focus/blur events and the underlying winit
