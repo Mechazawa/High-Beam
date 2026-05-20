@@ -1,5 +1,10 @@
-import { describe, expect, test } from 'vitest';
-import { query } from './plugin.js';
+import { describe, expect, test, vi } from 'vitest';
+import { readText } from 'highbeam:fs';
+import spells from './5eSpells.json';
+
+vi.mocked(readText).mockResolvedValue(JSON.stringify(spells));
+
+const { query } = await import('./plugin.js');
 
 async function collect(iter) {
     const out = [];

@@ -6,5 +6,5 @@
   "debounceMs": 50,
   "timeoutMs": 200,
   "memoryMb": 64,
-  "capabilities": ["actions"]
+  "capabilities": ["actions", "fs.read"]
 }

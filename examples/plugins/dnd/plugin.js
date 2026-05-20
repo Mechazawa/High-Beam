@@ -5,6 +5,7 @@
 
 import { openUrl } from "highbeam:actions";
 import { fuzzy } from "highbeam:match";
+import { readText } from "highbeam:fs";
 
 const TRIGGER = /^\s*(?:5e\s+)?spells?(?:\s+(.*))?$/i;
 
@@ -13,8 +14,7 @@ let spellsPromise = null;
 
 function loadSpells() {
     if (!spellsPromise) {
-        spellsPromise = import("./5eSpells.json", { with: { type: "json" } })
-            .then((mod) => mod.default);
+        spellsPromise = readText("./5eSpells.json").then((text) => JSON.parse(text));
     }
     return spellsPromise;
 }
