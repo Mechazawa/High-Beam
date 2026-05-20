@@ -33,12 +33,14 @@ use rquickjs::{
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
+use crate::plugins::log::{LogLevel, PluginLog};
 use crate::plugins::manifest::Manifest;
 use crate::plugins::result::PluginResult;
 use crate::sdk::abort::{Abort, install_global_controller};
 use crate::sdk::actions::ActionsModule;
 use crate::sdk::capability;
 use crate::sdk::clipboard;
+use crate::sdk::console;
 use crate::sdk::fs;
 use crate::sdk::http::HttpModule;
 use crate::sdk::icons;
@@ -81,6 +83,7 @@ pub struct LoadedPlugin {
     // Held to keep the interrupt flag alive for the runtime's lifetime; the
     // interrupt hook captures a clone of the same `Arc`.
     interrupt_flag: Arc<AtomicBool>,
+    log: Arc<PluginLog>,
 }
 
 /// Errors surfaced while loading or running a plugin.
@@ -147,6 +150,24 @@ impl LoadedPlugin {
         manifest: Manifest,
         cache_dir: std::path::PathBuf,
     ) -> Result<Self, PluginError> {
+        let log = PluginLog::for_plugin_dir(plugin_dir);
+        Self::load_with_log(plugin_dir, manifest, cache_dir, log).await
+    }
+
+    /// Variant of [`Self::load_with_cache_dir`] that accepts an explicit
+    /// [`PluginLog`] handle — used by tests that need to point the logfile at
+    /// a tempdir-controlled location while still exercising the real load
+    /// pipeline.
+    ///
+    /// # Errors
+    ///
+    /// Same conditions as [`Self::load`].
+    pub async fn load_with_log(
+        plugin_dir: &Path,
+        manifest: Manifest,
+        cache_dir: std::path::PathBuf,
+        log: Arc<PluginLog>,
+    ) -> Result<Self, PluginError> {
         let entry_path = manifest.entry_path(plugin_dir);
         let source = std::fs::read_to_string(&entry_path).map_err(|err| {
             PluginError::Io(std::io::Error::new(
@@ -191,7 +212,16 @@ impl LoadedPlugin {
         let source_bytes = source.into_bytes();
         let plugin_caps = manifest.capabilities.clone();
         let plugin_dir_owned = plugin_dir.to_path_buf();
+        let log_for_ctx = Arc::clone(&log);
         async_with!(context => |ctx| {
+            // `console` goes first so any failure further down in this block
+            // that we choose to log can still reach the plugin's logfile via
+            // a JS-side `console.error`. (Today we log from Rust instead, but
+            // installing first costs nothing and keeps the invariant simple.)
+            console::install(&ctx, &log_for_ctx)
+                .catch(&ctx)
+                .map_err(|err| PluginError::Js(format!("install console: {err}")))?;
+
             // Install the JS-side AbortController polyfill so plugins can do
             // `new AbortController()` for their own cancellation flows.
             install_global_controller(&ctx)
@@ -271,7 +301,15 @@ impl LoadedPlugin {
             context,
             timeout,
             interrupt_flag,
+            log,
         })
+    }
+
+    /// The per-plugin log writer. Exposed for the loader (which logs load-time
+    /// failures into the same file) and tests.
+    #[must_use]
+    pub fn log(&self) -> Arc<PluginLog> {
+        Arc::clone(&self.log)
     }
 
     /// Stream results from `query(input, signal)` over an `mpsc` channel.
@@ -299,11 +337,16 @@ impl LoadedPlugin {
         self.interrupt_flag.store(false, Ordering::Relaxed);
         let flag_for_timer = Arc::clone(&self.interrupt_flag);
         let timeout = self.timeout;
+        // Distinguishes "timer tripped the interrupt" from "caller cancelled"
+        // so the post-run logger can report a budget exhaustion specifically.
+        let timed_out = Arc::new(AtomicBool::new(false));
+        let timed_out_for_timer = Arc::clone(&timed_out);
 
         let cancel_for_timer = cancel.clone();
         tokio::spawn(async move {
             tokio::select! {
                 () = tokio::time::sleep(timeout) => {
+                    timed_out_for_timer.store(true, Ordering::Relaxed);
                     flag_for_timer.store(true, Ordering::Relaxed);
                     cancel_for_timer.cancel();
                 }
@@ -317,17 +360,23 @@ impl LoadedPlugin {
 
         let input_owned = input.to_owned();
         let context = self.context.clone();
-        let plugin_name = self.manifest.name.clone();
+        let log_for_task = Arc::clone(&self.log);
+        let timeout_ms = self.manifest.timeout_ms;
+        let memory_mb = self.manifest.memory_mb;
         tokio::spawn(async move {
+            let input_for_stream = input_owned.clone();
             let outcome: Result<(), PluginError> = async_with!(context => |ctx| {
-                stream_query(ctx, &input_owned, &tx, &cancel).await
+                stream_query(ctx, &input_for_stream, &tx, &cancel).await
             })
             .await;
-            if let Err(err) = outcome
-                && !matches!(err, PluginError::Cancelled)
-            {
-                eprintln!("plugins: {plugin_name}: query: {err}");
-            }
+            log_query_outcome(
+                &log_for_task,
+                &outcome,
+                &input_owned,
+                timed_out.load(Ordering::Relaxed),
+                timeout_ms,
+                memory_mb,
+            );
         });
 
         rx
@@ -340,6 +389,51 @@ impl Drop for LoadedPlugin {
         // handle the rest via their own cleanup.
         self.interrupt_flag.store(false, Ordering::Relaxed);
     }
+}
+
+/// Map a `query()` outcome to a line in the plugin's logfile.
+///
+/// Distinguishes four cases the user wants to debug separately:
+///   * timeout — the manifest budget was exhausted (`WARN`)
+///   * out-of-memory — the memory cap tripped a `RangeError` (`ERROR`)
+///   * generic exception — anything else the plugin's iterator threw (`ERROR`)
+///   * `Cancelled` — no log; the host abandoned the query, not the plugin.
+fn log_query_outcome(
+    log: &PluginLog,
+    outcome: &Result<(), PluginError>,
+    input: &str,
+    timed_out: bool,
+    timeout_ms: u64,
+    memory_mb: u32,
+) {
+    let Err(err) = outcome else {
+        return;
+    };
+    // Timeout wins over Cancelled: the host-driven cancel that flips on a
+    // timeout is the *cause* the user wants to see, not the resulting
+    // "cancelled" classification.
+    if timed_out || matches!(err, PluginError::Timeout) {
+        log.write(
+            LogLevel::Warn,
+            &format!("query timed out after {timeout_ms}ms (manifest budget: {timeout_ms}ms); input: {input:?}"),
+        );
+        return;
+    }
+    if matches!(err, PluginError::Cancelled) {
+        return;
+    }
+    let msg = err.to_string();
+    if msg.to_ascii_lowercase().contains("out of memory") {
+        log.write(
+            LogLevel::Error,
+            &format!("out of memory; memory limit {memory_mb}mb exceeded; input: {input:?}"),
+        );
+        return;
+    }
+    log.write(
+        LogLevel::Error,
+        &format!("query threw: {msg}; input: {input:?}"),
+    );
 }
 
 /// Iterate the plugin's async iterator, sending each yielded result through
@@ -469,7 +563,7 @@ fn normalize_async_iterator<'js>(
 /// `~/Library/Caches/high-beam/plugins/<name>/` on macOS,
 /// `$XDG_CACHE_HOME/high-beam/plugins/<name>/` on Linux. Falls back to a
 /// temp-dir-rooted path if `ProjectDirs` can't resolve (CI, exotic env).
-fn default_cache_dir(plugin_name: &str) -> std::path::PathBuf {
+pub(crate) fn default_cache_dir(plugin_name: &str) -> std::path::PathBuf {
     if let Some(dirs) = directories::ProjectDirs::from("", "", "high-beam") {
         dirs.cache_dir().join("plugins").join(plugin_name)
     } else {

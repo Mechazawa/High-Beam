@@ -8,6 +8,7 @@ pub mod abort;
 pub mod actions;
 pub mod capability;
 pub mod clipboard;
+pub mod console;
 pub(crate) mod errors;
 pub mod fs;
 pub mod http;

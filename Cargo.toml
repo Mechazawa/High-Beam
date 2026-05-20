@@ -89,6 +89,11 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 # `parse` feature is the default and is all we need (no serialization).
 toml = { version = "0.8", default-features = false, features = ["parse"] }
 
+# UTC timestamps for per-plugin `plugin.log` lines. `chrono` is already in the
+# transitive tree via slint, so adding it explicitly is essentially free; the
+# default features pull in serde/clock and we only need clock + std formatting.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
 # macOS-only deps:
 #   * `global-hotkey` — the only Rust crate that actually works on modern macOS
 #     for app-level global hotkeys without an Accessibility prompt; Linux is

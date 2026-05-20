@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use directories::ProjectDirs;
 
+use crate::plugins::log::{LogLevel, PluginLog};
 use crate::plugins::manifest::Manifest;
 use crate::plugins::runtime::LoadedPlugin;
 use crate::sdk::capability::KNOWN_CAPABILITIES;
@@ -114,11 +115,21 @@ async fn load_one(plugin_dir: &Path) -> Result<LoadedPlugin, LoadError> {
     let bytes = std::fs::read(&manifest_path).map_err(|err| {
         LoadError::Failed(format!("read {}: {err}", manifest_path.display()).into())
     })?;
+    // Manifest parse failures are reported to stderr rather than plugin.log:
+    // we have no per-plugin identity yet (the file is the source of truth for
+    // the name), so writing into a per-plugin file before the manifest parses
+    // would mean inventing a name — leaving stderr as the only honest channel.
     let manifest = Manifest::parse(&bytes)
         .map_err(|err| LoadError::Failed(format!("parse manifest.json: {err}").into()))?;
 
+    let log = PluginLog::for_plugin_dir(plugin_dir);
+
     for cap in &manifest.capabilities {
         if !KNOWN_CAPABILITIES.contains(&cap.as_str()) {
+            log.write(
+                LogLevel::Warn,
+                &format!("ignoring unknown capability {cap:?} (known: {KNOWN_CAPABILITIES:?})"),
+            );
             eprintln!(
                 "plugins: {}: ignoring unknown capability {cap:?} (known: {KNOWN_CAPABILITIES:?})",
                 manifest.name,
@@ -138,9 +149,13 @@ async fn load_one(plugin_dir: &Path) -> Result<LoadedPlugin, LoadError> {
         });
     }
 
-    let loaded = LoadedPlugin::load(plugin_dir, manifest)
+    let cache_dir = crate::plugins::runtime::default_cache_dir(&manifest.name);
+    let loaded = LoadedPlugin::load_with_log(plugin_dir, manifest, cache_dir, Arc::clone(&log))
         .await
-        .map_err(|err| LoadError::Failed(Box::new(err)))?;
+        .map_err(|err| {
+            log.write(LogLevel::Error, &format!("load failed: {err}"));
+            LoadError::Failed(Box::new(err))
+        })?;
     Ok(loaded)
 }
 
