@@ -9,6 +9,7 @@ use std::thread;
 use slint::ComponentHandle;
 
 use crate::QueryWindow;
+use crate::app;
 use crate::ipc::{Command, Server};
 use crate::window;
 
@@ -40,6 +41,12 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
 
     let window = QueryWindow::new()?;
     window::configure(&window);
+
+    // Start the plugin runtime. The host owns a background thread + tokio
+    // runtime and wires the per-keystroke `query_edited` and `Enter`
+    // `invoke_selected` callbacks. We hold onto the handle so it lives as
+    // long as the daemon does — `Drop` sends Shutdown to the worker.
+    let _plugin_host = app::start(&window)?;
 
     spawn_ipc_listener(&options.socket_path, window.as_weak())?;
 

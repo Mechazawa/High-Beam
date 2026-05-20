@@ -1,6 +1,26 @@
-// Stage 2 placeholder query window. Stage 3 replaces the single TextInput with
-// the real input + result rows layout. Tokens here are hard-coded; theming
-// (Stage 8) will bind them to runtime properties from theme.toml.
+// Stage 3 layout: query input + result rows.
+//
+// The single source of truth for what's displayed sits on the Rust side. UI
+// state on the Slint side is kept to:
+//   * `query-text` — text input mirror (see clear-input() rationale below)
+//   * `results` — a model of rows pushed from Rust after each query dispatch
+//   * `selected-index` — which row is highlighted; reset to 0 on every new
+//     result set
+//
+// Theme tokens are still hard-coded (Stage 8 will bind them to runtime
+// properties from `theme.toml`).
+
+import { ScrollView } from "std-widgets.slint";
+
+// Wire shape sent across Rust -> Slint for each row. `key` is the composite
+// `<plugin>:<result_key>` so two plugins emitting the same `key` string don't
+// collide and the row keying is stable on re-renders.
+export struct ResultRow {
+    key: string,
+    title: string,
+    subtitle: string,    // empty string when absent — Slint structs need fixed types
+    has-subtitle: bool,
+}
 
 export component QueryWindow inherits Window {
     title: "High Beam";
@@ -10,8 +30,15 @@ export component QueryWindow inherits Window {
     default-font-size: 18px;
 
     in-out property <string> query-text;
+    in-out property <[ResultRow]> results: [];
+    in-out property <int> selected-index: 0;
+    in-out property <int> max-rows: 9;
+
     callback query-edited(string);
     callback escape-pressed();
+    // Fires when the user presses Enter on the highlighted row. The Rust side
+    // looks up the corresponding result and runs its action.
+    callback invoke-selected();
 
     // forward-focus makes the input the focus target whenever the window
     // itself is focused. Combined with the explicit `input.focus()` call in
@@ -32,10 +59,18 @@ export component QueryWindow inherits Window {
     public function clear-input() {
         input.text = "";
         root.query-text = "";
+        root.results = [];
+        root.selected-index = 0;
     }
 
+    // Derived: how tall the rows area should be. Each row is ~52px (padding
+    // included). 9 rows max keeps the window from swallowing the whole screen.
+    property <int> visible-row-count: min(results.length, max-rows);
+    property <length> rows-height: visible-row-count * 52px;
+    property <length> input-height: 80px;
+
     width: 760px;
-    height: 80px;
+    height: input-height + (results.length > 0 ? rows-height + 1px : 0);
 
     // Translucent rounded panel sits inside a transparent window so the corner
     // radius reads cleanly on the desktop.
@@ -45,49 +80,117 @@ export component QueryWindow inherits Window {
         border-width: 1px;
         border-color: #00000010;
 
-        input := TextInput {
-            // Span the full panel so `vertical-alignment: center` has room to
-            // act on. Without an explicit height, the TextInput sizes to its
-            // glyph metrics and the alignment property has nothing to align
-            // against — which is what produced the top-aligned text bug.
-            x: 20px;
-            y: 0;
-            width: parent.width - 40px;
-            height: parent.height;
-            font-size: 32px;
-            color: #1d1d1f;
-            single-line: true;
-            vertical-alignment: center;
-            text: root.query-text;
-            // Placeholder text rendered behind the input when empty.
-            // TextInput has no native placeholder; emulate with a sibling Text.
+        VerticalLayout {
+            // Input area
+            Rectangle {
+                height: input-height;
+                input := TextInput {
+                    // Span the input area so vertical-alignment has room to
+                    // act on. Without an explicit height, the TextInput sizes
+                    // to its glyph metrics and the alignment property has
+                    // nothing to align against.
+                    x: 20px;
+                    y: 0;
+                    width: parent.width - 40px;
+                    height: parent.height;
+                    font-size: 32px;
+                    color: #1d1d1f;
+                    single-line: true;
+                    vertical-alignment: center;
+                    text: root.query-text;
 
-            edited => {
-                root.query-text = self.text;
-                root.query-edited(self.text);
-            }
+                    edited => {
+                        root.query-text = self.text;
+                        root.query-edited(self.text);
+                    }
 
-            key-pressed(event) => {
-                if (event.text == Key.Escape) {
-                    root.escape-pressed();
-                    return accept;
+                    key-pressed(event) => {
+                        if (event.text == Key.Escape) {
+                            root.escape-pressed();
+                            return accept;
+                        }
+                        if (event.text == Key.Return) {
+                            if (root.results.length > 0) {
+                                root.invoke-selected();
+                            }
+                            return accept;
+                        }
+                        if (event.text == Key.DownArrow) {
+                            if (root.selected-index < root.results.length - 1) {
+                                root.selected-index += 1;
+                            }
+                            return accept;
+                        }
+                        if (event.text == Key.UpArrow) {
+                            if (root.selected-index > 0) {
+                                root.selected-index -= 1;
+                            }
+                            return accept;
+                        }
+                        reject
+                    }
                 }
-                reject
-            }
-        }
 
-        // Faux placeholder: only visible when the input is empty. Mirrors the
-        // input's geometry and alignment so the two sit at the same baseline.
-        Text {
-            x: 20px;
-            y: 0;
-            width: parent.width - 40px;
-            height: parent.height;
-            text: "Query…";
-            font-size: 32px;
-            color: #86868b;
-            vertical-alignment: center;
-            visible: root.query-text == "";
+                // Faux placeholder: only visible when the input is empty.
+                Text {
+                    x: 20px;
+                    y: 0;
+                    width: parent.width - 40px;
+                    height: parent.height;
+                    text: "Query…";
+                    font-size: 32px;
+                    color: #86868b;
+                    vertical-alignment: center;
+                    visible: root.query-text == "";
+                }
+            }
+
+            // Separator line — only visible when there are results.
+            Rectangle {
+                height: results.length > 0 ? 1px : 0;
+                background: #00000010;
+            }
+
+            // Result rows
+            Rectangle {
+                height: rows-height;
+                clip: true;
+                visible: results.length > 0;
+
+                VerticalLayout {
+                    spacing: 0px;
+                    for row[idx] in results: TouchArea {
+                        height: 52px;
+                        clicked => {
+                            root.selected-index = idx;
+                            root.invoke-selected();
+                        }
+                        Rectangle {
+                            background: idx == root.selected-index ? #0a84ff33 : transparent;
+                            VerticalLayout {
+                                padding-left: 20px;
+                                padding-right: 20px;
+                                padding-top: 8px;
+                                padding-bottom: 8px;
+                                spacing: 2px;
+                                Text {
+                                    text: row.title;
+                                    color: #1d1d1f;
+                                    font-size: 14px;
+                                    overflow: elide;
+                                }
+
+                                if row.has-subtitle: Text {
+                                    text: row.subtitle;
+                                    color: #86868b;
+                                    font-size: 12px;
+                                    overflow: elide;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

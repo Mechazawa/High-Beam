@@ -11,6 +11,39 @@ build = "build.rs"
 slint = { version = "1.16", features = ["unstable-winit-030"] }
 clap = { version = "4", features = ["derive"] }
 directories = "6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Plugin runtime. We picked rquickjs 0.11 (latest stable as of 2026-05) over
+# alternatives like `boa_engine` / `deno_core` because:
+#   * the docs explicitly call out our needs — per-Context memory cap,
+#     interrupt-hook based wall-clock timeout, custom module resolver+loader
+#     for the `highbeam:` import scheme, and async generator support;
+#   * QuickJS itself is ~1 MB embedded vs Deno-class engines that bring V8 or
+#     huge crate trees — we want a JS sandbox, not a runtime.
+# Features:
+#   * `loader` — Resolver + Loader traits + ModuleLoader for builtin modules
+#   * `futures` — AsyncRuntime / AsyncContext + Promise::into_future, needed to
+#     drive `async function* query()` from Rust without manual job-queue pumping
+#   * `macro` — `#[rquickjs::module]` etc. for ergonomic host module exports
+#   * `parallel` — required by `futures` for Send-able runtime handles
+rquickjs = { version = "0.11", features = ["loader", "futures", "macro", "parallel"] }
+
+# Async executor for driving the rquickjs AsyncRuntime per query. Single-thread
+# current-thread flavor — every plugin query collects on the Slint event-loop
+# thread today; we'll revisit when streaming lands in Stage 4.
+tokio = { version = "1", features = ["rt", "macros", "time", "sync"] }
+
+# Clipboard. `arboard` is the obvious choice — actively maintained, cross-platform
+# (macOS / X11 / Wayland / Windows), and the docs sample line up exactly with our
+# one-shot "set text" use case. `copypasta` is the other contender but ships
+# more transitively and the README hasn't been touched in 2 years.
+arboard = "3"
+
+# Spawn a URL in the user's default browser / app handler. The `open` crate is
+# the de facto pick — same `open::that(url)` works on macOS (`/usr/bin/open`)
+# and Linux (`xdg-open`).
+open = "5"
 
 # macOS-only deps:
 #   * `global-hotkey` — the only Rust crate that actually works on modern macOS

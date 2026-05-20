@@ -14,11 +14,9 @@ use crate::QueryWindow;
 /// Caller is responsible for showing/hiding the window in response to hotkey
 /// or IPC events. This function only attaches handlers.
 pub(crate) fn configure(window: &QueryWindow) {
-    // Typing in the input prints to stdout. Stage 3 replaces this with the
-    // dispatch into the plugin runtime.
-    window.on_query_edited(|text| {
-        println!("query: {text}");
-    });
+    // `on_query_edited` and `on_invoke_selected` are wired by `crate::app::start`
+    // because they need the plugin host's channel / latest-results snapshot.
+    // Anything that doesn't depend on host state stays here.
 
     // Esc closes the window. The daemon stays running.
     let weak_for_esc = window.as_weak();
