@@ -16,13 +16,24 @@ const SMOKE_TIMEOUT: Duration = Duration::from_secs(5);
 const EXAMPLES: &[&str] = &[
     "examples/plugins/app-launcher",
     "examples/plugins/calculator",
+    "examples/plugins/color-converter",
+    "examples/plugins/dictionary-linux",
+    "examples/plugins/dictionary-macos",
     "examples/plugins/dnd",
     "examples/plugins/echo",
     "examples/plugins/echo-ts",
+    "examples/plugins/file-search",
     "examples/plugins/frecency-demo",
     "examples/plugins/http-codes",
+    "examples/plugins/kill-process",
     "examples/plugins/paper-size",
+    "examples/plugins/prefpanes",
+    "examples/plugins/quick-links",
     "examples/plugins/slow-echo",
+    "examples/plugins/unit-conversions",
+    "examples/plugins/web-search",
+    "examples/plugins/window-mgmt",
+    "examples/plugins/xkcd",
 ];
 
 fn rt() -> tokio::runtime::Runtime {
@@ -98,6 +109,61 @@ fn slow_echo_loads_in_rquickjs() {
 #[test]
 fn app_launcher_loads_in_rquickjs() {
     smoke_test("examples/plugins/app-launcher");
+}
+
+#[test]
+fn color_converter_loads_in_rquickjs() {
+    smoke_test("examples/plugins/color-converter");
+}
+
+#[test]
+fn dictionary_linux_loads_in_rquickjs() {
+    smoke_test("examples/plugins/dictionary-linux");
+}
+
+#[test]
+fn dictionary_macos_loads_in_rquickjs() {
+    smoke_test("examples/plugins/dictionary-macos");
+}
+
+#[test]
+fn file_search_loads_in_rquickjs() {
+    smoke_test("examples/plugins/file-search");
+}
+
+#[test]
+fn kill_process_loads_in_rquickjs() {
+    smoke_test("examples/plugins/kill-process");
+}
+
+#[test]
+fn prefpanes_loads_in_rquickjs() {
+    smoke_test("examples/plugins/prefpanes");
+}
+
+#[test]
+fn quick_links_loads_in_rquickjs() {
+    smoke_test("examples/plugins/quick-links");
+}
+
+#[test]
+fn unit_conversions_loads_in_rquickjs() {
+    smoke_test("examples/plugins/unit-conversions");
+}
+
+#[test]
+fn web_search_loads_in_rquickjs() {
+    smoke_test("examples/plugins/web-search");
+}
+
+#[test]
+fn window_mgmt_loads_in_rquickjs() {
+    smoke_test("examples/plugins/window-mgmt");
+}
+
+#[test]
+fn xkcd_loads_in_rquickjs() {
+    smoke_test("examples/plugins/xkcd");
 }
 
 #[test]
