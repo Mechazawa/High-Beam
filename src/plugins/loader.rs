@@ -97,7 +97,11 @@ pub async fn load_all(options: &LoaderOptions) -> Vec<Arc<LoadedPlugin>> {
                 );
                 plugins.push(Arc::new(plugin));
             }
-            Err(err) => {
+            Err(LoadError::Skipped { name, reason }) => {
+                // INFO-level: deliberate gate, not an error condition.
+                eprintln!("plugins: skipping {name}: {reason}");
+            }
+            Err(LoadError::Failed(err)) => {
                 eprintln!("plugins: skipping {}: {err}", path.display());
             }
         }
@@ -105,11 +109,13 @@ pub async fn load_all(options: &LoaderOptions) -> Vec<Arc<LoadedPlugin>> {
     plugins
 }
 
-async fn load_one(plugin_dir: &Path) -> Result<LoadedPlugin, Box<dyn std::error::Error>> {
+async fn load_one(plugin_dir: &Path) -> Result<LoadedPlugin, LoadError> {
     let manifest_path = plugin_dir.join("manifest.json");
-    let bytes = std::fs::read(&manifest_path)
-        .map_err(|err| format!("read {}: {err}", manifest_path.display()))?;
-    let manifest = Manifest::parse(&bytes).map_err(|err| format!("parse manifest.json: {err}"))?;
+    let bytes = std::fs::read(&manifest_path).map_err(|err| {
+        LoadError::Failed(format!("read {}: {err}", manifest_path.display()).into())
+    })?;
+    let manifest = Manifest::parse(&bytes)
+        .map_err(|err| LoadError::Failed(format!("parse manifest.json: {err}").into()))?;
 
     for cap in &manifest.capabilities {
         if !KNOWN_CAPABILITIES.contains(&cap.as_str()) {
@@ -120,8 +126,43 @@ async fn load_one(plugin_dir: &Path) -> Result<LoadedPlugin, Box<dyn std::error:
         }
     }
 
-    let loaded = LoadedPlugin::load(plugin_dir, manifest).await?;
+    // Platform gating happens BEFORE we hand the manifest to `LoadedPlugin::load`,
+    // because instantiating the rquickjs context + evaluating the entry module
+    // is the expensive part — there's no point paying that cost for a plugin
+    // we're about to discard. A skipped plugin returns a typed `Skipped` so
+    // `load_all` can log INFO without conflating it with a real error.
+    if !manifest.supports_current_platform() {
+        let reason = manifest
+            .platform_skip_reason()
+            .unwrap_or_else(|| "platform gate".to_owned());
+        return Err(LoadError::Skipped {
+            name: manifest.name,
+            reason,
+        });
+    }
+
+    let loaded = LoadedPlugin::load(plugin_dir, manifest)
+        .await
+        .map_err(|err| LoadError::Failed(Box::new(err)))?;
     Ok(loaded)
+}
+
+/// Two-variant error so `load_all` can distinguish a deliberate platform-gate
+/// skip (logged at INFO) from a load failure (logged as an error). Without
+/// this split the user would see scary "skipping" lines for plugins that did
+/// nothing wrong.
+enum LoadError {
+    Skipped { name: String, reason: String },
+    Failed(Box<dyn std::error::Error>),
+}
+
+impl std::fmt::Display for LoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Skipped { reason, .. } => write!(f, "{reason}"),
+            Self::Failed(err) => write!(f, "{err}"),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -156,5 +197,107 @@ mod tests {
         // The plugins dir under our control either exists or doesn't —
         // either way `resolve` should hand us a non-empty PathBuf.
         assert!(!opts.plugins_dir.as_os_str().is_empty());
+    }
+
+    /// Build a throwaway plugin tree on disk so the loader can scan it.
+    /// We hand-roll a temp dir via `std::env::temp_dir` + nanos so the test
+    /// has zero extra deps and doesn't fight cargo's lack of `tempfile`.
+    fn write_plugin(root: &Path, name: &str, manifest: &str, entry: &str) {
+        let dir = root.join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("manifest.json"), manifest).unwrap();
+        std::fs::write(dir.join("plugin.js"), entry).unwrap();
+    }
+
+    fn fresh_tmp(tag: &str) -> PathBuf {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let p = std::env::temp_dir().join(format!("high-beam-loader-test-{tag}-{now}"));
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    #[test]
+    fn platform_gated_plugin_is_skipped_by_loader() {
+        let root = fresh_tmp("gate");
+        // A "wrong-os" plugin that declares only the OTHER known platform —
+        // gating must skip it without crashing or polluting the result set.
+        let other = if std::env::consts::OS == "macos" {
+            "linux"
+        } else {
+            "macos"
+        };
+        let wrong =
+            format!(r#"{{ "name": "wrong-os", "entry": "plugin.js", "platforms": ["{other}"] }}"#);
+        write_plugin(
+            &root,
+            "wrong-os",
+            &wrong,
+            "export async function* query() {}",
+        );
+        // And a matching plugin so we can assert the loader still found one.
+        let right = format!(
+            r#"{{ "name": "right-os", "entry": "plugin.js", "platforms": ["{}"] }}"#,
+            std::env::consts::OS,
+        );
+        write_plugin(
+            &root,
+            "right-os",
+            &right,
+            "export async function* query() {}",
+        );
+
+        let opts = LoaderOptions {
+            plugins_dir: root.clone(),
+        };
+        let plugins = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio rt")
+            .block_on(load_all(&opts));
+
+        // The wrong-os plugin must be absent from the loaded set; the right-os
+        // plugin must be present. Anything else (panic, both present, both
+        // absent) is a regression.
+        let names: Vec<_> = plugins.iter().map(|p| p.manifest.name.as_str()).collect();
+        assert!(
+            !names.contains(&"wrong-os"),
+            "wrong-os plugin should have been gated out, got {names:?}",
+        );
+        assert!(
+            names.contains(&"right-os"),
+            "right-os plugin should have loaded, got {names:?}",
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn empty_platforms_array_disables_plugin() {
+        let root = fresh_tmp("shelved");
+        write_plugin(
+            &root,
+            "shelved",
+            r#"{ "name": "shelved", "entry": "plugin.js", "platforms": [] }"#,
+            "export async function* query() {}",
+        );
+
+        let opts = LoaderOptions {
+            plugins_dir: root.clone(),
+        };
+        let plugins = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio rt")
+            .block_on(load_all(&opts));
+
+        assert!(
+            plugins.is_empty(),
+            "empty platforms must disable the plugin everywhere",
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
