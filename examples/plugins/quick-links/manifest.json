@@ -1,0 +1,10 @@
+{
+  "name": "quick-links",
+  "displayName": "Quick Links",
+  "version": "0.1.0",
+  "description": "Open URL templates by prefix — `gh user/repo`, `npm pkg`, `mdn api`, etc.",
+  "debounceMs": 50,
+  "timeoutMs": 100,
+  "memoryMb": 16,
+  "capabilities": ["actions", "fs.read"]
+}
