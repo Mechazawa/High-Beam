@@ -16,6 +16,7 @@ const SMOKE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Example plugins under `examples/plugins/` whose code is loadable today.
 const EXAMPLES: &[&str] = &[
+    "examples/plugins/app-launcher",
     "examples/plugins/calculator",
     "examples/plugins/dnd",
     "examples/plugins/echo",
@@ -24,7 +25,6 @@ const EXAMPLES: &[&str] = &[
     "examples/plugins/http-codes",
     "examples/plugins/paper-size",
     "examples/plugins/slow-echo",
-    "examples/plugins/spotlight",
 ];
 
 fn rt() -> tokio::runtime::Runtime {
@@ -39,6 +39,13 @@ fn smoke_test(dir: &str) {
         let path = Path::new(dir);
         let manifest_bytes = std::fs::read(path.join("manifest.json")).expect("read manifest.json");
         let manifest = Manifest::parse(&manifest_bytes).expect("parse manifest");
+
+        // The loader gates by `platforms`; the smoke runner bypasses the
+        // loader, so re-apply the gate here to keep the test green on every OS.
+        if !manifest.supports_current_platform() {
+            return;
+        }
+
         let plugin = LoadedPlugin::load(path, manifest)
             .await
             .expect("plugin loads in real rquickjs");
@@ -91,8 +98,8 @@ fn slow_echo_loads_in_rquickjs() {
 }
 
 #[test]
-fn spotlight_loads_in_rquickjs() {
-    smoke_test("examples/plugins/spotlight");
+fn app_launcher_loads_in_rquickjs() {
+    smoke_test("examples/plugins/app-launcher");
 }
 
 #[test]
