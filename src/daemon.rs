@@ -10,6 +10,7 @@ use slint::ComponentHandle;
 
 use crate::QueryWindow;
 use crate::app;
+use crate::bundle_install;
 use crate::ipc::{Command, Server};
 use crate::logging;
 use crate::theme::Theme;
@@ -37,6 +38,16 @@ pub struct Options {
 #[allow(clippy::needless_pass_by_value)]
 pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     logging::try_init();
+
+    // Run before the plugin loader picks a directory: when launched from
+    // `HighBeam.app` we want bundled defaults landing in the user's plugin
+    // dir before [`crate::plugins::loader::LoaderOptions::resolve`] scans
+    // it. A `--plugins-dir` override bypasses the platform default and
+    // therefore the bundle install path too — that's intentional, devs
+    // pointing at an arbitrary checkout don't want their workspace seeded.
+    if options.plugins_dir.is_none() {
+        bundle_install::install_default_plugins_if_needed();
+    }
 
     // Pin the winit backend explicitly — we rely on it for monitor enumeration
     // and focus events; a default-backend swap would otherwise fail opaquely.

@@ -36,3 +36,10 @@ fmt-fix:
     cargo fmt
 
 check: fmt lint test
+
+# Build the release binary, then run cargo-packager to produce a .app
+# bundle and drag-to-Applications .dmg in target/release.
+# Requires `cargo install cargo-packager --locked` once per machine.
+bundle:
+    cargo build --release
+    cargo packager --release

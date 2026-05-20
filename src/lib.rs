@@ -1,6 +1,7 @@
 //! High Beam — native Rust keyboard launcher.
 
 pub mod app;
+pub mod bundle_install;
 pub mod cli;
 pub mod daemon;
 pub mod frecency;

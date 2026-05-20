@@ -86,18 +86,20 @@ No special permissions. Plugins that run subprocesses via
 
 ## Known platform limitations
 
-- **macOS Dock / Cmd-Tab**: the daemon currently appears briefly in the
-  Dock when launched via `cargo run`. Setting
-  `NSApp.setActivationPolicy(.accessory)` or shipping as a `.app` with
-  `LSUIElement=1` in `Info.plist` would fix this — TODO when a real
-  packaged build lands.
+- **macOS Dock / Cmd-Tab**: when launched from `HighBeam.app` the
+  `LSUIElement=1` key in Info.plist hides the daemon from both. When
+  launched via `cargo run` the daemon still appears in the Dock — setting
+  `NSApp.setActivationPolicy(.accessory)` at runtime would also fix the
+  unbundled case, tracked as a TODO in `src/window.rs`.
 - **Linux Wayland global hotkeys**: no portable API yet. The WM keybind +
   `highbeam --open` flow is the v1 answer.
 - **No real macOS vibrancy**: v1 uses the `background` alpha channel for
   flat translucency. `NSVisualEffectView` integration is post-v1.
 
-## Distribution (out of scope for v1)
+## Distribution
 
-- macOS: build to a `.app` bundle, eventually code-signed + notarized.
+- macOS: `just bundle` produces an ad-hoc-signed `.app` + drag-to-Applications
+  `.dmg`. Real distribution to other Macs needs a Developer ID certificate +
+  notarization — see [docs/distribution.md](distribution.md).
 - Linux: plain binary; Flatpak / AUR packaging later.
 - Auto-updater: deferred. v1 is `cargo install` / manual.

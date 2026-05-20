@@ -1,0 +1,139 @@
+# Distribution
+
+`just bundle` produces two artifacts under `target/release/`:
+
+- `HighBeam.app` — the macOS app bundle, ad-hoc signed
+- `HighBeam_<version>_<arch>.dmg` — drag-to-Applications disk image
+  containing the .app
+
+The pipeline is driven by [`cargo-packager`](https://github.com/crabnebula-dev/cargo-packager).
+The full config lives in `[package.metadata.packager]` in `Cargo.toml`.
+
+```sh
+cargo install cargo-packager --locked     # one-time
+just bundle                               # every release
+```
+
+## Bundle contents
+
+```
+HighBeam.app/
+  Contents/
+    Info.plist                    # generated; merged with bundle/Info.plist
+    _CodeSignature/
+    MacOS/
+      high-beam                   # the release binary, ad-hoc signed
+    Resources/
+      HighBeam.icns               # converted from bundle/icon.png
+      plugins/                    # bundled defaults (see below)
+        calculator/{manifest.json,plugin.js}
+        http-codes/{manifest.json,plugin.js,http.json}
+        app-launcher/{manifest.json,plugin.js}
+        paper-size/{manifest.json,plugin.js}
+        dnd/{manifest.json,plugin.js,5eSpells.json}
+      themes/
+        yosemite-spotlight.toml
+```
+
+### First-launch plugin install
+
+`src/bundle_install.rs::install_default_plugins_if_needed` runs once at
+daemon startup (before the plugin loader scans). If the user's plugin
+directory is missing or empty, the bundled defaults are recursively copied
+in. Subsequent launches notice the populated dir and leave it alone, so the
+user can edit / remove / add plugins freely without `.app` updates clobbering
+their copy.
+
+The `--plugins-dir <path>` CLI override skips this entirely; a developer
+pointing at a checkout doesn't want a workspace seeded.
+
+### Updating the shipped plugin list
+
+The set of bundled plugins is the explicit list in
+`Cargo.toml::[package.metadata.packager]::resources`. Dev-only fixtures
+(`echo`, `echo-ts`, `slow-echo`, `frecency-demo`) deliberately stay out.
+Adding a new plugin to the ship-list: append three entries (manifest,
+plugin.js, any data files) to the `resources` array.
+
+## Icon
+
+The current `bundle/icon.png` is a generated 512×512 placeholder ("HB"
+letters on amber background). To swap in a real icon:
+
+1. Drop a 1024×1024 PNG at `bundle/icon.png` (or commit multiple sizes —
+   cargo-packager picks the largest available).
+2. Run `just bundle`; cargo-packager generates the multi-resolution
+   `.icns` automatically.
+
+Pre-generated `.icns` files are also accepted — list them in the `icons`
+array in `Cargo.toml`.
+
+## Signing & distribution
+
+The bundle config uses `signing-identity = "-"` — Apple's ad-hoc signature
+identity. This is sufficient to RUN the app locally on the machine that
+built it, but every other Mac will see Gatekeeper's "unidentified developer"
+warning. `spctl --assess` deliberately rejects ad-hoc-signed apps.
+
+For real distribution you need:
+
+### 1. Enroll in the Apple Developer Program
+
+$99/yr at <https://developer.apple.com/programs/>. Required to issue any
+Developer ID certificate; this is the cost of admission, not optional.
+
+### 2. Create a Developer ID Application certificate
+
+Inside Xcode → Settings → Accounts → Manage Certificates, click `+` → "Developer ID
+Application". The certificate name is what goes in `signing-identity`, of
+the form `Developer ID Application: Your Name (TEAMID12)`.
+
+### 3. Point cargo-packager at the cert
+
+Update `[package.metadata.packager.macos]` in `Cargo.toml`:
+
+```toml
+signing-identity = "Developer ID Application: Bas Bieling (XXXXXXXXXX)"
+```
+
+The keychain holding the private key must be unlocked when `cargo packager`
+runs.
+
+### 4. Notarize the .dmg
+
+Apple's notarytool inspects the bundle for malware/policy violations and
+issues a ticket. The recommended flow uses a keychain-stored
+app-specific password:
+
+```sh
+# One-time setup: store an app-specific password (created at appleid.apple.com)
+# under a keychain profile name of your choice.
+xcrun notarytool store-credentials high-beam-notary \
+    --apple-id "you@example.com" \
+    --team-id "XXXXXXXXXX"
+
+# Per release:
+xcrun notarytool submit target/release/HighBeam_*.dmg \
+    --keychain-profile high-beam-notary \
+    --wait
+```
+
+### 5. Staple the ticket
+
+Notarization succeeds asynchronously; stapling embeds the ticket into the
+.dmg so Gatekeeper can verify offline.
+
+```sh
+xcrun stapler staple target/release/HighBeam_*.dmg
+```
+
+`cargo packager` can drive notarization automatically when the
+`APPLE_KEYCHAIN_PROFILE` (or `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID`)
+environment variables are set; it currently logs `Skipping app notarization`
+when none are present.
+
+## Linux / Windows
+
+Not yet wired. `cargo-packager` supports `.deb`, `.AppImage`, `.msi`, and
+`.exe` — adding them is a matter of fleshing out `[package.metadata.packager.linux]`
+/ `.windows` blocks. Tracked under the Roadmap in the top-level README.
