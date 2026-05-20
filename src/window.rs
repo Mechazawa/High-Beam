@@ -4,8 +4,11 @@
 //! in the crate root. Window-level behaviour that the .slint markup can't
 //! express — sizing, native center positioning, blur-to-close — lives here.
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use slint::ComponentHandle;
 use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
+use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
 
 use crate::QueryWindow;
 
@@ -215,5 +218,132 @@ mod macos {
         // exists. We only borrow it for the duration of `[NSView window]`.
         let ns_view: &NSView = unsafe { ns_view_ptr.as_ref() };
         ns_view.window()
+    }
+}
+
+/// Decode a plugin-supplied icon spec into a `slint::Image`.
+///
+/// The renderer feeds the returned image into each row's `icon` field. A
+/// `None`/empty/non-data-URI input — or any failure along the decode path —
+/// produces `Image::default()`, which paints as nothing; the row markup then
+/// draws a muted outline placeholder so titles stay column-aligned across
+/// rows whether or not an icon is present.
+///
+/// Bare filesystem paths are deliberately *not* loaded: plugins are expected
+/// to pre-resolve via `highbeam:icons.forPath(...)` which already returns a
+/// data URI. Touching the filesystem from the render path would couple the UI
+/// thread to disk latency.
+pub(crate) fn decode_icon(spec: Option<&str>) -> Image {
+    let Some(spec) = spec else {
+        return Image::default();
+    };
+    let Some((mime, b64)) = parse_data_uri(spec) else {
+        return Image::default();
+    };
+    let Ok(bytes) = STANDARD.decode(b64) else {
+        return Image::default();
+    };
+    decode_bytes(mime, &bytes).unwrap_or_default()
+}
+
+/// Split a `data:<mime>;base64,<payload>` URI into the mime type and the
+/// base64 payload. Returns `None` for anything that isn't a base64 data URI.
+fn parse_data_uri(spec: &str) -> Option<(&str, &str)> {
+    let rest = spec.strip_prefix("data:")?;
+    let (meta, payload) = rest.split_once(',')?;
+    let meta = meta.strip_suffix(";base64")?;
+    Some((meta, payload))
+}
+
+/// Decode raw image bytes into a `slint::Image`. Returns `None` on any error
+/// so the caller can fall back to a blank placeholder rather than panicking.
+fn decode_bytes(mime: &str, bytes: &[u8]) -> Option<Image> {
+    if mime.eq_ignore_ascii_case("image/svg+xml") {
+        return Image::load_from_svg_data(bytes).ok();
+    }
+    let img = image::load_from_memory(bytes).ok()?;
+    let rgba = img.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    let buffer = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(rgba.as_raw(), width, height);
+    Some(Image::from_rgba8(buffer))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 1×1 green PNG, hand-encoded once with a tiny zlib-deflated IDAT.
+    // Inlined as a const so the test stays self-contained.
+    const PNG_1X1_B64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
+
+    // 1×1 JPEG produced offline with the same approach. JPEG is rare for
+    // launcher icons but Spotlight-class plugins occasionally hand them over,
+    // so we cover the path.
+    const TINY_JPEG_B64: &str = "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/2wBDAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/wAARCAABAAEDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD9/KKKKAP/2Q==";
+
+    #[test]
+    fn decode_icon_none_returns_default() {
+        let img = decode_icon(None);
+        assert_eq!(img.size().width, 0);
+    }
+
+    #[test]
+    fn decode_icon_empty_string_returns_default() {
+        let img = decode_icon(Some(""));
+        assert_eq!(img.size().width, 0);
+    }
+
+    #[test]
+    fn decode_icon_non_data_uri_returns_default() {
+        // A bare filesystem path is the documented "no, the plugin forgot"
+        // case — we must not try to load it from disk.
+        let img = decode_icon(Some(
+            "/Applications/Safari.app/Contents/Resources/AppIcon.icns",
+        ));
+        assert_eq!(img.size().width, 0);
+    }
+
+    #[test]
+    fn decode_icon_http_url_returns_default() {
+        let img = decode_icon(Some("https://example.com/icon.png"));
+        assert_eq!(img.size().width, 0);
+    }
+
+    #[test]
+    fn decode_icon_valid_png_data_uri_returns_image() {
+        let uri = format!("data:image/png;base64,{PNG_1X1_B64}");
+        let img = decode_icon(Some(&uri));
+        assert_eq!(img.size().width, 1);
+        assert_eq!(img.size().height, 1);
+    }
+
+    #[test]
+    fn decode_icon_valid_jpeg_data_uri_returns_image() {
+        let uri = format!("data:image/jpeg;base64,{TINY_JPEG_B64}");
+        let img = decode_icon(Some(&uri));
+        assert_eq!(img.size().width, 1);
+        assert_eq!(img.size().height, 1);
+    }
+
+    #[test]
+    fn decode_icon_invalid_base64_returns_default() {
+        let img = decode_icon(Some("data:image/png;base64,not!valid!base64!@#$"));
+        assert_eq!(img.size().width, 0);
+    }
+
+    #[test]
+    fn decode_icon_unsupported_mime_returns_default() {
+        // Non-image data URI (text/plain). Decoder rejects it, caller gets
+        // the blank placeholder.
+        let img = decode_icon(Some("data:text/plain;base64,aGVsbG8="));
+        assert_eq!(img.size().width, 0);
+    }
+
+    #[test]
+    fn decode_icon_missing_base64_marker_returns_default() {
+        // `data:image/png,<raw>` (no `;base64`) — we only support base64
+        // payloads. Falls back to blank rather than guessing.
+        let img = decode_icon(Some("data:image/png,abc"));
+        assert_eq!(img.size().width, 0);
     }
 }

@@ -333,15 +333,27 @@ fn handle_query(
 /// Preserves `selected-index` if the previously-selected row still exists;
 /// otherwise resets to 0. (Stage 3 always reset; Stage 4's streaming model
 /// would make that thrash the user's selection.)
+///
+/// Icons are decoded here, on the Slint thread, because each `ResultRow`
+/// carries an `image` value and `slint::Image` isn't trivially constructed
+/// off-thread without dragging in the renderer's pixel-buffer types upstream.
+/// Doing it per-yield keeps the cost bounded — `max_rows` is 9 — and means a
+/// malformed data URI surfaces as a blank slot, not a crash.
 fn render_results(window: &QueryWindow, results: &[RankedResult]) {
     let previously_selected = window.get_selected_index();
     let rows: Vec<ResultRow> = results
         .iter()
-        .map(|r| ResultRow {
-            key: r.composite_key().into(),
-            title: r.result.title.clone().into(),
-            subtitle: r.result.subtitle.clone().unwrap_or_default().into(),
-            has_subtitle: r.result.subtitle.is_some(),
+        .map(|r| {
+            let icon_spec = r.result.icon.as_deref();
+            let has_icon = is_renderable_icon(icon_spec);
+            ResultRow {
+                key: r.composite_key().into(),
+                title: r.result.title.clone().into(),
+                subtitle: r.result.subtitle.clone().unwrap_or_default().into(),
+                has_subtitle: r.result.subtitle.is_some(),
+                icon: window::decode_icon(icon_spec),
+                has_icon,
+            }
         })
         .collect();
     let row_count = i32::try_from(rows.len()).unwrap_or(i32::MAX);
@@ -349,6 +361,13 @@ fn render_results(window: &QueryWindow, results: &[RankedResult]) {
     if previously_selected >= row_count || previously_selected < 0 {
         window.set_selected_index(0);
     }
+}
+
+/// `has-icon` drives the row's placeholder vs icon styling. We treat anything
+/// that doesn't look like a base64 data URI as "no icon" so the row gets the
+/// muted outline rather than appearing to load something we never resolved.
+fn is_renderable_icon(spec: Option<&str>) -> bool {
+    spec.is_some_and(|s| s.starts_with("data:") && s.contains(";base64,"))
 }
 
 impl Drop for PluginHost {

@@ -188,6 +188,7 @@ mod tests {
                 key: key.into(),
                 title: key.into(),
                 subtitle: None,
+                icon: None,
                 weight,
                 pinned,
                 action: Action::Copy { text: key.into() },

@@ -77,6 +77,13 @@ nucleo-matcher = "0.3"
 # Base64 encoding for `highbeam:icons` data URIs. Tiny crate, no transitives.
 base64 = "0.22"
 
+# PNG/JPEG decode for result-row icons rendered into `slint::Image`. Default
+# features pull in every format the crate supports (TIFF/WebP/AVIF/…) which we
+# do not need — plugins ship PNG (Spotlight via sips, DnD via base64'd SVG
+# rasterized upstream) and the occasional JPEG. Disabling defaults keeps the
+# transitive footprint small.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+
 # macOS-only deps:
 #   * `global-hotkey` — the only Rust crate that actually works on modern macOS
 #     for app-level global hotkeys without an Accessibility prompt; Linux is
