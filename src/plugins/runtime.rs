@@ -10,10 +10,13 @@
 //! aborts the in-flight query both JS-side (`signal.aborted`) and Rust-side
 //! (interrupt hook for blocking loops).
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+
+use serde_json::Value as JsonValue;
 
 use rquickjs::function::This;
 use rquickjs::loader::{Loader, Resolver};
@@ -37,6 +40,7 @@ use crate::sdk::http::HttpModule;
 use crate::sdk::icons;
 use crate::sdk::r#match::MatchModule;
 use crate::sdk::platform::PlatformModule;
+use crate::sdk::settings::{self, SettingsModule};
 use crate::sdk::system;
 use crate::sdk::timers;
 
@@ -53,6 +57,7 @@ const ICONS_MODULE: &str = "highbeam:icons";
 const SYSTEM_MODULE: &str = "highbeam:system";
 const MATCH_MODULE: &str = "highbeam:match";
 const PLATFORM_MODULE: &str = "highbeam:platform";
+const SETTINGS_MODULE: &str = "highbeam:settings";
 /// Slot on `globalThis` for the plugin's `query` export. We can't carry a
 /// `Module<'js>` across iterator `.await` points, and
 /// `Persistent<Function<'static>>` holds a raw `!Send` pointer that can't
@@ -137,11 +142,13 @@ impl LoadedPlugin {
         cache_dir: std::path::PathBuf,
     ) -> Result<Self, PluginError> {
         let log = PluginLog::for_plugin_dir(plugin_dir);
-        Self::load_with_log(plugin_dir, manifest, cache_dir, log).await
+        Self::load_with_log(plugin_dir, manifest, cache_dir, log, HashMap::new()).await
     }
 
-    /// Variant accepting an explicit [`PluginLog`] handle — used by tests
-    /// that need to point the logfile at a tmpdir.
+    /// Variant accepting an explicit [`PluginLog`] handle and the merged
+    /// per-plugin options bag — used by the loader to pre-populate
+    /// `highbeam:settings` and by tests that need to point the logfile at a
+    /// tmpdir.
     ///
     /// # Errors
     ///
@@ -151,6 +158,7 @@ impl LoadedPlugin {
         manifest: Manifest,
         cache_dir: std::path::PathBuf,
         log: Arc<PluginLog>,
+        merged_options: HashMap<String, JsonValue>,
     ) -> Result<Self, PluginError> {
         let entry_path = manifest.entry_path(plugin_dir);
         let source = std::fs::read_to_string(&entry_path).map_err(|err| {
@@ -196,54 +204,14 @@ impl LoadedPlugin {
         let plugin_dir_owned = plugin_dir.to_path_buf();
         let log_for_ctx = Arc::clone(&log);
         async_with!(context => |ctx| {
-            // Install `console` first so any later install failure could still
-            // route through it. (Today we log those from Rust, but keeping
-            // the invariant simple is free.)
-            console::install(&ctx, &log_for_ctx)
-                .catch(&ctx)
-                .map_err(|err| PluginError::Js(format!("install console: {err}")))?;
-
-            install_global_controller(&ctx)
-                .catch(&ctx)
-                .map_err(|err| PluginError::Js(format!("install AbortController: {err}")))?;
-
-            // setTimeout/clearTimeout: without these, the canonical
-            // `await new Promise(r => setTimeout(r, ms))` doesn't work.
-            timers::install(&ctx)
-                .catch(&ctx)
-                .map_err(|err| PluginError::Js(format!("install setTimeout: {err}")))?;
-
-            // Per-plugin bindings get installed unconditionally; the inert
-            // no-cap stubs are cheap and keep the module evaluate path
-            // branch-free.
-            let can_read = plugin_caps.iter().any(|c| c == "clipboard.read");
-            let can_write = plugin_caps.iter().any(|c| c == "clipboard.write");
-            clipboard::install(&ctx, can_read, can_write)
-                .catch(&ctx)
-                .map_err(|err| PluginError::Js(format!("install clipboard: {err}")))?;
-
-            let can_fs_read = plugin_caps.iter().any(|c| c == "fs.read");
-            let can_fs_cache = plugin_caps.iter().any(|c| c == "fs.cache");
-            fs::install(
+            install_host_globals(
                 &ctx,
-                can_fs_read,
-                can_fs_cache,
+                &log_for_ctx,
+                &plugin_caps,
                 cache_dir.clone(),
                 plugin_dir_owned.clone(),
-            )
-            .catch(&ctx)
-            .map_err(|err| PluginError::Js(format!("install fs: {err}")))?;
-
-            let can_icons = plugin_caps.iter().any(|c| c == "icons");
-            icons::install(&ctx, can_icons)
-                .catch(&ctx)
-                .map_err(|err| PluginError::Js(format!("install icons: {err}")))?;
-
-            let can_system_exec = plugin_caps.iter().any(|c| c == "system.exec");
-            let can_system_applescript = plugin_caps.iter().any(|c| c == "system.applescript");
-            system::install(&ctx, can_system_exec, can_system_applescript)
-                .catch(&ctx)
-                .map_err(|err| PluginError::Js(format!("install system: {err}")))?;
+                &merged_options,
+            )?;
 
             let declared = Module::declare(ctx.clone(), "plugin:main", source_bytes)
                 .catch(&ctx)
@@ -355,6 +323,64 @@ impl Drop for LoadedPlugin {
     fn drop(&mut self) {
         self.interrupt_flag.store(false, Ordering::Relaxed);
     }
+}
+
+/// Install every host-side global the plugin's `query` body might touch
+/// before the entry module evaluates. Order matters only for `console` (so
+/// later installs can route through it once we move logging into JS); the
+/// rest are independent.
+fn install_host_globals<S: std::hash::BuildHasher>(
+    ctx: &Ctx<'_>,
+    log: &Arc<PluginLog>,
+    plugin_caps: &[String],
+    cache_dir: std::path::PathBuf,
+    plugin_dir: std::path::PathBuf,
+    merged_options: &HashMap<String, JsonValue, S>,
+) -> Result<(), PluginError> {
+    console::install(ctx, log)
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("install console: {err}")))?;
+
+    install_global_controller(ctx)
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("install AbortController: {err}")))?;
+
+    timers::install(ctx)
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("install setTimeout: {err}")))?;
+
+    // Per-plugin options bag; populated even when the plugin declared no
+    // options so `get('anything')` is always callable and returns undefined.
+    settings::install(ctx, merged_options)
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("install settings: {err}")))?;
+
+    // Per-plugin SDK bindings get installed unconditionally; the inert
+    // no-cap stubs are cheap and keep the module evaluate path branch-free.
+    let can_read = plugin_caps.iter().any(|c| c == "clipboard.read");
+    let can_write = plugin_caps.iter().any(|c| c == "clipboard.write");
+    clipboard::install(ctx, can_read, can_write)
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("install clipboard: {err}")))?;
+
+    let can_fs_read = plugin_caps.iter().any(|c| c == "fs.read");
+    let can_fs_cache = plugin_caps.iter().any(|c| c == "fs.cache");
+    fs::install(ctx, can_fs_read, can_fs_cache, cache_dir, plugin_dir)
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("install fs: {err}")))?;
+
+    let can_icons = plugin_caps.iter().any(|c| c == "icons");
+    icons::install(ctx, can_icons)
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("install icons: {err}")))?;
+
+    let can_system_exec = plugin_caps.iter().any(|c| c == "system.exec");
+    let can_system_applescript = plugin_caps.iter().any(|c| c == "system.applescript");
+    system::install(ctx, can_system_exec, can_system_applescript)
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("install system: {err}")))?;
+
+    Ok(())
 }
 
 /// Map a `query()` outcome to a line in the plugin's logfile.
@@ -596,6 +622,7 @@ impl Loader for HighbeamLoader {
             SYSTEM_MODULE => Module::declare_def::<system::SystemModule, _>(ctx.clone(), name),
             MATCH_MODULE => Module::declare_def::<MatchModule, _>(ctx.clone(), name),
             PLATFORM_MODULE => Module::declare_def::<PlatformModule, _>(ctx.clone(), name),
+            SETTINGS_MODULE => Module::declare_def::<SettingsModule, _>(ctx.clone(), name),
             other => Err(JsError::new_loading_message(
                 name,
                 format!("`{other}` is registered in the capability table but not in the loader"),

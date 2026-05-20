@@ -12,6 +12,7 @@ use high_beam::sdk::http::HttpModule;
 use high_beam::sdk::icons::IconsModule;
 use high_beam::sdk::r#match::MatchModule;
 use high_beam::sdk::platform::PlatformModule;
+use high_beam::sdk::settings::SettingsModule;
 use high_beam::sdk::system::SystemModule;
 
 /// Mirrors `sdk/highbeam/<name>.d.ts`.
@@ -25,6 +26,7 @@ fn expected_for(name: &str) -> &'static [&'static str] {
         "highbeam:match" => &["fuzzy"],
         "highbeam:system" => &["exec", "applescript"],
         "highbeam:platform" => &["os", "arch", "version", "isMacOS", "isLinux"],
+        "highbeam:settings" => &["get", "getString", "getBool", "getInt"],
         other => {
             panic!("expected_for({other}): no expected list — keep this in sync with sdk/highbeam")
         }
@@ -55,6 +57,7 @@ enum OneShotLoader {
     Match,
     System,
     Platform,
+    Settings,
 }
 
 impl Loader for OneShotLoader {
@@ -68,6 +71,7 @@ impl Loader for OneShotLoader {
             Self::Match => Module::declare_def::<MatchModule, _>(ctx.clone(), name),
             Self::System => Module::declare_def::<SystemModule, _>(ctx.clone(), name),
             Self::Platform => Module::declare_def::<PlatformModule, _>(ctx.clone(), name),
+            Self::Settings => Module::declare_def::<SettingsModule, _>(ctx.clone(), name),
         }
     }
 }
@@ -159,4 +163,9 @@ fn system_module_exports_match_dts() {
 #[test]
 fn platform_module_exports_match_dts() {
     assert_module_exports("highbeam:platform", OneShotLoader::Platform);
+}
+
+#[test]
+fn settings_module_exports_match_dts() {
+    assert_module_exports("highbeam:settings", OneShotLoader::Settings);
 }

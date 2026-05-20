@@ -14,5 +14,6 @@ pub mod icons;
 #[path = "match.rs"]
 pub mod r#match;
 pub mod platform;
+pub mod settings;
 pub mod system;
 pub mod timers;

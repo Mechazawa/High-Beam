@@ -43,7 +43,7 @@ pub(crate) const MODULES: &[ModuleCap] = &[
     },
 ];
 
-const UNCAPPED_MODULES: &[&str] = &["highbeam:match", "highbeam:platform"];
+const UNCAPPED_MODULES: &[&str] = &["highbeam:match", "highbeam:platform", "highbeam:settings"];
 
 /// Every capability string the host recognises. Anything else is logged as
 /// an unknown-cap warning at load time.

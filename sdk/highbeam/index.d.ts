@@ -34,4 +34,8 @@ declare module 'highbeam:platform' {
     export * from './platform';
 }
 
+declare module 'highbeam:settings' {
+    export * from './settings';
+}
+
 export * from './types';

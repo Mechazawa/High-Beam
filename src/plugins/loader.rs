@@ -159,13 +159,27 @@ async fn load_one(plugin_dir: &Path, settings: &Settings) -> Result<LoadedPlugin
         });
     }
 
+    // Fold the user's TOML overrides onto the manifest defaults so the
+    // runtime sees one ready-to-export bag — keeps the SDK module path free
+    // of branching on "did the user set a value?".
+    let merged_options = crate::sdk::settings::merge_options(
+        &manifest.parsed_options().defs,
+        &settings.plugin_options(&manifest.name),
+    );
+
     let cache_dir = crate::plugins::runtime::default_cache_dir(&manifest.name);
-    let loaded = LoadedPlugin::load_with_log(plugin_dir, manifest, cache_dir, Arc::clone(&log))
-        .await
-        .map_err(|err| {
-            log.write(LogLevel::Error, &format!("load failed: {err}"));
-            LoadError::Failed(Box::new(err))
-        })?;
+    let loaded = LoadedPlugin::load_with_log(
+        plugin_dir,
+        manifest,
+        cache_dir,
+        Arc::clone(&log),
+        merged_options,
+    )
+    .await
+    .map_err(|err| {
+        log.write(LogLevel::Error, &format!("load failed: {err}"));
+        LoadError::Failed(Box::new(err))
+    })?;
     Ok(loaded)
 }
 
