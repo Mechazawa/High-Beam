@@ -84,31 +84,35 @@ impl Manifest {
         plugin_dir.join(&self.entry)
     }
 
-    /// Whether this plugin should load on the host platform. Warnings for
-    /// unknown platform strings are emitted here (not at parse time) so the
-    /// manifest stays a passive data type.
+    /// Whether this plugin should load on the host platform. Pure: does not
+    /// emit warnings — pair with [`Self::platform_warnings`] when you have a
+    /// destination for them (e.g. the per-plugin `plugin.log`).
     #[must_use]
     pub fn supports_current_platform(&self) -> bool {
-        match &self.platforms {
-            None => true,
-            Some(list) => {
-                let current = std::env::consts::OS;
-                let mut matched = false;
-                for entry in list {
-                    if KNOWN_PLATFORMS.contains(&entry.as_str()) {
-                        if entry == current {
-                            matched = true;
-                        }
-                    } else {
-                        eprintln!(
-                            "plugins: {}: ignoring unknown platform {entry:?} (known: {KNOWN_PLATFORMS:?})",
-                            self.name,
-                        );
-                    }
-                }
-                matched
-            }
-        }
+        let Some(list) = &self.platforms else {
+            return true;
+        };
+        let current = std::env::consts::OS;
+        list.iter()
+            .any(|entry| KNOWN_PLATFORMS.contains(&entry.as_str()) && entry == current)
+    }
+
+    /// Diagnostic strings the loader should record for this manifest, one per
+    /// unknown platform entry. Empty when `platforms` is absent or every entry
+    /// is recognised. The loader funnels these into `plugin.log` after the
+    /// log handle exists, so they're discoverable next to the plugin instead
+    /// of buried on stderr.
+    #[must_use]
+    pub fn platform_warnings(&self) -> Vec<String> {
+        let Some(list) = &self.platforms else {
+            return Vec::new();
+        };
+        list.iter()
+            .filter(|entry| !KNOWN_PLATFORMS.contains(&entry.as_str()))
+            .map(|entry| {
+                format!("ignoring unknown platform {entry:?} (known: {KNOWN_PLATFORMS:?})")
+            })
+            .collect()
     }
 
     /// Human-readable reason describing why the plugin was gated out.
@@ -242,6 +246,9 @@ mod tests {
         let m = Manifest::parse(br#"{ "name": "future", "platforms": ["haiku"] }"#).unwrap();
         assert_eq!(m.platforms.as_deref().map(<[String]>::len), Some(1));
         assert!(!m.supports_current_platform());
+        let warnings = m.platform_warnings();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("haiku"));
     }
 
     #[test]
@@ -252,5 +259,20 @@ mod tests {
         );
         let m = Manifest::parse(json.as_bytes()).unwrap();
         assert!(m.supports_current_platform());
+        let warnings = m.platform_warnings();
+        assert_eq!(warnings.len(), 1, "only the unknown entry warns");
+        assert!(warnings[0].contains("haiku"));
+    }
+
+    #[test]
+    fn platform_warnings_empty_when_no_platforms_field() {
+        let m = Manifest::parse(br#"{ "name": "x" }"#).unwrap();
+        assert!(m.platform_warnings().is_empty());
+    }
+
+    #[test]
+    fn platform_warnings_empty_for_only_known_entries() {
+        let m = Manifest::parse(br#"{ "name": "x", "platforms": ["macos", "linux"] }"#).unwrap();
+        assert!(m.platform_warnings().is_empty());
     }
 }

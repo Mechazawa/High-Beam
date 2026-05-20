@@ -109,6 +109,10 @@ async fn load_one(plugin_dir: &Path) -> Result<LoadedPlugin, LoadError> {
 
     let log = PluginLog::for_plugin_dir(plugin_dir);
 
+    for warning in manifest.platform_warnings() {
+        log.write(LogLevel::Warn, &warning);
+    }
+
     for cap in &manifest.capabilities {
         if !KNOWN_CAPABILITIES.contains(&cap.as_str()) {
             log.write(
@@ -243,6 +247,47 @@ mod tests {
         assert!(
             names.contains(&"right-os"),
             "right-os plugin should have loaded, got {names:?}",
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn unknown_platform_warning_lands_in_plugin_log() {
+        let root = fresh_tmp("unknown-platform-log");
+        // Mix an unknown entry with the host OS so the plugin still loads and
+        // we have a chance to assert against plugin.log.
+        let manifest = format!(
+            r#"{{ "name": "mixed", "entry": "plugin.js", "platforms": ["haiku", "{}"] }}"#,
+            std::env::consts::OS,
+        );
+        write_plugin(
+            &root,
+            "mixed",
+            &manifest,
+            "export async function* query() {}",
+        );
+
+        let opts = LoaderOptions {
+            plugins_dir: root.clone(),
+        };
+        let plugins = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio rt")
+            .block_on(load_all(&opts));
+        assert_eq!(plugins.len(), 1, "matching host OS keeps the plugin loaded");
+
+        let log_path = root.join("mixed").join("plugin.log");
+        let body = std::fs::read_to_string(&log_path)
+            .expect("plugin.log should have been created by the warning write");
+        assert!(
+            body.contains("[WARN ] ignoring unknown platform"),
+            "expected warn line, got: {body}",
+        );
+        assert!(
+            body.contains("haiku"),
+            "warning should name the offender: {body}"
         );
 
         let _ = std::fs::remove_dir_all(&root);
