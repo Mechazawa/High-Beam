@@ -1,7 +1,5 @@
 //! Host implementation of the `highbeam:http` module.
 //!
-//! Stage 4 surface:
-//!
 //! ```ts
 //! import { get, post } from 'highbeam:http';
 //!
@@ -20,9 +18,8 @@
 //! signals, hook a JS listener that flips a token). Either path aborts the
 //! in-flight reqwest.
 //!
-//! Body decoding: UTF-8 only for v1. Binary responses come back as
-//! lossy-decoded strings; if a plugin needs raw bytes we'll add a
-//! `binary: true` opt in a later stage.
+//! Body decoding: UTF-8 only. Binary responses come back as lossy-decoded
+//! strings; raw-bytes opt-in would land via a `binary: true` option.
 
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -32,6 +29,7 @@ use rquickjs::function::Async;
 use rquickjs::{Ctx, Function, Object, Result as JsResult, Value, module::ModuleDef};
 
 use crate::sdk::abort;
+use crate::sdk::errors::{throw_abort, throw_named};
 
 /// Default per-request timeout when `opts.timeoutMs` is absent. Matches the
 /// Web Fetch defaults various browsers use for slow requests; deliberately
@@ -286,18 +284,8 @@ fn build_response<'js>(
     Ok(obj)
 }
 
-fn throw_abort(ctx: &Ctx<'_>) -> rquickjs::Error {
-    let err = Object::new(ctx.clone()).expect("alloc error object");
-    let _ = err.set("name", "AbortError");
-    let _ = err.set("message", "operation aborted");
-    ctx.throw(err.into_value())
-}
-
 fn throw_http(ctx: &Ctx<'_>, message: &str) -> rquickjs::Error {
-    let err = Object::new(ctx.clone()).expect("alloc error object");
-    let _ = err.set("name", "HttpError");
-    let _ = err.set("message", message.to_owned());
-    ctx.throw(err.into_value())
+    throw_named(ctx, "HttpError", message)
 }
 
 #[cfg(test)]

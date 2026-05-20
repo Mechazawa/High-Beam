@@ -23,7 +23,9 @@ use std::sync::Mutex;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use rquickjs::function::{Async, Opt, Rest};
-use rquickjs::{Ctx, Function, Object, Result as JsResult, Value, module::ModuleDef};
+use rquickjs::{Ctx, Function, Result as JsResult, Value, module::ModuleDef};
+
+use crate::sdk::errors::{throw_cap, throw_named};
 
 const FOR_PATH_GLOBAL: &str = "__highbeam_icons_for_path";
 
@@ -207,27 +209,8 @@ fn fallback_icon_bytes() -> &'static [u8] {
     PNG
 }
 
-fn throw_cap(ctx: &Ctx<'_>, cap: &str) -> rquickjs::Error {
-    let err = match Object::new(ctx.clone()) {
-        Ok(o) => o,
-        Err(e) => return e,
-    };
-    let _ = err.set("name", "CapabilityError");
-    let _ = err.set(
-        "message",
-        format!("missing capability: {cap} (declare it in manifest.json)"),
-    );
-    ctx.throw(err.into_value())
-}
-
 fn throw_io(ctx: &Ctx<'_>, message: &str) -> rquickjs::Error {
-    let err = match Object::new(ctx.clone()) {
-        Ok(o) => o,
-        Err(e) => return e,
-    };
-    let _ = err.set("name", "IconError");
-    let _ = err.set("message", message.to_owned());
-    ctx.throw(err.into_value())
+    throw_named(ctx, "IconError", message)
 }
 
 #[cfg(test)]

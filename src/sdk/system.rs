@@ -29,6 +29,7 @@ use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
 use crate::sdk::abort;
+use crate::sdk::errors::{throw_abort, throw_cap, throw_named};
 
 const EXEC_GLOBAL: &str = "__highbeam_system_exec";
 const APPLESCRIPT_GLOBAL: &str = "__highbeam_system_applescript";
@@ -294,35 +295,6 @@ async fn sleep_opt(timeout: Option<Duration>) {
     }
 }
 
-fn throw_cap(ctx: &Ctx<'_>, cap: &str) -> rquickjs::Error {
-    let err = match Object::new(ctx.clone()) {
-        Ok(o) => o,
-        Err(e) => return e,
-    };
-    let _ = err.set("name", "CapabilityError");
-    let _ = err.set(
-        "message",
-        format!("missing capability: {cap} (declare it in manifest.json)"),
-    );
-    ctx.throw(err.into_value())
-}
-
 fn throw_io(ctx: &Ctx<'_>, message: &str) -> rquickjs::Error {
-    let err = match Object::new(ctx.clone()) {
-        Ok(o) => o,
-        Err(e) => return e,
-    };
-    let _ = err.set("name", "SystemError");
-    let _ = err.set("message", message.to_owned());
-    ctx.throw(err.into_value())
-}
-
-fn throw_abort(ctx: &Ctx<'_>) -> rquickjs::Error {
-    let err = match Object::new(ctx.clone()) {
-        Ok(o) => o,
-        Err(e) => return e,
-    };
-    let _ = err.set("name", "AbortError");
-    let _ = err.set("message", "operation aborted");
-    ctx.throw(err.into_value())
+    throw_named(ctx, "SystemError", message)
 }

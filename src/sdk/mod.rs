@@ -1,28 +1,14 @@
 //! Host implementations of the `highbeam:*` SDK modules.
 //!
-//! Modules:
-//!   * `highbeam:actions`   — `openUrl`, `copy`, `exec`, `reveal` action builders
-//!   * `highbeam:http`      — `get`, `post` (cap-gated by `http`)
-//!   * `highbeam:clipboard` — `read`, `write` (cap-gated by `clipboard.read`
-//!     and `clipboard.write` respectively)
-//!   * `highbeam:fs`        — `readDir`, `readFile`, `readText`, `readCache`,
-//!     `writeCache` (cap-gated by `fs.read` / `fs.cache`)
-//!   * `highbeam:icons`     — `forPath` (cap-gated by `icons`)
-//!   * `highbeam:system`    — `exec`, `applescript` (cap-gated by `system.exec`
-//!     / `system.applescript`; `applescript` is a no-op on non-macOS)
-//!   * `highbeam:match`     — `fuzzy` (no capability — pure compute)
-//!   * `highbeam:platform`  — `os`, `arch`, `version`, `isMacOS`, `isLinux`
-//!     (no capability — metadata)
-//!
-//! `abort` is the cross-cutting `AbortController` / `AbortSignal` polyfill —
-//! not a `highbeam:` module itself, just a host-side helper that exposes
-//! `AbortController` on the global object and provides the abort-token plumbing
-//! the other modules consume.
+//! The capability gate that decides which of these a plugin can import lives
+//! in [`capability`]. `abort` and `timers` are cross-cutting polyfills
+//! installed on `globalThis` rather than `highbeam:*` modules themselves.
 
 pub mod abort;
 pub mod actions;
 pub mod capability;
 pub mod clipboard;
+pub(crate) mod errors;
 pub mod fs;
 pub mod http;
 pub mod icons;

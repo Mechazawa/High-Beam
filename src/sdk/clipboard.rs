@@ -1,7 +1,5 @@
 //! Host implementation of the `highbeam:clipboard` module.
 //!
-//! Stage 4 surface:
-//!
 //! ```ts
 //! import { read, write } from 'highbeam:clipboard';
 //! await write('hi');
@@ -24,7 +22,9 @@
 //! issues on X11.
 
 use rquickjs::function::Async;
-use rquickjs::{Ctx, Function, Object, Result as JsResult, Value, module::ModuleDef};
+use rquickjs::{Ctx, Function, Result as JsResult, Value, module::ModuleDef};
+
+use crate::sdk::errors::{throw_cap, throw_named};
 
 /// Where [`install`] stashes the read/write callables so the module's
 /// `evaluate()` can re-export them as `read` / `write`. Plugin code should
@@ -134,25 +134,6 @@ pub fn install<'js>(ctx: &Ctx<'js>, can_read: bool, can_write: bool) -> JsResult
     Ok(())
 }
 
-fn throw_cap(ctx: &Ctx<'_>, cap: &str) -> rquickjs::Error {
-    let err = match Object::new(ctx.clone()) {
-        Ok(o) => o,
-        Err(e) => return e,
-    };
-    let _ = err.set("name", "CapabilityError");
-    let _ = err.set(
-        "message",
-        format!("missing capability: {cap} (declare it in manifest.json)"),
-    );
-    ctx.throw(err.into_value())
-}
-
 fn throw_io(ctx: &Ctx<'_>, message: &str) -> rquickjs::Error {
-    let err = match Object::new(ctx.clone()) {
-        Ok(o) => o,
-        Err(e) => return e,
-    };
-    let _ = err.set("name", "ClipboardError");
-    let _ = err.set("message", message.to_owned());
-    ctx.throw(err.into_value())
+    throw_named(ctx, "ClipboardError", message)
 }

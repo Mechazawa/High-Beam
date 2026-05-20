@@ -31,6 +31,7 @@ use rquickjs::{Ctx, Function, Object, Result as JsResult, TypedArray, Value, mod
 use tokio_util::sync::CancellationToken;
 
 use crate::sdk::abort;
+use crate::sdk::errors::{throw_abort, throw_cap, throw_named};
 
 const READ_DIR_GLOBAL: &str = "__highbeam_fs_read_dir";
 const READ_FILE_GLOBAL: &str = "__highbeam_fs_read_file";
@@ -462,37 +463,8 @@ fn resolve_cache_path(cache_dir: &Path, name: &str) -> Result<PathBuf, &'static 
     Ok(cache_dir.join(name))
 }
 
-fn throw_cap(ctx: &Ctx<'_>, cap: &str) -> rquickjs::Error {
-    let err = match Object::new(ctx.clone()) {
-        Ok(o) => o,
-        Err(e) => return e,
-    };
-    let _ = err.set("name", "CapabilityError");
-    let _ = err.set(
-        "message",
-        format!("missing capability: {cap} (declare it in manifest.json)"),
-    );
-    ctx.throw(err.into_value())
-}
-
 fn throw_io(ctx: &Ctx<'_>, message: &str) -> rquickjs::Error {
-    let err = match Object::new(ctx.clone()) {
-        Ok(o) => o,
-        Err(e) => return e,
-    };
-    let _ = err.set("name", "FsError");
-    let _ = err.set("message", message.to_owned());
-    ctx.throw(err.into_value())
-}
-
-fn throw_abort(ctx: &Ctx<'_>) -> rquickjs::Error {
-    let err = match Object::new(ctx.clone()) {
-        Ok(o) => o,
-        Err(e) => return e,
-    };
-    let _ = err.set("name", "AbortError");
-    let _ = err.set("message", "operation aborted");
-    ctx.throw(err.into_value())
+    throw_named(ctx, "FsError", message)
 }
 
 #[cfg(test)]
