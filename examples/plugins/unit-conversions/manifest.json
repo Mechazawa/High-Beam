@@ -1,0 +1,9 @@
+{
+    "name": "unit-conversions",
+    "displayName": "Unit Conversions",
+    "version": "0.1.0",
+    "description": "Convert between units — `100 km to mi`, `72 F to C`, `2 GB to MB`, etc.",
+    "timeoutMs": 100,
+    "memoryMb": 32,
+    "capabilities": ["actions"]
+}
