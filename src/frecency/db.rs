@@ -87,7 +87,7 @@ impl FrecencyDb {
         let guard = match self.inner.lock() {
             Ok(g) => g,
             Err(err) => {
-                eprintln!("frecency: snapshot lock poisoned: {err}");
+                tracing::error!(%err, "frecency: snapshot lock poisoned");
                 return Snapshot::default();
             }
         };
@@ -96,7 +96,7 @@ impl FrecencyDb {
         {
             Ok(s) => s,
             Err(err) => {
-                eprintln!("frecency: snapshot prepare failed: {err}");
+                tracing::error!(%err, "frecency: snapshot prepare failed");
                 return Snapshot::default();
             }
         };
@@ -121,11 +121,11 @@ impl FrecencyDb {
                         Ok((id, pick)) => {
                             map.insert(id, pick);
                         }
-                        Err(err) => eprintln!("frecency: row decode failed: {err}"),
+                        Err(err) => tracing::warn!(%err, "frecency: row decode failed"),
                     }
                 }
             }
-            Err(err) => eprintln!("frecency: snapshot query failed: {err}"),
+            Err(err) => tracing::error!(%err, "frecency: snapshot query failed"),
         }
         Snapshot { picks: map }
     }

@@ -5,6 +5,7 @@ pub mod cli;
 pub mod daemon;
 pub mod frecency;
 pub mod ipc;
+pub mod logging;
 pub mod paths;
 pub mod plugins;
 pub mod sdk;

@@ -87,7 +87,7 @@ fn spawn_runtime_thread(
             {
                 Ok(rt) => rt,
                 Err(err) => {
-                    eprintln!("plugins: failed to start tokio runtime: {err}");
+                    tracing::error!(%err, "plugins: failed to start tokio runtime");
                     return;
                 }
             };
@@ -96,9 +96,9 @@ fn spawn_runtime_thread(
                 let opts = LoaderOptions::resolve(plugins_override);
                 let plugins = loader::load_all(&opts).await;
                 if plugins.is_empty() {
-                    eprintln!(
-                        "plugins: no plugins loaded (looked in {})",
-                        opts.plugins_dir.display()
+                    tracing::warn!(
+                        plugins_dir = %opts.plugins_dir.display(),
+                        "plugins: no plugins loaded",
                     );
                 }
                 let plugins: Vec<Arc<LoadedPlugin>> = plugins;
@@ -155,7 +155,7 @@ fn wire_window_callbacks(
             })
             .is_err()
         {
-            eprintln!("plugins: runtime thread exited; query dropped");
+            tracing::error!("plugins: runtime thread exited; query dropped");
         }
     });
 
@@ -177,7 +177,7 @@ fn invoke_selected(
     let snapshot = match latest.lock() {
         Ok(s) => s,
         Err(err) => {
-            eprintln!("plugins: latest results lock poisoned: {err}");
+            tracing::error!(%err, "plugins: latest results lock poisoned");
             return;
         }
     };
@@ -195,7 +195,7 @@ fn invoke_selected(
             }
         }
         Err(err) => {
-            eprintln!("plugins: {plugin_name}: action failed: {err}");
+            tracing::error!(plugin = %plugin_name, %err, "plugins: action failed");
         }
     }
     window::hide(&w);
@@ -205,15 +205,16 @@ fn invoke_selected(
 /// failure so the daemon stays functional with default ranking.
 fn open_frecency_db() -> Option<FrecencyDb> {
     let Some(path) = frecency::default_db_path() else {
-        eprintln!("frecency: could not resolve data dir; running without frecency");
+        tracing::warn!("frecency: could not resolve data dir; running without frecency");
         return None;
     };
     match FrecencyDb::open(&path) {
         Ok(db) => Some(db),
         Err(err) => {
-            eprintln!(
-                "frecency: failed to open {} ({err}); continuing without frecency",
-                path.display()
+            tracing::warn!(
+                path = %path.display(),
+                %err,
+                "frecency: failed to open; continuing without frecency",
             );
             None
         }
@@ -229,7 +230,12 @@ fn spawn_pick_bump(db: &FrecencyDb, plugin_name: String, result_key: String) {
         .name("highbeam-frecency-bump".into())
         .spawn(move || {
             if let Err(err) = db.bump(&plugin_name, &result_key) {
-                eprintln!("frecency: bump {plugin_name}:{result_key} failed: {err}");
+                tracing::warn!(
+                    plugin = %plugin_name,
+                    result_key = %result_key,
+                    %err,
+                    "frecency: bump failed",
+                );
             }
         })
         .ok();

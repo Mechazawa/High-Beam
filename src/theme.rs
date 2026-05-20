@@ -89,14 +89,14 @@ impl Theme {
     #[must_use]
     pub fn load_or_default() -> Self {
         let Some(path) = default_theme_path() else {
-            eprintln!("theme: could not resolve config dir; using default");
+            tracing::warn!("theme: could not resolve config dir; using default");
             return Self::default();
         };
         match fs::read_to_string(&path) {
             Ok(text) => Self::from_toml_or_default(&text, &path),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Self::default(),
             Err(err) => {
-                eprintln!("theme: could not read {}: {err}", path.display());
+                tracing::warn!(path = %path.display(), %err, "theme: could not read; using default");
                 Self::default()
             }
         }
@@ -109,9 +109,10 @@ impl Theme {
         match Self::from_toml(text) {
             Ok(theme) => theme,
             Err(err) => {
-                eprintln!(
-                    "theme: malformed {}: {err}; using default",
-                    source.display()
+                tracing::warn!(
+                    source = %source.display(),
+                    %err,
+                    "theme: malformed config; using default",
                 );
                 Self::default()
             }

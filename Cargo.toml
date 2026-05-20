@@ -61,6 +61,12 @@ toml = { version = "0.8", default-features = false, features = ["parse"] }
 # the plugin.log writer needs.
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
+# Host-side structured logging. `tracing` is the event/macro surface; the
+# `fmt`+`env-filter` subscriber gives us level-routed stderr output with
+# `RUST_LOG`-style filtering. Per-plugin logs still go through `PluginLog`.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "std"] }
+
 # macOS-only:
 #   * `global-hotkey` — only crate that works on modern macOS for app-level
 #     global hotkeys without an Accessibility prompt

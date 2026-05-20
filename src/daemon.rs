@@ -11,6 +11,7 @@ use slint::ComponentHandle;
 use crate::QueryWindow;
 use crate::app;
 use crate::ipc::{Command, Server};
+use crate::logging;
 use crate::theme::Theme;
 use crate::window;
 
@@ -35,6 +36,8 @@ pub struct Options {
 // here; by-value is more ergonomic than forcing the caller to keep it alive.
 #[allow(clippy::needless_pass_by_value)]
 pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
+    logging::try_init();
+
     // Pin the winit backend explicitly — we rely on it for monitor enumeration
     // and focus events; a default-backend swap would otherwise fail opaquely.
     slint::BackendSelector::new()
@@ -80,7 +83,7 @@ fn spawn_ipc_listener(socket_path: &Path, weak: slint::Weak<QueryWindow>) -> io:
                 }
             });
             if let Err(err) = result {
-                eprintln!("ipc server exited: {err}");
+                tracing::error!(%err, "ipc server exited");
             }
         })?;
     Ok(())
@@ -99,14 +102,14 @@ fn spawn_hotkey_listener(
     let manager = match GlobalHotKeyManager::new() {
         Ok(m) => m,
         Err(err) => {
-            eprintln!("failed to create global hotkey manager: {err}");
+            tracing::error!(%err, "failed to create global hotkey manager");
             return None;
         }
     };
 
     let hotkey = HotKey::new(Some(Modifiers::SHIFT), Code::Space);
     if let Err(err) = manager.register(hotkey) {
-        eprintln!("failed to register Shift+Space hotkey: {err}");
+        tracing::error!(%err, "failed to register Shift+Space hotkey");
         return None;
     }
     let hotkey_id = hotkey.id();

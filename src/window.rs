@@ -85,7 +85,7 @@ pub(crate) fn apply_theme(window: &QueryWindow, theme: &Theme) {
 /// the `NSWindow` key + frontmost ourselves before asking Slint for focus.
 pub(crate) fn show(window: &QueryWindow) {
     if let Err(err) = window.show() {
-        eprintln!("failed to show window: {err}");
+        tracing::error!(%err, "failed to show window");
         return;
     }
     center_on_focused_display(window);
@@ -99,7 +99,7 @@ pub(crate) fn show(window: &QueryWindow) {
 pub(crate) fn hide(window: &QueryWindow) {
     window.invoke_clear_input();
     if let Err(err) = window.hide() {
-        eprintln!("failed to hide window: {err}");
+        tracing::error!(%err, "failed to hide window");
     }
 }
 
@@ -162,7 +162,7 @@ mod macos {
     /// a future off-thread caller fail loudly instead of being UB.
     pub fn activate_and_make_key(window: &QueryWindow) {
         let Some(mtm) = MainThreadMarker::new() else {
-            eprintln!("activate_and_make_key called off the main thread");
+            tracing::error!("activate_and_make_key called off the main thread");
             return;
         };
 
@@ -180,7 +180,7 @@ mod macos {
             .with_winit_window(|w: &winit::window::Window| ns_window_from_winit(w))
             .flatten();
         let Some(ns_window) = ns_window else {
-            eprintln!("could not resolve NSWindow from winit window");
+            tracing::error!("could not resolve NSWindow from winit window");
             return;
         };
 

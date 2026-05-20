@@ -61,9 +61,10 @@ pub async fn load_all(options: &LoaderOptions) -> Vec<Arc<LoadedPlugin>> {
         Ok(e) => e,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
         Err(err) => {
-            eprintln!(
-                "plugins: failed to read {}: {err}",
-                options.plugins_dir.display()
+            tracing::error!(
+                plugins_dir = %options.plugins_dir.display(),
+                %err,
+                "plugins: failed to read plugins directory",
             );
             return Vec::new();
         }
@@ -77,19 +78,19 @@ pub async fn load_all(options: &LoaderOptions) -> Vec<Arc<LoadedPlugin>> {
         }
         match load_one(&path).await {
             Ok(plugin) => {
-                eprintln!(
-                    "plugins: loaded {} ({} caps)",
-                    plugin.manifest.name,
-                    plugin.manifest.capabilities.len(),
+                tracing::info!(
+                    plugin = %plugin.manifest.name,
+                    caps = plugin.manifest.capabilities.len(),
+                    "plugins: loaded",
                 );
                 plugins.push(Arc::new(plugin));
             }
             Err(LoadError::Skipped { name, reason }) => {
                 // Deliberate gate (e.g. platform), not an error condition.
-                eprintln!("plugins: skipping {name}: {reason}");
+                tracing::info!(plugin = %name, %reason, "plugins: skipping");
             }
             Err(LoadError::Failed(err)) => {
-                eprintln!("plugins: skipping {}: {err}", path.display());
+                tracing::warn!(path = %path.display(), %err, "plugins: skipping");
             }
         }
     }
@@ -119,9 +120,11 @@ async fn load_one(plugin_dir: &Path) -> Result<LoadedPlugin, LoadError> {
                 LogLevel::Warn,
                 &format!("ignoring unknown capability {cap:?} (known: {KNOWN_CAPABILITIES:?})"),
             );
-            eprintln!(
-                "plugins: {}: ignoring unknown capability {cap:?} (known: {KNOWN_CAPABILITIES:?})",
-                manifest.name,
+            tracing::warn!(
+                plugin = %manifest.name,
+                capability = %cap,
+                known = ?KNOWN_CAPABILITIES,
+                "plugins: ignoring unknown capability",
             );
         }
     }

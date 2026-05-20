@@ -100,7 +100,7 @@ impl Server {
             }
             match Command::parse(&line) {
                 Ok(cmd) => handler(cmd),
-                Err(err) => eprintln!("ipc: {err}"),
+                Err(err) => tracing::warn!(%err, "ipc: rejecting unknown command"),
             }
         }
         Ok(())
