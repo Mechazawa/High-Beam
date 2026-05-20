@@ -88,9 +88,13 @@ async fn resolve_icon(ctx: &Ctx<'_>, path: &str, size: u32) -> JsResult<String> 
         return Ok(hit.clone());
     }
     let path_owned = path.to_owned();
+    // A JoinError here means the blocking task panicked or was cancelled —
+    // a real fault, not "no icon found". Surface it as IconError so plugins
+    // can distinguish "extraction crashed" from "no usable icon" (which
+    // falls back to a transparent PNG below).
     let result = tokio::task::spawn_blocking(move || extract_icon_bytes(&path_owned, size))
         .await
-        .map_err(|e| throw_io(ctx, &e.to_string()))?;
+        .map_err(|e| throw_io(ctx, &join_error_message(&e)))?;
     let bytes = result.unwrap_or_else(|| fallback_icon_bytes().to_vec());
     let encoded = STANDARD.encode(&bytes);
     let data_uri = format!("data:image/png;base64,{encoded}");
@@ -99,6 +103,13 @@ async fn resolve_icon(ctx: &Ctx<'_>, path: &str, size: u32) -> JsResult<String> 
         .expect("icon cache mutex")
         .insert(key, data_uri.clone());
     Ok(data_uri)
+}
+
+/// Render a `tokio::task::JoinError` into the message we pass to JS-side
+/// `IconError`. Pulled out so the message shape can be asserted without
+/// having to manufacture a real `JoinError` (which has no public ctor).
+fn join_error_message(err: &tokio::task::JoinError) -> String {
+    format!("icon extraction crashed: {err}")
 }
 
 #[cfg(target_os = "macos")]
@@ -216,5 +227,26 @@ mod tests {
         assert_eq!(v.as_deref(), Some("v"));
         // Cleanup — the cache is process-global and shared with other tests.
         c.lock().unwrap().remove(&("k".to_owned(), 1));
+    }
+
+    /// Drive a real `JoinError` by panicking inside `spawn_blocking` and
+    /// assert our message helper renders it as `IconError` text — a process
+    /// killed mid-call must surface, not silently degrade to a placeholder.
+    #[test]
+    fn join_error_message_carries_panic_details() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio rt");
+        let join_err = rt.block_on(async {
+            tokio::task::spawn_blocking(|| panic!("simulated icon extractor crash"))
+                .await
+                .expect_err("the panicked task must produce a JoinError")
+        });
+        let msg = join_error_message(&join_err);
+        assert!(
+            msg.starts_with("icon extraction crashed: "),
+            "expected the crash prefix, got: {msg}",
+        );
     }
 }
