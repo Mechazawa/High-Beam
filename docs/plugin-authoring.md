@@ -39,7 +39,11 @@ plugins/
     "timeoutMs": 500,
     "memoryMb": 32,
     "capabilities": ["actions"],
-    "platforms": ["macos", "linux"]
+    "platforms": ["macos", "linux"],
+    "options": [
+        { "key": "github_username", "type": "string", "label": "GitHub username", "default": "" },
+        { "key": "result_limit", "type": "int", "label": "Max results", "default": 10, "min": 1, "max": 50 }
+    ]
 }
 ```
 
@@ -89,6 +93,11 @@ tolerated so new fields can land without breaking older plugins.
   full table.
 - `platforms` — optional array. Absent loads everywhere; `["macos"]`
   shelves it on Linux; `[]` shelves it entirely.
+- `options` — optional array of user-editable settings the host renders
+  in the settings UI. Each entry has `key`, `type` (`"string"`, `"bool"`,
+  `"int"`, or `"enum"`), `label`, `default`, plus `min`/`max` (int) or
+  `choices` (enum). Plugins read their own values via `highbeam:settings`
+  — see [the SDK reference](./sdk-reference.md#highbeamsettings).
 
 Tuning guidance is in [the cookbook](./plugin-cookbook.md#tune-debouncems--timeoutms--memorymb).
 
@@ -136,9 +145,9 @@ Plugins can `import` only from the `highbeam:*` scheme. `import 'fs'`,
 | `system.exec`          | `highbeam:system.exec`                              |
 | `system.applescript`   | `highbeam:system.applescript`                       |
 
-`highbeam:match` and `highbeam:platform` are uncapped — no declaration
-required. See [sdk-reference.md](./sdk-reference.md) for per-function
-behavior, signatures, and examples.
+`highbeam:match`, `highbeam:platform`, and `highbeam:settings` are uncapped
+— no declaration required. See [sdk-reference.md](./sdk-reference.md) for
+per-function behavior, signatures, and examples.
 
 ## Console + logging
 

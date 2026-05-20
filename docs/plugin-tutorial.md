@@ -103,6 +103,12 @@ Field-by-field:
 
 Full schema lives in `src/plugins/manifest.rs`. Unknown fields are tolerated.
 
+If you want user-editable knobs (defaults to use when the user hasn't set
+anything), add an `options` array — the settings UI renders each entry and
+your plugin reads the values via `highbeam:settings`. See the
+[settings recipe](./plugin-cookbook.md#read-user-editable-options-via-highbeamsettings)
+in the cookbook.
+
 ## Step 3 — write `plugin.js`
 
 The host calls `query(input, signal)` on every keystroke (post-debounce) and

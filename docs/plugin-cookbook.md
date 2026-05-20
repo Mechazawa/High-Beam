@@ -329,6 +329,59 @@ empty `[]` shelves the plugin entirely (never loads).
 Real plugin: `examples/plugins/app-launcher` (`isMacOS()` / `isLinux()` to
 branch between `.app` and `.desktop` discovery).
 
+## Read user-editable options via `highbeam:settings`
+
+Use this when the plugin needs a knob the user can flip — a default search
+engine, a result cap, a username substituted into URL templates.
+
+In `manifest.json`:
+
+```json
+{
+    "name": "quick-links",
+    "options": [
+        { "key": "github_username", "type": "string", "label": "GitHub username", "default": "" },
+        { "key": "result_limit", "type": "int", "label": "Max results", "default": 10, "min": 1, "max": 50 }
+    ]
+}
+```
+
+In `plugin.js`:
+
+```js
+import { openUrl } from 'highbeam:actions';
+import { getString, getInt } from 'highbeam:settings';
+
+export async function* query(input, _signal) {
+    const user = getString('github_username') ?? '';
+    const limit = getInt('result_limit') ?? 10;
+
+    // ...use `user` to expand `gh me/repo` to `gh <user>/repo`, etc.
+    // ...cap yields at `limit`.
+}
+```
+
+The settings UI (open via Cmd+, or by typing `settings`) renders an input
+per option type — text field for `string`, toggle for `bool`, number input
+for `int`, click-to-cycle for `enum`. Values persist in
+`~/Library/Application Support/high-beam/settings.toml` on macOS,
+`$XDG_CONFIG_HOME/high-beam/settings.toml` on Linux.
+
+Notes:
+
+- Each plugin only sees its OWN options. `get('foo')` from plugin A and
+  plugin B return different values.
+- Reading a value is "cheap" — populated into the JS context at load time.
+- Reload is restart-only in v1. Editing a setting persists immediately, but
+  the already-loaded plugin keeps the value it saw when it loaded.
+- Use the typed variants (`getString` / `getBool` / `getInt`) when a stale
+  `settings.toml` (e.g. from a manifest rename) might carry the wrong shape
+  — they return `undefined` on mismatch rather than handing you the wrong
+  type.
+
+Real plugin: `examples/plugins/quick-links` (`github_username` +
+`result_limit` options).
+
 ## Mock SDK calls in vitest
 
 Use this when testing a plugin that calls SDK functions with side effects.
@@ -364,6 +417,27 @@ test('loads data and yields matching rows', async () => {
     // ...
 });
 ```
+
+Mocking `highbeam:settings` for a plugin that reads option values:
+
+```js
+import { describe, expect, test, vi } from 'vitest';
+import { getString, getInt } from 'highbeam:settings';
+import { query } from './plugin.js';
+
+test('uses the user-set username', async () => {
+    vi.mocked(getString).mockImplementation((key) =>
+        key === 'github_username' ? 'octocat' : undefined,
+    );
+    vi.mocked(getInt).mockImplementation((key) =>
+        key === 'result_limit' ? 5 : undefined,
+    );
+    // ...drive the plugin...
+});
+```
+
+The SDK stubs are `vi.fn()`s that return `undefined` by default, so any
+unmocked `get*` call falls back to the plugin's `?? default` branch.
 
 Mocking `http.get` per-test:
 

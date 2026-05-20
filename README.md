@@ -45,6 +45,10 @@ Stable Rust, edition 2024. Pinned via `rust-toolchain.toml`.
 Type into the input; results stream in. Up/down to highlight a row; Enter
 to invoke its action. Esc or click-away closes; the daemon stays running.
 
+Type `settings` (or press Cmd+, when the launcher is open) to open the
+settings view — toggle plugins on/off and edit per-plugin options. Restart
+to apply.
+
 ## What ships
 
 The host binary plus one in-process built-in (Core: shutdown / sleep /
@@ -136,7 +140,7 @@ logging. After v1, in rough priority order:
 - `push` action / nested views (the `Action` enum reserves room)
 - Forms — multi-field input view dispatched by an `Action` variant
 - Detail / preview pane (Yosemite Spotlight's right-side preview)
-- Settings screen + a `PrefPanes` macOS plugin
+- Live-reload of plugin options (today: restart-to-apply)
 - Strike-out / auto-disable on repeated plugin failures
 - Plugin store / install-by-URL (Hammerspoon-style)
 - Theme live-reload (watch `theme.toml`)

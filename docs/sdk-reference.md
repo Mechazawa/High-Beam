@@ -494,6 +494,59 @@ if (isMacOS()) {
 Convenience wrappers over `os === 'macos'` / `os === 'linux'`. Use these in
 preference to manual comparisons — the intent is clearer at the call site.
 
+## `highbeam:settings`
+
+Read this plugin's own option values. The host scopes per plugin internally,
+so `get('foo')` always returns this plugin's `foo` — never another plugin's.
+Always importable, no capability required.
+
+```js
+import { get, getString, getBool, getInt } from 'highbeam:settings';
+```
+
+**Capability:** none.
+
+Options come from the plugin's `manifest.json` (the `options` array — see
+[plugin-authoring.md](./plugin-authoring.md#manifest-cheat-sheet)). The host
+folds the user's saved overrides onto the manifest defaults at load time,
+so the SDK never returns a value the manifest didn't declare.
+
+### `get<T>(key: string): T | undefined`
+
+Returns whatever the host has for `key`, or `undefined` when the key isn't
+in the plugin's options bag. Use the typed variants below if you want the
+SDK to also drop values whose runtime type doesn't match.
+
+### `getString(key)` / `getBool(key)` / `getInt(key)`
+
+Same lookup as `get`, but the SDK returns `undefined` unless the stored
+value matches the expected type (string / boolean / number). Useful when
+the manifest renamed an option and an older `settings.toml` carries the
+wrong type — the plugin sees a clean `undefined` instead of a surprise
+shape.
+
+### Example
+
+```js
+import { copy } from 'highbeam:actions';
+import { getString, getInt } from 'highbeam:settings';
+
+const user = getString('github_username') ?? '';
+const limit = getInt('result_limit') ?? 10;
+// ...use `user` / `limit` in your query function.
+```
+
+### Persistence
+
+User-set values live in `settings.toml`:
+
+- macOS: `~/Library/Application Support/high-beam/settings.toml`
+- Linux: `$XDG_CONFIG_HOME/high-beam/settings.toml`
+
+Writes are atomic (temp file + rename). Reloading values is restart-only
+for v1 — toggling an option in the settings UI persists immediately, but
+running plugins keep the value they were loaded with.
+
 ## `highbeam:system`
 
 Subprocess and AppleScript escape hatches. Two capabilities so plugins
@@ -576,7 +629,7 @@ to control a system app (Finder, System Events, etc.). Grant once.
 | `system.exec`          | `highbeam:system.exec`                              |
 | `system.applescript`   | `highbeam:system.applescript`                       |
 
-`highbeam:match` and `highbeam:platform` are uncapped.
+`highbeam:match`, `highbeam:platform`, and `highbeam:settings` are uncapped.
 
 A module loads if the plugin declares *any* of its required caps. Within a
 module, individual functions can still gate themselves more tightly.
