@@ -28,15 +28,13 @@ pub fn configure(window: &QueryWindow) {
         }
     });
 
-    // Blur-to-close in release builds. In debug we keep the window up so we
-    // can inspect it while developing.
+    // Blur-to-close fires whenever the window loses focus, in any build. The
+    // daemon stays running; only the window goes away.
     let weak_for_focus = window.as_weak();
-    let close_on_blur = !cfg!(debug_assertions);
     window
         .window()
         .on_winit_window_event(move |_slint_win, event| {
             if let winit::event::WindowEvent::Focused(false) = event
-                && close_on_blur
                 && let Some(w) = weak_for_focus.upgrade()
             {
                 hide(&w);

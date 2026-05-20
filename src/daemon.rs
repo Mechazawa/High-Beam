@@ -50,7 +50,13 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
         window::show(&window);
     }
 
-    window.run()?;
+    // Use `run_event_loop_until_quit` instead of `window.run()` so the daemon
+    // stays alive when the window is hidden. `ComponentHandle::run()` shows the
+    // window unconditionally and exits the event loop when the last window
+    // closes — neither matches our "background daemon, window opens on demand"
+    // model. With this, Esc and blur can hide the window without killing the
+    // daemon, and `--open`/Shift+Space can re-show it.
+    slint::run_event_loop_until_quit()?;
     Ok(())
 }
 
