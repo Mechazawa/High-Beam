@@ -1,0 +1,11 @@
+{
+  "name": "file-search",
+  "displayName": "File Search",
+  "version": "0.1.0",
+  "description": "Find files by name — type `find <query>`",
+  "debounceMs": 150,
+  "timeoutMs": 1500,
+  "memoryMb": 32,
+  "platforms": ["macos", "linux"],
+  "capabilities": ["actions", "icons", "system.exec"]
+}
