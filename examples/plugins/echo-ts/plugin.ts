@@ -1,8 +1,8 @@
-// TypeScript variant of the echo plugin. Build with `tsc` — the host loads
-// the sibling `plugin.js` (the compiler's output).
+// TypeScript variant of the echo plugin. Build with `npm run build` — the
+// host loads the sibling `plugin.js` (the compiler's output).
 
 import { copy } from 'highbeam:actions';
-import type { AbortSignal, Result } from 'highbeam:actions';
+import type { AbortSignal, Result } from 'highbeam:types';
 
 export async function* query(
     input: string,

@@ -1,14 +1,13 @@
-// Compiled output of plugin.ts (hand-written so the example works without
-// running `tsc`). Plugin authors normally compile via `tsc` and ship that.
-
-import { copy } from "highbeam:actions";
-
+// TypeScript variant of the echo plugin. Build with `npm run build` — the
+// host loads the sibling `plugin.js` (the compiler's output).
+import { copy } from 'highbeam:actions';
 export async function* query(input, _signal) {
-    if (!input) return;
+    if (!input)
+        return;
     yield {
-        key: "echo-ts",
+        key: 'echo-ts',
         title: `echo (ts): ${input}`,
-        subtitle: "press Enter to copy",
+        subtitle: 'press Enter to copy',
         action: copy(input),
     };
 }

@@ -5,10 +5,10 @@
         "moduleResolution": "node",
         "strict": true,
         "noEmit": false,
-        "outDir": ".",
         "paths": {
             "highbeam:*": ["../../../sdk/highbeam/*"]
         }
     },
-    "include": ["plugin.ts"]
+    "include": ["plugin.ts"],
+    "exclude": ["node_modules", "echo-ts.test.js"]
 }
