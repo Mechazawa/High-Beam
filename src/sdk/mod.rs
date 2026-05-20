@@ -1,8 +1,6 @@
-//! Host implementations of the `highbeam:*` SDK modules.
-//!
-//! The capability gate that decides which of these a plugin can import lives
-//! in [`capability`]. `abort` and `timers` are cross-cutting polyfills
-//! installed on `globalThis` rather than `highbeam:*` modules themselves.
+//! Host implementations of the `highbeam:*` SDK modules. The cap gate lives
+//! in [`capability`]. `abort` and `timers` are polyfills installed on
+//! `globalThis` rather than `highbeam:*` modules.
 
 pub mod abort;
 pub mod actions;

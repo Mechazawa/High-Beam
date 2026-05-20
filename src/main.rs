@@ -16,7 +16,7 @@ fn main() -> ExitCode {
         }
     };
 
-    // `--open` first tries to contact a running daemon; if there isn't one,
+    // `--open` first tries to contact a running daemon; if there isn't one
     // it falls through and starts a daemon that opens immediately.
     if args.open && ipc::send(&socket_path, Command::Open).is_ok() {
         return ExitCode::SUCCESS;

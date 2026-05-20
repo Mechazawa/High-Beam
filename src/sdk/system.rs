@@ -1,23 +1,11 @@
 //! Host implementation of the `highbeam:system` module.
 //!
-//! Surface:
+//! `exec` (cap `system.exec`) captures stdout/stderr/code; capture is
+//! truncated at [`MAX_CAPTURE_BYTES`]. `AbortSignal` is honored — the child
+//! is killed on abort via `kill_on_drop`.
 //!
-//! ```ts
-//! import { exec, applescript } from 'highbeam:system';
-//! const { stdout, stderr, code } = await exec('/usr/bin/uptime', []);
-//! const macOnly = await applescript('tell application "Finder" to get name');
-//! ```
-//!
-//! Capabilities:
-//!   * `system.exec` — gates `exec`
-//!   * `system.applescript` — gates `applescript`
-//!
-//! `applescript` is a no-op on non-macOS — it resolves with `null`, never
-//! throws, so plugins can call it without platform-gating every call site.
-//!
-//! `exec` captures stdout/stderr (truncated at `MAX_CAPTURE_BYTES`) and the
-//! process exit code. `AbortSignal` honored — the subprocess is killed on
-//! abort.
+//! `applescript` (cap `system.applescript`) resolves with `null` on
+//! non-macOS, never throws — plugins can call it without gating every site.
 
 use std::process::Stdio;
 use std::time::Duration;
@@ -34,9 +22,8 @@ use crate::sdk::errors::{throw_abort, throw_cap, throw_named};
 const EXEC_GLOBAL: &str = "__highbeam_system_exec";
 const APPLESCRIPT_GLOBAL: &str = "__highbeam_system_applescript";
 
-/// Capture cap per stream. Subprocesses that exceed this have their output
-/// silently truncated — the launcher use case is "small CLI commands", not
-/// "tail a 10GB log file".
+/// Per-stream capture cap. Output beyond this is silently truncated — the
+/// launcher use case is small CLI commands, not tailing a 10GB log.
 const MAX_CAPTURE_BYTES: usize = 10 * 1024 * 1024;
 
 pub struct SystemModule;
@@ -82,15 +69,14 @@ impl ModuleDef for SystemModule {
     }
 }
 
-/// Build per-plugin bindings.
+/// Install per-plugin bindings.
 ///
 /// # Errors
 ///
 /// Propagates JS errors from function construction or global assignment.
-// The subprocess capture stack (tokio::process + select! over multiple
-// branches) bumps the generated future to ~65KB; spawning is a one-shot per
-// plugin call so the heap-vs-stack difference is irrelevant. Suppress the
-// warning across this fn rather than scattering Box::pin around.
+// The subprocess capture stack (tokio::process + multi-branch select!) makes
+// the generated future ~65KB; one-shot per call so the heap-vs-stack
+// difference is irrelevant. Suppress across this fn vs scattering Box::pin.
 #[allow(clippy::large_futures)]
 pub fn install<'js>(ctx: &Ctx<'js>, can_exec: bool, can_applescript: bool) -> JsResult<()> {
     let exec = Function::new(

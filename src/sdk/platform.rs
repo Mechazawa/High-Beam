@@ -1,13 +1,5 @@
-//! Host implementation of the `highbeam:platform` module.
-//!
-//! Surface:
-//!
-//! ```ts
-//! import { os, arch, version, isMacOS, isLinux } from 'highbeam:platform';
-//! ```
-//!
-//! No capability required — metadata only. Gating "what OS am I on" would be
-//! ceremony for no benefit.
+//! Host implementation of the `highbeam:platform` module — metadata only,
+//! no capability required.
 
 use std::sync::OnceLock;
 
@@ -37,14 +29,13 @@ impl ModuleDef for PlatformModule {
     }
 }
 
-/// `std::env::consts::OS` returns `"macos"` / `"linux"` which already matches
-/// our wire shape; the wrapper exists to centralise the contract in case we
-/// ever need to normalise.
+/// `std::env::consts::OS` already returns `"macos"`/`"linux"`; wrapper
+/// centralises the contract for future normalisation.
 fn normalized_os() -> &'static str {
     std::env::consts::OS
 }
 
-/// OS version, cached after the first lookup. Returns `"unknown"` on any
+/// OS version, cached after first lookup. Returns `"unknown"` on any
 /// failure — the plugin contract is "best-effort, never throws".
 fn os_version() -> &'static str {
     static VERSION: OnceLock<String> = OnceLock::new();
@@ -94,9 +85,8 @@ mod tests {
 
     #[test]
     fn normalized_os_matches_consts() {
-        // The renamer is a passthrough today; assert that explicitly so a
-        // future "remap windows to wsl" experiment shows up as a failing test
-        // rather than silent drift.
+        // Today it's a passthrough — future remap experiments should surface
+        // here rather than silently drifting.
         assert_eq!(normalized_os(), std::env::consts::OS);
     }
 

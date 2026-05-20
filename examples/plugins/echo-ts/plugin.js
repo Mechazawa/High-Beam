@@ -1,6 +1,5 @@
-// Compiled output of plugin.ts. Hand-written so the example works without
-// requiring a tsc invocation; in practice plugin authors would run
-// `tsc` and ship the compiler output here.
+// Compiled output of plugin.ts (hand-written so the example works without
+// running `tsc`). Plugin authors normally compile via `tsc` and ship that.
 
 import { copy } from "highbeam:actions";
 

@@ -1,7 +1,5 @@
-//! Behavioural tests for `highbeam:icons`.
-//!
-//! Covers capability gating and the in-process cache (a second `forPath` call
-//! returns the same data URI without re-extracting).
+//! Behavioural tests for `highbeam:icons` — capability gating and the
+//! in-process cache.
 
 use rquickjs::loader::{Loader, Resolver};
 use rquickjs::{
@@ -68,8 +66,8 @@ fn for_path_without_cap_throws() {
 
 #[test]
 fn for_path_with_cap_returns_data_uri_even_for_missing_path() {
-    // The contract is "best-effort, never throw" — a missing file path must
-    // resolve to the fallback data URI rather than blowing up.
+    // Contract: best-effort, never throw — missing paths resolve to the
+    // fallback data URI.
     let rt = rt();
     let outcome: String = rt.block_on(async {
         let async_rt = AsyncRuntime::new().expect("rt");

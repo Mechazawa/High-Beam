@@ -1,12 +1,6 @@
-// Vitest config that maps `highbeam:foo` imports onto the stub `.js` files
-// in this directory, so plugin tests can run in plain Node.
-//
-// Plugin authors: either copy this file into your plugin and adjust the
-// `replacement` path, or — if the SDK lives at a fixed relative location —
-// re-export it directly:
-//
-//     import config from '<relpath>/sdk/highbeam/vitest.config.example';
-//     export default config;
+// Maps `highbeam:foo` imports onto the stub `.js` files so plugin tests can
+// run in plain Node. Copy into your plugin and adjust the `replacement`
+// path, or re-export this file directly when the SDK is at a known path.
 
 import { defineConfig } from 'vitest/config';
 import path from 'node:path';

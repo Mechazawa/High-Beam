@@ -1,7 +1,5 @@
-// Shared types referenced from multiple highbeam:* modules.
-//
-// Importing this file directly isn't necessary — every module re-exports the
-// types it needs. We declare them here so we can keep one source of truth.
+// Shared types referenced from multiple `highbeam:*` modules. Each module
+// re-exports the types it needs — this is the single source of truth.
 
 /**
  * One result row a plugin yields from `query()`.

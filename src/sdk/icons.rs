@@ -1,20 +1,8 @@
 //! Host implementation of the `highbeam:icons` module.
 //!
-//! Surface:
-//!
-//! ```ts
-//! import { forPath } from 'highbeam:icons';
-//! const dataUri = await forPath('/Applications/Safari.app', { size: 128 });
-//! ```
-//!
-//! Resolution strategy:
-//!   * macOS: `sips` extracts the resource fork icon as PNG. Slow on first
-//!     call (~50ms); cached in-process to make repeated lookups cheap.
-//!   * Linux: best-effort — return a tiny generic icon data URI rather than
-//!     throwing. The Spotlight plugin's main consumer never crashes for
-//!     missing icons.
-//!
-//! Cap: `icons`.
+//! macOS: `sips` extracts the bundle icon as PNG (~50ms first call, cached
+//! in-process). Linux: returns a 1×1 transparent PNG as a graceful fallback
+//! so the Spotlight plugin never crashes on missing icons.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -57,7 +45,7 @@ impl ModuleDef for IconsModule {
     }
 }
 
-/// Build the per-plugin `forPath` binding.
+/// Install the per-plugin `forPath` binding.
 ///
 /// # Errors
 ///
@@ -122,10 +110,8 @@ fn extract_icon_bytes(path: &str, size: u32) -> Option<Vec<u8>> {
         return None;
     }
 
-    // Strategy: read the bundle's CFBundleIconFile via `defaults`, then `sips`
-    // converts the .icns to a sized PNG written to a temp file. This avoids
-    // shelling out to `osascript` and works for both .app bundles and plain
-    // files (sips will return the file's Quick Look thumbnail in those cases).
+    // Read CFBundleIconFile via `defaults`, then `sips` converts the .icns
+    // to a sized PNG. Works for plain files too (Quick Look thumbnail).
     let tmp = std::env::temp_dir().join(format!(
         "hb-icon-{}-{}.png",
         std::process::id(),
@@ -196,8 +182,7 @@ fn extract_icon_bytes(_path: &str, _size: u32) -> Option<Vec<u8>> {
     None
 }
 
-/// 1×1 transparent PNG. Used as the universal fallback so callers never
-/// crash when icon extraction is unavailable (Linux, missing file, etc.).
+/// 1×1 transparent PNG — universal fallback for Linux / missing files.
 fn fallback_icon_bytes() -> &'static [u8] {
     const PNG: &[u8] = &[
         0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
@@ -229,7 +214,7 @@ mod tests {
         c.lock().unwrap().insert(("k".into(), 1), "v".into());
         let v = c.lock().unwrap().get(&("k".to_owned(), 1)).cloned();
         assert_eq!(v.as_deref(), Some("v"));
-        // Cleanup so the test doesn't pollute other tests in the same process.
+        // Cleanup — the cache is process-global and shared with other tests.
         c.lock().unwrap().remove(&("k".to_owned(), 1));
     }
 }

@@ -1,6 +1,5 @@
-// Stub of `highbeam:icons` for vitest. Default is a 1x1 transparent PNG
-// data URI — matches the Linux fallback from the Rust host so plugin
-// snapshots stay stable across platforms.
+// `highbeam:icons` stub. Default is a 1×1 transparent PNG matching the Rust
+// host's Linux fallback so snapshots stay stable cross-platform.
 
 import { vi } from 'vitest';
 

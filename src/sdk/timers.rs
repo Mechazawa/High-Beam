@@ -1,22 +1,14 @@
-//! Tiny `setTimeout` polyfill — the bare minimum so plugins can write
+//! Tiny `setTimeout` polyfill — bare minimum so plugins can write
+//! `await new Promise(r => setTimeout(r, 250))`. Raw `QuickJS` doesn't ship
+//! this; we drive it via `tokio::time::sleep`.
 //!
-//! ```js
-//! await new Promise(r => setTimeout(r, 250));
-//! ```
-//!
-//! …the canonical "wait 250ms" idiom. Raw `QuickJS` doesn't ship
-//! `setTimeout`/`setInterval` because they're browser/Node concepts; we
-//! provide a host-bound version that drives `tokio::time::sleep`.
-//!
-//! `clearTimeout` / `clearInterval` are accepted as no-ops — we don't track
-//! ids. Plugins are expected to `await` `setTimeout` directly rather than
-//! juggle handles.
+//! `clearTimeout`/`clearInterval` are no-ops — we don't track ids; plugins
+//! are expected to `await setTimeout` directly.
 
 use rquickjs::function::Async;
 use rquickjs::{Ctx, Error as JsError, Function};
 
-/// Install the timer polyfills on the global object. Idempotent if the host
-/// re-runs it.
+/// Install the timer polyfills on the global object. Idempotent.
 ///
 /// # Errors
 ///
@@ -25,9 +17,8 @@ pub fn install<'js>(ctx: &Ctx<'js>) -> Result<(), JsError> {
     let set_timeout = Function::new(
         ctx.clone(),
         Async(|cb: Function<'js>, delay_ms: f64| async move {
-            // f64 -> u64 with NaN/negatives clamped to zero. We deliberately
-            // accept up to u64::MAX ms (well past sane usage) so we don't
-            // mask a plugin bug with an obscure cap.
+            // NaN/negatives clamp to 0; valid f64 up to u64::MAX ms passes
+            // through — we don't mask plugin bugs with an obscure cap.
             let delay = if delay_ms.is_finite() && delay_ms > 0.0 {
                 #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
                 let ms = delay_ms as u64;
@@ -36,8 +27,8 @@ pub fn install<'js>(ctx: &Ctx<'js>) -> Result<(), JsError> {
                 std::time::Duration::from_millis(0)
             };
             tokio::time::sleep(delay).await;
-            // Best effort fire — swallow callback exceptions because we
-            // can't surface them to a non-existent `try`/`catch` site.
+            // Callback exceptions are swallowed — there's no try/catch site
+            // for them to surface to.
             let _ = cb.call::<_, ()>(());
             Ok::<i32, JsError>(0)
         }),

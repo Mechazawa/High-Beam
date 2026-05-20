@@ -1,9 +1,8 @@
 //! User-editable theme loaded from `theme.toml` in the platform config dir.
 //!
-//! The token surface mirrors what `QueryWindow` exposes as `in-out` properties.
-//! Loading is best-effort: a missing or malformed file falls back to the
-//! bundled yosemite-spotlight default. Reload is restart-only — there is no
-//! file watcher.
+//! Token surface mirrors `QueryWindow`'s `in-out` properties. Missing or
+//! malformed file falls back to the bundled yosemite-spotlight default.
+//! Reload is restart-only.
 
 use std::fs;
 use std::path::PathBuf;
@@ -13,8 +12,8 @@ use slint::Color;
 
 use crate::paths;
 
-/// Resolved theme tokens. Field defaults reproduce the bundled
-/// yosemite-spotlight theme; partial user overrides merge against them.
+/// Resolved theme tokens. Defaults reproduce the bundled yosemite-spotlight
+/// theme; partial user overrides merge against them.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Theme {
     pub colors: Colors,
@@ -49,10 +48,9 @@ pub struct Window {
 impl Default for Colors {
     fn default() -> Self {
         Self {
-            // The hex literals here are the source of truth for the bundled
-            // yosemite-spotlight theme. `themes/yosemite-spotlight.toml` and
-            // the Slint property defaults exist for documentation/UI parity
-            // but this is the only value Rust reads at runtime.
+            // These hex literals are the runtime source of truth — the
+            // bundled `themes/yosemite-spotlight.toml` and the .slint
+            // property defaults exist for parity; only Rust reads at runtime.
             background: parse_hex_color("#ffffffea").unwrap(),
             foreground: parse_hex_color("#1d1d1f").unwrap(),
             muted: parse_hex_color("#86868b").unwrap(),
@@ -66,9 +64,7 @@ impl Default for Colors {
 impl Default for Font {
     fn default() -> Self {
         Self {
-            // Empty = let Slint's backend pick the OS default font; that's
-            // what today's UI uses, so a missing theme.toml is visually
-            // identical to the pre-theming build.
+            // Empty family → Slint picks the OS default.
             family: String::new(),
             size_query: 32.0,
             size_title: 14.0,
@@ -87,10 +83,9 @@ impl Default for Window {
 }
 
 impl Theme {
-    /// Resolve the platform-specific config path and load the user's
-    /// `theme.toml` if present. Missing file = silent default. Malformed file
-    /// logs a warning and still returns the default — the daemon must not
-    /// fail to start because of a typo in a theme.
+    /// Load the user's `theme.toml` from the platform config path. Missing
+    /// file → silent default; malformed → warning + default. A typo in the
+    /// theme must not prevent the daemon from starting.
     #[must_use]
     pub fn load_or_default() -> Self {
         let Some(path) = default_theme_path() else {
@@ -107,9 +102,8 @@ impl Theme {
         }
     }
 
-    /// Parse a theme document, merging present fields over the default. Any
-    /// parse error (malformed TOML, bad hex string) falls back to the full
-    /// default with a one-line warning so the app remains startable.
+    /// Parse with fallback. Parse errors (malformed TOML, bad hex) log and
+    /// return the default so the app stays startable.
     #[must_use]
     pub fn from_toml_or_default(text: &str, source: &std::path::Path) -> Self {
         match Self::from_toml(text) {
@@ -124,14 +118,13 @@ impl Theme {
         }
     }
 
-    /// Parse a theme document with strict error reporting. Public so tests can
-    /// assert on specific failure modes; production loading routes through
-    /// [`Self::from_toml_or_default`] which swallows errors.
+    /// Parse with strict errors — public so tests can assert on specific
+    /// failure modes. Production uses [`Self::from_toml_or_default`].
     ///
     /// # Errors
     ///
-    /// Returns a human-readable error string if the TOML is malformed or any
-    /// color value is not parseable as a hex literal.
+    /// Human-readable error string if the TOML is malformed or any color
+    /// value isn't a parseable hex literal.
     pub fn from_toml(text: &str) -> Result<Self, String> {
         let raw: RawTheme = toml::from_str(text).map_err(|e| e.to_string())?;
         let defaults = Self::default();
@@ -146,8 +139,8 @@ impl Theme {
     }
 }
 
-/// Path the daemon reads on startup. `None` when the platform's project dir
-/// can't be resolved (no `$HOME` etc.) — extremely rare but possible in CI.
+/// Path the daemon reads on startup. `None` when the project dir can't be
+/// resolved (no `$HOME` etc.).
 #[must_use]
 pub fn default_theme_path() -> Option<PathBuf> {
     paths::config_dir().ok().map(|dir| dir.join("theme.toml"))
@@ -225,8 +218,7 @@ fn parse_optional(raw: Option<String>, fallback: Color, field: &str) -> Result<C
 }
 
 /// Parse `#rgb`, `#rrggbb`, or `#rrggbbaa`. Returns `None` for any other
-/// shape so the caller can report a localised error and fall through to the
-/// default.
+/// shape so the caller can report a localised error.
 fn parse_hex_color(spec: &str) -> Option<Color> {
     let hex = spec.strip_prefix('#')?;
     let (r, g, b, a) = match hex.len() {
@@ -321,7 +313,6 @@ mod tests {
             parse_hex_color("#0a84ff33").unwrap(),
             Color::from_argb_u8(0x33, 0x0A, 0x84, 0xFF)
         );
-        // case-insensitive
         assert_eq!(
             parse_hex_color("#ABCDEF").unwrap(),
             parse_hex_color("#abcdef").unwrap()
@@ -381,9 +372,8 @@ mod tests {
 
     #[test]
     fn bundled_yosemite_spotlight_matches_default() {
-        // The bundled theme is the documented source of truth for what the
-        // app looks like when no user theme.toml is present. Drift between
-        // this file and the in-Rust defaults would be a silent UX surprise.
+        // Drift between the bundled theme file and the in-Rust defaults would
+        // be a silent UX surprise — this test catches it.
         let text = include_str!("../themes/yosemite-spotlight.toml");
         let theme = Theme::from_toml(text).expect("bundled theme parses");
         assert_eq!(theme, Theme::default());

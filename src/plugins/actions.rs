@@ -1,11 +1,8 @@
 //! Host-side execution of plugin [`Action`] variants.
 //!
-//!   * `OpenUrl` — `open::that(url)` (system handler)
-//!   * `Copy`    — `arboard::Clipboard::set_text`
-//!   * `Exec`    — fire-and-forget subprocess (live capture lives in
-//!     `highbeam:system.exec`)
-//!   * `Reveal`  — open the parent dir with the file selected (macOS `open -R`;
-//!     Linux opens the parent dir best-effort, no selection)
+//! `Exec` here is fire-and-forget; the live-capture variant lives in
+//! `highbeam:system.exec`. `Reveal` opens the parent dir with the file
+//! selected (macOS `open -R`); Linux opens the parent dir, no selection.
 
 use std::error::Error;
 use std::path::Path;
@@ -31,8 +28,6 @@ pub fn execute(action: &Action) -> Result<(), Box<dyn Error>> {
             Ok(())
         }
         Action::Exec { cmd, args } => {
-            // Fire-and-forget spawn. The live capture variant lives in
-            // `highbeam:system.exec`.
             Command::new(cmd).args(args).spawn()?;
             Ok(())
         }
@@ -41,22 +36,15 @@ pub fn execute(action: &Action) -> Result<(), Box<dyn Error>> {
             Ok(())
         }
         Action::Quit => {
-            // Hard exit — bypasses Drop for in-flight resources but matches
-            // the v1 "exit High Beam" contract. The daemon's tokio runtime,
-            // SQLite handles, and rquickjs contexts are all designed to
-            // survive abrupt termination.
+            // Hard exit — bypasses Drop for in-flight resources, but every
+            // owned resource (tokio runtime, SQLite handle, rquickjs context)
+            // is designed to survive abrupt termination.
             std::process::exit(0);
         }
         Action::Noop => Ok(()),
     }
 }
 
-/// Reveal a file in the system file manager.
-///
-/// macOS: `open -R <path>` (the dedicated Finder "select this file" mode).
-/// Linux: best-effort `xdg-open <parent_dir>` — no selection.
-/// Other: not supported; returns an error consistent with how the rest of the
-/// daemon handles unsupported platforms.
 fn reveal(path: &Path) -> Result<(), Box<dyn Error>> {
     #[cfg(target_os = "macos")]
     {

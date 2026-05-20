@@ -1,5 +1,4 @@
-// Stub of `highbeam:system` for vitest. Side-effectful in production —
-// `vi.fn()` so plugin authors override per-test.
+// `highbeam:system` stub — `vi.fn()`s for per-test override.
 
 import { vi } from 'vitest';
 

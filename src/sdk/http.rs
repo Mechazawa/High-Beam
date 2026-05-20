@@ -1,25 +1,9 @@
-//! Host implementation of the `highbeam:http` module.
+//! Host implementation of the `highbeam:http` module. Requires the `http`
+//! capability.
 //!
-//! ```ts
-//! import { get, post } from 'highbeam:http';
-//!
-//! const res = await get('https://api.example.com/x', {
-//!     headers: { 'X-Foo': 'bar' },
-//!     signal,
-//!     timeoutMs: 10_000,
-//! });
-//! if (res.ok) console.log(res.status, res.body);
-//! ```
-//!
-//! The plugin must declare the `http` capability to import this module.
-//!
-//! Cancellation: if the caller passes a `signal`, we race the request future
-//! against that signal's underlying [`CancellationToken`] (or, for foreign
-//! signals, hook a JS listener that flips a token). Either path aborts the
-//! in-flight reqwest.
-//!
-//! Body decoding: UTF-8 only. Binary responses come back as lossy-decoded
-//! strings; raw-bytes opt-in would land via a `binary: true` option.
+//! Cancellation: a plugin-supplied `signal` becomes a [`CancellationToken`]
+//! via [`abort::token_from_js_signal`]; the send/body futures race that
+//! token. UTF-8 only — binary responses are lossy-decoded for v1.
 
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -31,28 +15,23 @@ use rquickjs::{Ctx, Function, Object, Result as JsResult, Value, module::ModuleD
 use crate::sdk::abort;
 use crate::sdk::errors::{throw_abort, throw_named};
 
-/// Default per-request timeout when `opts.timeoutMs` is absent. Matches the
-/// Web Fetch defaults various browsers use for slow requests; deliberately
-/// short for a launcher use case.
+/// Default per-request timeout when `opts.timeoutMs` is absent.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// One shared client for the whole daemon. Sharing it pools TCP/TLS sessions
-/// across plugins and across queries.
+/// Shared client across the whole daemon — pools TCP/TLS sessions.
 fn client() -> &'static Client {
     static CLIENT: OnceLock<Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
         Client::builder()
             .user_agent("high-beam/0.1")
             .timeout(DEFAULT_TIMEOUT)
-            // redirect-follow is on by default in reqwest; spelled out here so
-            // it's auditable.
+            // Default is on; spelled out for auditability.
             .redirect(reqwest::redirect::Policy::limited(10))
             .build()
             .unwrap_or_else(|_| Client::new())
     })
 }
 
-/// Module definition registered against the `highbeam:http` import specifier.
 pub struct HttpModule;
 
 impl ModuleDef for HttpModule {
@@ -83,8 +62,6 @@ impl ModuleDef for HttpModule {
     }
 }
 
-/// Parsed `HttpOpts` argument — headers list, request timeout override,
-/// optional `AbortSignal` passed by the plugin.
 struct HttpOpts<'js> {
     headers: Vec<(String, String)>,
     timeout: Option<Duration>,
@@ -134,8 +111,6 @@ fn parse_opts<'js>(opts: &Value<'js>) -> HttpOpts<'js> {
     }
 }
 
-/// The actual request dispatch. Lives outside the closure so its logic stays
-/// readable.
 async fn request<'js>(
     ctx: Ctx<'js>,
     method: &'static str,
@@ -152,7 +127,6 @@ async fn request<'js>(
     let mut builder = match method {
         "GET" => client().get(&url),
         "POST" => client().post(&url),
-        // The closures above only pass these two; defensive default.
         _ => client().request(
             reqwest::Method::from_bytes(method.as_bytes()).map_err(|e| {
                 rquickjs::Error::new_loading_message("highbeam:http", e.to_string())
@@ -182,8 +156,6 @@ async fn request<'js>(
         }
     }
 
-    // Cancellation: build a token from the signal if there is one, otherwise
-    // a fresh token that nothing ever fires.
     let token = if let Some(sig) = signal {
         abort::token_from_js_signal(&ctx, &sig)?
     } else {
@@ -235,8 +207,8 @@ enum BodyShape {
     Text(String),
 }
 
-/// Convert a JS body value to either JSON-stringified or plain text. Anything
-/// truthy non-string non-undefined goes through `JSON.stringify`.
+/// String values pass through as text; everything else goes through
+/// `JSON.stringify` and sets `content-type: application/json`.
 fn coerce_body<'js>(ctx: &Ctx<'js>, value: Value<'js>) -> JsResult<Option<BodyShape>> {
     if value.is_undefined() || value.is_null() {
         return Ok(None);
@@ -250,7 +222,6 @@ fn coerce_body<'js>(ctx: &Ctx<'js>, value: Value<'js>) -> JsResult<Option<BodySh
     Ok(Some(BodyShape::Json(s)))
 }
 
-/// Build the `HttpResponse` object the plugin observes.
 fn build_response<'js>(
     ctx: &Ctx<'js>,
     status: u16,
@@ -299,7 +270,6 @@ mod tests {
 
     #[test]
     fn client_is_lazily_constructed() {
-        // Two calls should return the same client.
         let a: *const Client = client();
         let b: *const Client = client();
         assert_eq!(a, b);

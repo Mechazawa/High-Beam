@@ -1,23 +1,14 @@
 //! rquickjs `Context` per plugin and the `query()` driver.
 //!
-//! Per-plugin state held here:
-//!   * `AsyncRuntime` + `AsyncContext` — own JS heap and global object
-//!   * memory cap from `manifest.memoryMb`
-//!   * shared `Arc<AtomicBool>` set by the wall-clock timer that the interrupt
-//!     hook checks; tripping it makes `QuickJS` raise an uncatchable exception
-//!     and return control to Rust
-//!   * resolver/loader pair that whitelists `highbeam:*` specifiers and gates
-//!     each module on the manifest's capability list
+//! Per plugin: own `AsyncRuntime` + `AsyncContext` with a memory cap from
+//! `manifest.memoryMb`, an interrupt hook backed by a shared `AtomicBool`
+//! that the wall-clock timer flips, and a resolver/loader pair that
+//! whitelists `highbeam:*` specifiers + gates each module on capabilities.
 //!
-//! Streaming + cancellation:
-//!   * `run_query` builds a host [`Abort`] and gives the plugin its
-//!     `AbortSignal` as the second argument to `query(input, signal)`.
-//!   * It returns an `mpsc::Receiver<PluginResult>` that the dispatcher reads
-//!     from as the plugin yields. Closing the dispatcher's end (via
-//!     `cancel_handle.abort()` or just dropping the receiver) interrupts the
-//!     in-flight query.
-//!   * Per-iteration we race the next-step future against the abort token so
-//!     we wake up promptly when a new keystroke arrives.
+//! `run_query_stream` returns an `mpsc::Receiver<PluginResult>` the
+//! dispatcher reads as the plugin yields. Cancelling the supplied token
+//! aborts the in-flight query both JS-side (`signal.aborted`) and Rust-side
+//! (interrupt hook for blocking loops).
 
 use std::path::Path;
 use std::sync::Arc;
@@ -49,9 +40,8 @@ use crate::sdk::platform::PlatformModule;
 use crate::sdk::system;
 use crate::sdk::timers;
 
-/// JS-side iterator normalizer (turns a value returned from `query()` into a
-/// real async iterator). Loaded once per query at the top of
-/// `stream_query`; tiny enough that re-eval cost is negligible.
+/// JS-side normalizer: turns whatever `query()` returns into a real async
+/// iterator. Re-eval cost per query is negligible.
 const ITERATOR_NORMALIZE_JS: &str = include_str!("../sdk/js/iterator_normalize.js");
 
 const HIGHBEAM_SCHEME: &str = "highbeam:";
@@ -63,25 +53,21 @@ const ICONS_MODULE: &str = "highbeam:icons";
 const SYSTEM_MODULE: &str = "highbeam:system";
 const MATCH_MODULE: &str = "highbeam:match";
 const PLATFORM_MODULE: &str = "highbeam:platform";
-/// Slot on `globalThis` where we stash the plugin's `query` export at load
-/// time. Re-importing the plugin module inside `run_query` would require a
-/// `Module<'js>` reference that can't survive the `.await` on each iteration
-/// step; `Persistent<Function<'static>>` would be cleaner but contains a raw
-/// pointer (`!Send`), so it can't cross the `async_with!` boundary under
-/// rquickjs's `parallel` feature. Keep the global name unusual so plugin
-/// code can't accidentally collide.
+/// Slot on `globalThis` for the plugin's `query` export. We can't carry a
+/// `Module<'js>` across iterator `.await` points, and
+/// `Persistent<Function<'static>>` holds a raw `!Send` pointer that can't
+/// cross `async_with!` under rquickjs's `parallel` feature.
 const QUERY_GLOBAL: &str = "__highbeam_query";
 
 /// A loaded, evaluated plugin ready to handle queries.
 ///
 /// `AsyncContext` keeps the underlying `AsyncRuntime` alive via its own
-/// internal `Arc`, so we only hold the context here.
+/// internal `Arc`.
 pub struct LoadedPlugin {
     pub manifest: Manifest,
     context: AsyncContext,
     timeout: Duration,
-    // Held to keep the interrupt flag alive for the runtime's lifetime; the
-    // interrupt hook captures a clone of the same `Arc`.
+    // Mirrors what the interrupt hook captures; we keep the Arc alive here.
     interrupt_flag: Arc<AtomicBool>,
     log: Arc<PluginLog>,
 }
@@ -140,7 +126,7 @@ impl LoadedPlugin {
     }
 
     /// Variant of [`Self::load`] with an explicit cache directory — used by
-    /// the test harness to keep cache writes inside a tmpdir.
+    /// tests to keep cache writes inside a tmpdir.
     ///
     /// # Errors
     ///
@@ -154,10 +140,8 @@ impl LoadedPlugin {
         Self::load_with_log(plugin_dir, manifest, cache_dir, log).await
     }
 
-    /// Variant of [`Self::load_with_cache_dir`] that accepts an explicit
-    /// [`PluginLog`] handle — used by tests that need to point the logfile at
-    /// a tempdir-controlled location while still exercising the real load
-    /// pipeline.
+    /// Variant accepting an explicit [`PluginLog`] handle — used by tests
+    /// that need to point the logfile at a tmpdir.
     ///
     /// # Errors
     ///
@@ -178,8 +162,7 @@ impl LoadedPlugin {
 
         let runtime = AsyncRuntime::new().map_err(|err| PluginError::Js(err.to_string()))?;
 
-        // Memory cap: docs say "0 = unlimited"; we treat 0 as "leave default
-        // alone" so a hand-crafted manifest can't accidentally remove the cap.
+        // memoryMb = 0 means "leave the engine default" — never "unlimited".
         if manifest.memory_mb > 0 {
             let bytes = usize::try_from(manifest.memory_mb)
                 .unwrap_or(usize::MAX)
@@ -187,9 +170,8 @@ impl LoadedPlugin {
             runtime.set_memory_limit(bytes).await;
         }
 
-        // Interrupt flag: the wall-clock timer flips this; the hook returns
-        // `true` whenever it's set, which causes QuickJS to raise an
-        // uncatchable exception and return control to Rust.
+        // Wall-clock timer flips this; hook returns `true` whenever set,
+        // causing QuickJS to raise an uncatchable exception and return.
         let interrupt_flag = Arc::new(AtomicBool::new(false));
         let hook_flag = Arc::clone(&interrupt_flag);
         runtime
@@ -204,43 +186,36 @@ impl LoadedPlugin {
             .await
             .map_err(|err| PluginError::Js(err.to_string()))?;
 
-        // Evaluate the entry module. We name it `plugin:main` so error
-        // backtraces print something sensible. The declare + eval split lets
-        // us await the eval-promise so top-level imports (e.g.
-        // `import 'highbeam:actions'`) finish before we look up `query`.
+        // Module is named `plugin:main` so backtraces print something
+        // sensible. `declare → eval → await` lets top-level imports
+        // (e.g. `import 'highbeam:actions'`) finish before we look up
+        // `query`.
         let entry_path_str = entry_path.display().to_string();
         let source_bytes = source.into_bytes();
         let plugin_caps = manifest.capabilities.clone();
         let plugin_dir_owned = plugin_dir.to_path_buf();
         let log_for_ctx = Arc::clone(&log);
         async_with!(context => |ctx| {
-            // `console` goes first so any failure further down in this block
-            // that we choose to log can still reach the plugin's logfile via
-            // a JS-side `console.error`. (Today we log from Rust instead, but
-            // installing first costs nothing and keeps the invariant simple.)
+            // Install `console` first so any later install failure could still
+            // route through it. (Today we log those from Rust, but keeping
+            // the invariant simple is free.)
             console::install(&ctx, &log_for_ctx)
                 .catch(&ctx)
                 .map_err(|err| PluginError::Js(format!("install console: {err}")))?;
 
-            // Install the JS-side AbortController polyfill so plugins can do
-            // `new AbortController()` for their own cancellation flows.
             install_global_controller(&ctx)
                 .catch(&ctx)
                 .map_err(|err| PluginError::Js(format!("install AbortController: {err}")))?;
 
-            // `setTimeout`/`clearTimeout` polyfill so plugins can `await
-            // new Promise(r => setTimeout(r, ms))`. Strictly speaking
-            // optional, but every JS author expects it; without it streaming
-            // demos like our slow-echo plugin can't write the obvious code.
+            // setTimeout/clearTimeout: without these, the canonical
+            // `await new Promise(r => setTimeout(r, ms))` doesn't work.
             timers::install(&ctx)
                 .catch(&ctx)
                 .map_err(|err| PluginError::Js(format!("install setTimeout: {err}")))?;
 
-            // Pre-install the per-plugin clipboard bindings so the
-            // `highbeam:clipboard` module can pick them up at evaluate-time.
-            // Only relevant if the plugin declared at least one clipboard cap;
-            // we install unconditionally because the inert no-cap stubs are
-            // cheap and keep the module's evaluate path branch-free.
+            // Per-plugin bindings get installed unconditionally; the inert
+            // no-cap stubs are cheap and keep the module evaluate path
+            // branch-free.
             let can_read = plugin_caps.iter().any(|c| c == "clipboard.read");
             let can_write = plugin_caps.iter().any(|c| c == "clipboard.write");
             clipboard::install(&ctx, can_read, can_write)
@@ -313,19 +288,8 @@ impl LoadedPlugin {
     }
 
     /// Stream results from `query(input, signal)` over an `mpsc` channel.
-    ///
-    /// Returns:
-    ///   * `receiver` — yields one [`PluginResult`] per `yield` from the plugin.
-    ///     Closes when the plugin's iterator drains, the timeout fires, the
-    ///     plugin throws, or the caller cancels via `cancel.cancel()`.
-    ///   * `cancel` — host handle to cancel mid-flight. The dispatcher flips
-    ///     this when a newer keystroke arrives.
-    ///
-    /// # Errors
-    ///
-    /// Channel send is fallible (receiver dropped) but the worker treats that
-    /// as a cancellation, not an error. Per-iteration JS errors close the
-    /// channel and are reported via the receiver returning `None`.
+    /// The receiver closes when the plugin's iterator drains, the timeout
+    /// fires, the plugin throws, or the caller cancels.
     #[must_use]
     pub fn run_query_stream(
         &self,
@@ -333,12 +297,11 @@ impl LoadedPlugin {
         cancel: CancellationToken,
     ) -> mpsc::UnboundedReceiver<PluginResult> {
         let (tx, rx) = mpsc::unbounded_channel();
-        // Reset and arm the interrupt flag for this call.
         self.interrupt_flag.store(false, Ordering::Relaxed);
         let flag_for_timer = Arc::clone(&self.interrupt_flag);
         let timeout = self.timeout;
-        // Distinguishes "timer tripped the interrupt" from "caller cancelled"
-        // so the post-run logger can report a budget exhaustion specifically.
+        // Distinguishes "timer tripped" from "caller cancelled" so the
+        // post-run logger can report budget exhaustion specifically.
         let timed_out = Arc::new(AtomicBool::new(false));
         let timed_out_for_timer = Arc::clone(&timed_out);
 
@@ -351,8 +314,8 @@ impl LoadedPlugin {
                     cancel_for_timer.cancel();
                 }
                 () = cancel_for_timer.cancelled() => {
-                    // Caller-initiated cancel — we still flip the interrupt
-                    // flag so blocking CPU loops inside QuickJS wake up.
+                    // Caller cancelled — still flip the interrupt flag so
+                    // blocking CPU loops inside QuickJS wake up.
                     flag_for_timer.store(true, Ordering::Relaxed);
                 }
             }
@@ -385,19 +348,14 @@ impl LoadedPlugin {
 
 impl Drop for LoadedPlugin {
     fn drop(&mut self) {
-        // Best effort: clear the interrupt flag and let AsyncRuntime/Context
-        // handle the rest via their own cleanup.
         self.interrupt_flag.store(false, Ordering::Relaxed);
     }
 }
 
 /// Map a `query()` outcome to a line in the plugin's logfile.
 ///
-/// Distinguishes four cases the user wants to debug separately:
-///   * timeout — the manifest budget was exhausted (`WARN`)
-///   * out-of-memory — the memory cap tripped a `RangeError` (`ERROR`)
-///   * generic exception — anything else the plugin's iterator threw (`ERROR`)
-///   * `Cancelled` — no log; the host abandoned the query, not the plugin.
+/// Distinguishes timeout (WARN), out-of-memory (ERROR), and other exceptions
+/// (ERROR); `Cancelled` writes no line — the host abandoned the query.
 fn log_query_outcome(
     log: &PluginLog,
     outcome: &Result<(), PluginError>,
@@ -409,9 +367,8 @@ fn log_query_outcome(
     let Err(err) = outcome else {
         return;
     };
-    // Timeout wins over Cancelled: the host-driven cancel that flips on a
-    // timeout is the *cause* the user wants to see, not the resulting
-    // "cancelled" classification.
+    // Timeout wins over Cancelled — the host-driven cancel that flips on
+    // a timeout is the cause the user wants to see.
     if timed_out || matches!(err, PluginError::Timeout) {
         log.write(
             LogLevel::Warn,
@@ -437,7 +394,7 @@ fn log_query_outcome(
 }
 
 /// Iterate the plugin's async iterator, sending each yielded result through
-/// `tx` as it arrives. Returns early on cancel/timeout.
+/// `tx`. Returns early on cancel/timeout.
 async fn stream_query<'js>(
     ctx: Ctx<'js>,
     input: &str,
@@ -464,12 +421,9 @@ async fn stream_query<'js>(
         .catch(&ctx)
         .map_err(|err| PluginError::Js(format!("build signal: {err}")))?;
 
-    // Drive the host abort into the JS controller when the dispatcher cancels.
-    // We do this inline via a select! in the iteration loop rather than
-    // spawning a side task because the side task would need its own
-    // `async_with!` context for the JS-side cancel call — single-threaded
-    // ergonomics get ugly. Instead the next-step race fires the JS-side
-    // abort once the token flips.
+    // The JS-side abort is fired inline from the select! below — spawning a
+    // side task would need its own `async_with!` context to call back into
+    // JS, which gets awkward under single-threaded rquickjs.
 
     let input_js = input
         .into_js(&ctx)
@@ -489,7 +443,7 @@ async fn stream_query<'js>(
 
     loop {
         if cancel.is_cancelled() {
-            // Best effort fire JS-side listeners so plugin code can clean up.
+            // Fire JS-side listeners so plugin code can clean up.
             let _ = abort.cancel(&ctx);
             return Err(PluginError::Cancelled);
         }
@@ -535,8 +489,8 @@ async fn stream_query<'js>(
     }
 }
 
-/// If the value is already an async iterator (has `next`), return it as-is.
-/// Otherwise call `Symbol.asyncIterator` on it to obtain one.
+/// If the value already has `next`, return it as-is; otherwise call its
+/// `Symbol.asyncIterator`.
 fn normalize_async_iterator<'js>(
     ctx: &Ctx<'js>,
     value: Value<'js>,
@@ -544,8 +498,6 @@ fn normalize_async_iterator<'js>(
     let obj: Object<'js> = value
         .try_into_object()
         .map_err(|_| PluginError::Js("query() did not return an object".into()))?;
-    // One-shot helper: returns either the iterator object directly (if `next`
-    // exists) or the result of calling `Symbol.asyncIterator`.
     let pick: Function<'js> = ctx
         .clone()
         .eval::<Function<'js>, _>(ITERATOR_NORMALIZE_JS)
@@ -559,10 +511,7 @@ fn normalize_async_iterator<'js>(
 }
 
 /// Resolve the per-plugin cache directory under the host's cache root.
-///
-/// `~/Library/Caches/high-beam/plugins/<name>/` on macOS,
-/// `$XDG_CACHE_HOME/high-beam/plugins/<name>/` on Linux. Falls back to a
-/// temp-dir-rooted path if `ProjectDirs` can't resolve (CI, exotic env).
+/// Falls back to a temp-dir-rooted path if `ProjectDirs` can't resolve.
 pub(crate) fn default_cache_dir(plugin_name: &str) -> std::path::PathBuf {
     if let Some(dirs) = directories::ProjectDirs::from("", "", "high-beam") {
         dirs.cache_dir().join("plugins").join(plugin_name)
@@ -591,9 +540,8 @@ impl Resolver for HighbeamResolver {
 }
 
 /// Loads exactly the `highbeam:*` modules the plugin's capabilities permit.
-///
-/// The capability table lives in [`crate::sdk::capability`] — adding a module
-/// is a one-line table edit plus the loader arm below.
+/// Adding a module is a one-line table edit in [`crate::sdk::capability`]
+/// plus a loader arm below.
 struct HighbeamLoader {
     capabilities: Vec<String>,
 }
@@ -613,9 +561,7 @@ impl Loader for HighbeamLoader {
             ));
         }
 
-        // Capability gate: lookup the module in the central table, check that
-        // at least one of its required caps is in the plugin's set. Modules
-        // marked uncapped (match, platform) skip this gate entirely.
+        // Modules marked uncapped (match, platform) skip the gate.
         if !capability::is_uncapped_module(name) {
             let Some(module_cap) = capability::for_module(name) else {
                 return Err(JsError::new_loading_message(

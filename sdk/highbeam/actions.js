@@ -1,6 +1,5 @@
-// Stub implementation of `highbeam:actions` for vitest. The host's Rust
-// version returns the same plain objects; treating this as a real impl
-// keeps test assertions simple — `expect(action).toEqual({...})`.
+// `highbeam:actions` stub for vitest. The host returns the same plain
+// objects, so this is the real impl — `expect(action).toEqual({...})` works.
 
 export function openUrl(url) {
     return { kind: 'openUrl', url };

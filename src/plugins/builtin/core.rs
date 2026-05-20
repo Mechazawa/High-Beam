@@ -1,34 +1,19 @@
-//! Core system actions (v1 `CorePlugin.js`) reimplemented as a host built-in.
+//! Core system actions, implemented in Rust so a buggy plugin can't power
+//! off the machine.
 //!
-//! Why not a JS plugin: a malicious or buggy plugin must not be able to power
-//! off the user's machine. Shutdown/sleep/restart/lock/quit are spelled out
-//! in Rust so they're auditable in one place and can't be redefined at
-//! runtime.
-//!
-//! Surface: keyword prefix-matching, case-insensitive. Scores are scaled by
-//! how much of the keyword the user has typed (`query_len / keyword_len`),
-//! capped to 100 so it ranks against JS plugins on the same 0..100 scale.
+//! Keyword prefix-match, case-insensitive. Score scales by how much of the
+//! keyword has been typed (`query_len / keyword_len`), capped to 100.
 
 use crate::plugins::dispatch::StreamedResult;
 use crate::plugins::result::{Action, PluginResult};
 
-/// The plugin name attributed to every Core result. Stable for the frecency
-/// key prefix — pickling "shutdown" once shouldn't lift it forever, but the
-/// current frecency model is already keyed on (plugin, key) so this Just Works.
 pub const NAME: &str = "core";
 
-/// Version string surfaced in `version v…` results.
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Every keyword the Core built-in recognises, paired with the action it
-/// produces when selected.
 struct Keyword {
-    /// What the user types (case-insensitive prefix match).
     label: &'static str,
-    /// Optional subtitle to surface on the result row.
     subtitle: Option<&'static str>,
-    /// Build the action. Most are pure data; only the version readout needs
-    /// runtime composition.
     make_action: fn() -> Action,
 }
 
@@ -64,8 +49,8 @@ fn keywords() -> Vec<Keyword> {
             subtitle: Some("not implemented yet"),
             make_action: || Action::Noop,
         },
-        // Synthesised at query time so the version label always matches the
-        // running binary even when build-time and lookup-time drift.
+        // Label synthesised at query time so it always reflects the running
+        // binary's version.
         Keyword {
             label: "__version_placeholder__",
             subtitle: None,
@@ -148,9 +133,6 @@ fn lock_action() -> Action {
     }
 }
 
-/// Match `query` against every Core keyword and produce matching results.
-/// Each match is wrapped in a [`StreamedResult`] so the dispatcher can fold
-/// these in alongside JS plugin yields.
 #[must_use]
 pub(crate) fn query(input: &str) -> Vec<StreamedResult> {
     let q = input.trim();
@@ -185,18 +167,12 @@ pub(crate) fn query(input: &str) -> Vec<StreamedResult> {
     out
 }
 
-/// Compute the prefix-match weight for one keyword.
-///
-/// Returns `None` if `query` is not a prefix of `label` (case-insensitive).
-/// Returns `Some(score)` where `score` scales linearly with how much of the
-/// keyword has been typed, capped at 100.
 fn match_weight(query_lower: &str, label: &str) -> Option<f64> {
     let label_lower = label.to_lowercase();
     if !label_lower.starts_with(query_lower) {
         return None;
     }
-    // Keyword labels never approach f64's mantissa precision (52 bits), so
-    // the lossy cast is safe in practice.
+    // Keyword labels are tiny strings — well under f64 mantissa precision.
     #[allow(clippy::cast_precision_loss)]
     let coverage = query_lower.len() as f64 / label.len() as f64;
     Some((coverage * 100.0).min(100.0))

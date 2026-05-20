@@ -1,11 +1,8 @@
 //! `SQLite` storage for the `picks` frecency table.
 //!
-//! Schema is created with `CREATE TABLE IF NOT EXISTS`. We have no schema
-//! history to migrate yet, so a real migrations crate would be ceremony for
-//! ceremony's sake.
-//!
-//! TODO: formalize migrations (e.g. `rusqlite_migration`) the first time we
-//! actually need to evolve the schema.
+//! `CREATE TABLE IF NOT EXISTS` is the whole migration system — no history
+//! to evolve yet. TODO: switch to `rusqlite_migration` the first time the
+//! schema actually changes.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -18,9 +15,8 @@ use rusqlite::{Connection, params};
 
 use crate::paths::ensure_parent_dir;
 
-// The composite PRIMARY KEY already generates an implicit unique index on
-// (plugin_name, result_key); SQLite uses it for both lookups and upserts.
-// No additional index is needed.
+// Composite PRIMARY KEY generates an implicit unique index used for both
+// lookups and upserts — no additional index needed.
 const SCHEMA_SQL: &str = "\
 CREATE TABLE IF NOT EXISTS picks (
     plugin_name      TEXT    NOT NULL,
@@ -31,14 +27,12 @@ CREATE TABLE IF NOT EXISTS picks (
 );
 ";
 
-/// One row's worth of pick history. Plain tuple in the snapshot map.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PickRow {
     pub(crate) picks: u32,
     pub(crate) last_picked_at: i64,
 }
 
-/// Composite key used by both the schema and the snapshot map.
 type ResultId = (String, String);
 
 /// Owned handle to the frecency database. `Arc<Mutex>` is enough — picks
@@ -86,12 +80,8 @@ impl FrecencyDb {
     }
 
     /// Read every `(plugin_name, result_key) -> (picks, last_picked_at)` row
-    /// into a map. Per-query cost is trivial — at our scale (thousands of
-    /// rows max) the whole table is well under 100 KB and `SQLite` blasts
-    /// through the SELECT in single-digit ms.
-    ///
-    /// On any SQL/lock failure we log and return an empty map so the daemon
-    /// stays functional with default ranking.
+    /// into a map. SQL/lock failure returns an empty map (daemon stays usable
+    /// with default ranking).
     #[must_use]
     pub(crate) fn snapshot(&self) -> Snapshot {
         let guard = match self.inner.lock() {
@@ -197,8 +187,8 @@ impl FrecencyDb {
     }
 }
 
-/// Wall-clock seconds since Unix epoch. Saturates to 0 on (impossible) pre-epoch
-/// system clocks rather than panicking.
+/// Wall-clock seconds since Unix epoch. Saturates to 0 on pre-epoch clocks
+/// rather than panicking.
 #[must_use]
 pub(crate) fn now_seconds() -> i64 {
     SystemTime::now()
@@ -206,18 +196,14 @@ pub(crate) fn now_seconds() -> i64 {
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
-/// Per-query snapshot of the picks table.
-///
-/// Holds an owned `HashMap` rather than a `&` into the DB so the dispatcher
-/// can pass it around without juggling lifetimes.
+/// Per-query snapshot of the picks table — owned `HashMap` so the dispatcher
+/// can pass it around without juggling lifetimes against the DB connection.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Snapshot {
     picks: HashMap<ResultId, PickRow>,
 }
 
 impl Snapshot {
-    /// Look up a `(plugin, key)` pair. Returns `None` when the result has
-    /// never been picked (the caller treats that as "no bonus").
     #[must_use]
     pub(crate) fn get(&self, plugin_name: &str, result_key: &str) -> Option<PickRow> {
         self.picks
@@ -225,8 +211,6 @@ impl Snapshot {
             .copied()
     }
 
-    /// Construct a snapshot from raw rows. Used by tests so we don't have to
-    /// stand up a `Connection`.
     #[cfg(test)]
     #[must_use]
     pub(crate) fn from_rows(rows: Vec<(String, String, PickRow)>) -> Self {
@@ -235,8 +219,8 @@ impl Snapshot {
     }
 }
 
-/// Resolve the on-disk path for the frecency DB. Mirrors the layout in
-/// `docs/04-platform.md`. Returns `None` if `ProjectDirs` won't resolve.
+/// Resolve the on-disk path for the frecency DB. Returns `None` if
+/// `ProjectDirs` won't resolve.
 #[must_use]
 pub(crate) fn default_db_path() -> Option<PathBuf> {
     let dirs = directories::ProjectDirs::from("", "", "high-beam")?;

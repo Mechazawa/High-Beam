@@ -1,49 +1,31 @@
-//! Web-spec `AbortController` / `AbortSignal` polyfill for plugins.
+//! Web-spec `AbortController`/`AbortSignal` polyfill for plugins.
 //!
-//! Plugins receive a real `AbortSignal`-shaped JS object as the second arg to
-//! `query(input, signal)`. The host can call [`Abort::cancel`] from Rust to
-//! cascade cancellation through host I/O (`http.get(url, { signal })`) and
-//! through any JS-side `signal.aborted` / `addEventListener('abort', …)`
-//! listeners the plugin registered.
+//! Plugins receive a real `AbortSignal`-shaped JS object as the second arg
+//! to `query(input, signal)`. [`Abort::cancel`] fires both the JS-side
+//! listeners and the Rust [`CancellationToken`] that gates in-flight I/O.
 //!
-//! Implementation strategy: the JS-side polyfill is pure JS (see
-//! [`install_global_controller`]) so we don't pay rquickjs binding costs for
-//! every property access. The host wraps that with a tiny Rust handle
-//! ([`Abort`]) that owns a [`tokio_util::sync::CancellationToken`]; calling
-//! [`Abort::cancel`] from Rust runs the JS-side `controller.abort()` so JS
-//! listeners fire, and flips the token so in-flight reqwest futures wake up.
+//! Pure-JS polyfill (see [`install_global_controller`]) avoids per-property
+//! rquickjs binding overhead. The host wraps it with [`Abort`] which holds
+//! a [`tokio_util::sync::CancellationToken`]. `highbeam:http` accepts a
+//! signal from plugin code and turns it back into a token via
+//! [`token_from_js_signal`].
 //!
-//! The cap-gated `highbeam:http` module accepts a signal from the plugin and
-//! turns it back into a token via [`token_from_js_signal`] — it registers a
-//! JS `addEventListener('abort', …)` that flips a brand-new token, then races
-//! the request future against that token.
-//!
-//! `AbortSignal.timeout(ms)` and `AbortSignal.any([signals])` are explicitly
-//! *not* in v1 — plugin authors who want those write the JS themselves.
+//! `AbortSignal.timeout(ms)` / `AbortSignal.any([…])` are post-v1.
 
 use rquickjs::function::This;
 use rquickjs::{CatchResultExt, Ctx, Error as JsError, Function, Object};
 use tokio_util::sync::CancellationToken;
 
-/// AbortController/AbortSignal polyfill. Idempotent; safe to evaluate twice
-/// in the same context.
+/// AbortController/AbortSignal polyfill. Idempotent.
 const ABORT_CONTROLLER_JS: &str = include_str!("js/abort_controller.js");
 
-/// Expression-shaped helper: `(() => { … })`. Used by [`Abort::create`].
 const ABORT_CREATE_JS: &str = include_str!("js/abort_create.js");
 
-/// Expression-shaped helper: `((id) => { … })`. Used by [`Abort::cancel`].
 const ABORT_FIRE_JS: &str = include_str!("js/abort_fire.js");
 
-/// Host handle for one signal the host gives a plugin.
-///
-/// The handle owns:
-///   * a [`CancellationToken`] mirrored by the JS controller's abort state
-///   * an opaque JS-side identifier so [`Abort::cancel`] can flip the matching
-///     controller's `abort()` from Rust
-///
-/// The controller (and its `.signal`) are returned by [`Abort::create`]; pass
-/// the signal object as a JS argument to whatever plugin code needs it.
+/// Host handle for one signal. Owns a [`CancellationToken`] mirrored by the
+/// JS controller's abort state plus an opaque controller id used by
+/// [`Abort::cancel`] to flip the JS side from Rust.
 pub struct Abort {
     token: CancellationToken,
     controller_id: i64,
@@ -51,20 +33,14 @@ pub struct Abort {
 
 impl Abort {
     /// Build a fresh controller+signal pair inside the active JS context.
-    ///
     /// Returns the Rust handle and the JS-side `controller.signal` object.
-    /// Side effect: registers the controller in the global
-    /// `__highbeam_abort_registry` so [`Abort::cancel`] can look it up later.
     ///
     /// # Errors
     ///
     /// Propagates JS errors from the bootstrap script.
     pub fn create<'js>(ctx: &Ctx<'js>) -> Result<(Self, Object<'js>), JsError> {
-        // Lazy-install the polyfill the first time we need it. Multiple calls
-        // are idempotent because the JS bootstrap guards on `globalThis.AbortController`.
         install_global_controller(ctx)?;
 
-        // Hand the registry a fresh controller, get back the id + signal.
         let make: Function<'js> = ctx.eval(ABORT_CREATE_JS)?;
         let pair: Object<'js> = make.call(())?;
         let controller_id: i64 = pair.get("id")?;
@@ -92,10 +68,8 @@ impl Abort {
         self.token.is_cancelled()
     }
 
-    /// Flip the abort flag. Fires JS-side listeners *and* the Rust-side token.
-    ///
-    /// Idempotent. Must be called from inside an `async_with!` block so the
-    /// JS controller can run its listeners.
+    /// Flip the abort flag. Fires JS-side listeners AND the Rust-side token.
+    /// Idempotent. Must be called from inside an `async_with!` block.
     ///
     /// # Errors
     ///
@@ -116,7 +90,7 @@ impl Abort {
 }
 
 /// Build the JS-side `AbortController` polyfill and the controller registry.
-/// Idempotent — multiple calls within the same context are no-ops.
+/// Idempotent.
 ///
 /// # Errors
 ///
@@ -127,15 +101,11 @@ pub fn install_global_controller(ctx: &Ctx<'_>) -> Result<(), JsError> {
 }
 
 /// Build a Rust [`CancellationToken`] that flips when the given JS-side
-/// `AbortSignal` aborts. Used by host I/O modules (`highbeam:http`) to weave a
-/// plugin-supplied signal into their cancellation logic.
-///
-/// If the signal is already aborted, returns a pre-cancelled token.
+/// `AbortSignal` aborts. Pre-cancelled token if the signal is already aborted.
 ///
 /// # Errors
 ///
-/// Propagates JS errors from reading the `aborted` property or attaching the
-/// listener.
+/// Propagates JS errors from reading `aborted` or attaching the listener.
 pub fn token_from_js_signal<'js>(
     ctx: &Ctx<'js>,
     signal: &Object<'js>,
@@ -147,8 +117,6 @@ pub fn token_from_js_signal<'js>(
         return Ok(token);
     }
 
-    // Make a tiny zero-arg function that flips the token. The token clone is
-    // captured by the function for as long as JS holds the listener.
     let token_for_cb = token.clone();
     let cb = Function::new(ctx.clone(), move || {
         token_for_cb.cancel();
@@ -217,7 +185,6 @@ mod tests {
             let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
             async_with!(ctx => |ctx| {
                 let (abort, signal) = Abort::create(&ctx).expect("create");
-                // Attach a JS listener on the signal.
                 let attach: Function<'_> = ctx.eval(r"((sig) => {
                     sig._observed = false;
                     sig.addEventListener('abort', () => { sig._observed = true; });

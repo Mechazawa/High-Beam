@@ -6,106 +6,68 @@ license = "MIT"
 build = "build.rs"
 
 [dependencies]
-# UI toolkit; unstable-winit-030 gives us focus/blur events and winit window access
-# for setting native window properties not exposed via .slint markup.
+# `unstable-winit-030` exposes focus/blur events and the underlying winit
+# window so we can set native properties .slint can't express.
 slint = { version = "1.16", features = ["unstable-winit-030"] }
 clap = { version = "4", features = ["derive"] }
 directories = "6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# Plugin runtime. We picked rquickjs 0.11 (latest stable as of 2026-05) over
-# alternatives like `boa_engine` / `deno_core` because:
-#   * the docs explicitly call out our needs — per-Context memory cap,
-#     interrupt-hook based wall-clock timeout, custom module resolver+loader
-#     for the `highbeam:` import scheme, and async generator support;
-#   * QuickJS itself is ~1 MB embedded vs Deno-class engines that bring V8 or
-#     huge crate trees — we want a JS sandbox, not a runtime.
-# Features:
-#   * `loader` — Resolver + Loader traits + ModuleLoader for builtin modules
-#   * `futures` — AsyncRuntime / AsyncContext + Promise::into_future, needed to
-#     drive `async function* query()` from Rust without manual job-queue pumping
-#   * `macro` — `#[rquickjs::module]` etc. for ergonomic host module exports
+# QuickJS embedding for plugins. Features:
+#   * `loader`   — Resolver/Loader traits for the `highbeam:` import scheme
+#   * `futures`  — AsyncRuntime + `Promise::into_future` to drive `async
+#                  function* query()` without manual job-queue pumping
+#   * `macro`    — `#[rquickjs::module]` ergonomics for host modules
 #   * `parallel` — required by `futures` for Send-able runtime handles
 rquickjs = { version = "0.11", features = ["loader", "futures", "macro", "parallel"] }
 
-# Async executor for driving the rquickjs AsyncRuntime per query. Single-thread
-# current-thread flavor — every plugin query collects on the Slint event-loop
-# thread today; we'll revisit when streaming lands in Stage 4.
+# Single-threaded tokio drives the AsyncRuntime per query.
 tokio = { version = "1", features = ["rt", "macros", "time", "sync", "process", "io-util"] }
 
-# CancellationToken — the canonical async cancellation primitive in the tokio
-# ecosystem. Stage 4 wires JS-side `AbortSignal` polyfill to a `CancellationToken`
-# so a plugin's `signal` cascades cleanly into in-flight `http.get`/timeouts.
+# `CancellationToken` is how we cascade aborts into in-flight I/O.
 tokio-util = { version = "0.7", default-features = false, features = ["rt"] }
 
-# Async HTTP for the `highbeam:http` SDK module. `rustls-tls` keeps openssl out
-# of the dep tree; `json` is for the convenience `response.json()` path; no
-# default features so we don't drag in cookies/blocking/etc we don't use.
+# `rustls-tls` keeps openssl out of the dep tree; `json` is for the
+# convenience `response.json()` path.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
-# Async stream adapters — used by the streaming dispatcher to merge per-plugin
-# result streams into a single ordered stream the renderer consumes.
 futures = { version = "0.3", default-features = false, features = ["std"] }
 
-# Clipboard. `arboard` is the obvious choice — actively maintained, cross-platform
-# (macOS / X11 / Wayland / Windows), and the docs sample line up exactly with our
-# one-shot "set text" use case. `copypasta` is the other contender but ships
-# more transitively and the README hasn't been touched in 2 years.
 arboard = "3"
 
-# Spawn a URL in the user's default browser / app handler. The `open` crate is
-# the de facto pick — same `open::that(url)` works on macOS (`/usr/bin/open`)
-# and Linux (`xdg-open`).
+# `open::that(url)` works on macOS (`/usr/bin/open`) and Linux (`xdg-open`).
 open = "5"
 
-# Frecency persistence. `rusqlite` is the obvious choice — small, sync API
-# matches our "open one connection at startup, run a couple of statements"
-# usage, and the `bundled` feature ships SQLite with the binary so we don't
-# depend on whatever sqlite version the host OS happens to have. Stage 5's
-# frecency table only ever sees single-digit-millisecond reads/writes from
-# one thread, so we wrap the `Connection` in `std::sync::Mutex` rather than
-# pulling in `tokio-rusqlite` or sharded pools.
+# `bundled` ships SQLite with the binary so we don't depend on whatever the
+# host OS happens to have. The frecency table sees single-digit-ms reads/
+# writes from one thread; a plain `Mutex<Connection>` suffices.
 rusqlite = { version = "0.32", features = ["bundled"] }
 
-# Fuzzy matcher behind `highbeam:match`. Helix-editor's `nucleo-matcher` —
-# Smith-Waterman with bonus heuristics tuned for filename-style ranking, and
-# exposes the per-match character indices we need to round-trip highlights to
-# JS. Self-contained (no transient deps that double the runtime weight).
+# `nucleo-matcher` exposes per-match char indices so we can round-trip
+# highlight ranges to JS.
 nucleo-matcher = "0.3"
 
-# Base64 encoding for `highbeam:icons` data URIs. Tiny crate, no transitives.
 base64 = "0.22"
 
-# PNG/JPEG decode for result-row icons rendered into `slint::Image`. Default
-# features pull in every format the crate supports (TIFF/WebP/AVIF/…) which we
-# do not need — plugins ship PNG (Spotlight via sips, DnD via base64'd SVG
-# rasterized upstream) and the occasional JPEG. Disabling defaults keeps the
-# transitive footprint small.
+# Default features pull in every format `image` supports — we only ship PNG
+# and JPEG icons, so disabling defaults trims the transitive tree.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
-# Theme file parsing. `toml` 0.8 is the small, no-frills choice — pulls in
-# `serde` (we already have it) and exposes `toml::from_str` directly. The
-# `parse` feature is the default and is all we need (no serialization).
+# `parse` feature is the default — no serialisation path needed.
 toml = { version = "0.8", default-features = false, features = ["parse"] }
 
-# UTC timestamps for per-plugin `plugin.log` lines. `chrono` is already in the
-# transitive tree via slint, so adding it explicitly is essentially free; the
-# default features pull in serde/clock and we only need clock + std formatting.
+# `chrono` is already in the transitive tree via slint; clock + std is all
+# the plugin.log writer needs.
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
-# macOS-only deps:
-#   * `global-hotkey` — the only Rust crate that actually works on modern macOS
-#     for app-level global hotkeys without an Accessibility prompt; Linux is
-#     punted to the WM.
-#   * `objc2` / `objc2-app-kit` / `objc2-foundation` — we need to call
-#     `NSApp.activate(ignoringOtherApps:)` and `NSWindow.makeKeyAndOrderFront`
-#     when summoning the launcher window so the OS-level key window / app
-#     activation actually flips to us. Without this, Slint's focus request on
-#     the TextInput silently drops because our process isn't frontmost.
-#   * `raw-window-handle` — pulls the underlying `NSView` pointer back out of
-#     the winit window so we can walk up to its `NSWindow`. Pinned to the same
-#     versions winit 0.30 uses to avoid dragging in a second objc2 family.
+# macOS-only:
+#   * `global-hotkey` — only crate that works on modern macOS for app-level
+#     global hotkeys without an Accessibility prompt
+#   * `objc2*` — `NSApp.activate(ignoringOtherApps:)` +
+#     `NSWindow.makeKeyAndOrderFront` for the focus dance in `window::show`
+#   * `raw-window-handle` — pulls the `NSView` ptr out of winit; pinned to
+#     winit-0.30's versions to avoid a second objc2 family in the dep tree
 [target.'cfg(target_os = "macos")'.dependencies]
 global-hotkey = "0.8"
 objc2 = "0.5"

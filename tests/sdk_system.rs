@@ -1,8 +1,5 @@
-//! Behavioural tests for `highbeam:system`.
-//!
-//! Covers capability gating (`exec` / `applescript` throw `CapabilityError`
-//! when their cap is missing) and the cross-platform `applescript` contract
-//! (returns `null` on non-macOS without throwing).
+//! Behavioural tests for `highbeam:system` — capability gating and the
+//! cross-platform `applescript` contract (resolves `null` on non-macOS).
 
 use rquickjs::loader::{Loader, Resolver};
 use rquickjs::{
@@ -40,8 +37,8 @@ fn rt() -> tokio::runtime::Runtime {
 fn applescript_returns_null_on_non_macos() {
     #[cfg(target_os = "macos")]
     {
-        // On macOS, applescript actually runs — we can't assert "null" output.
-        // Just verify the call completes without throwing.
+        // On macOS, applescript actually runs — just verify the call
+        // completes without throwing.
         let rt = rt();
         rt.block_on(async {
             let async_rt = AsyncRuntime::new().expect("rt");
@@ -60,7 +57,7 @@ fn applescript_returns_null_on_non_macos() {
                     .catch(&ctx).expect("declare");
                 let (_m, eval) = declared.eval().catch(&ctx).expect("eval");
                 eval.into_future::<()>().await.catch(&ctx).expect("await eval");
-                // Drain microtasks
+                // Drain microtasks.
                 for _ in 0..10 {
                     let _: () = ctx.eval("0").expect("noop");
                     tokio::task::yield_now().await;

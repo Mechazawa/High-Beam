@@ -1,19 +1,10 @@
 //! Top-level coordinator wiring the Slint window to the plugin runtime.
 //!
-//! Responsibilities:
-//!   * Owns a dedicated background thread running a Tokio current-thread
-//!     runtime; the loaded plugins live inside that thread so the rquickjs
-//!     `AsyncRuntime` futures (`!Send` across `async_with`) can be polled
-//!     without crossing thread boundaries.
-//!   * Receives `query(input)` messages from the main thread (Slint event
-//!     loop), dispatches them to every plugin in parallel using the
-//!     streaming dispatcher, and routes each yielded row back to the Slint
-//!     thread via `slint::invoke_from_event_loop`.
-//!   * On every new keystroke, cancels the in-flight dispatch (`CancellationToken`)
-//!     and starts a fresh one. Stale yields are dropped via a monotonic
-//!     `query_id` check the receiver task performs before invoking the UI.
-//!   * Holds the latest result snapshot in an `Arc<Mutex<_>>` so the
-//!     `invoke-selected` callback can look up the highlighted row's action.
+//! The plugins live inside a dedicated tokio current-thread runtime so the
+//! rquickjs `AsyncRuntime` futures (`!Send` across `async_with`) can be polled
+//! without crossing thread boundaries. Yields cross back to the Slint event
+//! loop via `slint::invoke_from_event_loop`. Stale yields from slow plugins
+//! are filtered by a monotonic `query_id`.
 
 use std::error::Error;
 use std::path::PathBuf;
@@ -58,19 +49,11 @@ pub fn start(
 ) -> Result<PluginHost, Box<dyn Error>> {
     let (tx, rx) = mpsc::unbounded_channel::<HostMessage>();
 
-    // Latest results: shared between the main thread (Enter looks up actions
-    // here) and the renderer closures that update it after each stream
-    // event. `Arc<Mutex>` is fine because the mutex is uncontended (every
-    // touch happens on the main thread).
+    // Touched only on the main thread, so the mutex is uncontended.
     let latest: Arc<Mutex<Vec<RankedResult>>> = Arc::new(Mutex::new(Vec::new()));
 
-    // Monotonic query id used to drop stale results from slow plugins. Bumped
-    // on every keystroke; the renderer task carries the id with each yield
-    // and ignores anything where the id is older than the current value.
     let latest_id = Arc::new(AtomicU64::new(0));
 
-    // Frecency database — opened best-effort. A failure here logs and
-    // returns `None`; the daemon stays usable, just without re-ranking.
     let frecency_db = open_frecency_db();
 
     spawn_runtime_thread(
@@ -87,8 +70,6 @@ pub fn start(
     Ok(PluginHost { query_tx: tx })
 }
 
-/// Spawn the plugin-runtime background thread + tokio runtime that owns the
-/// loaded plugins and dispatches queries.
 fn spawn_runtime_thread(
     mut rx: mpsc::UnboundedReceiver<HostMessage>,
     plugins_override: Option<PathBuf>,
@@ -132,8 +113,6 @@ fn spawn_runtime_thread(
                             if let Some(prev) = current_cancel.take() {
                                 prev.cancel();
                             }
-                            // Eager per-query snapshot: one source of truth for
-                            // this query's ranking, fast enough at our row scale.
                             let snapshot = frecency_db.as_ref().map(FrecencyDb::snapshot);
                             let cancel = handle_query(
                                 id,
@@ -159,8 +138,6 @@ fn spawn_runtime_thread(
     Ok(())
 }
 
-/// Wire the per-keystroke `on_query_edited` and Enter-key `on_invoke_selected`
-/// callbacks on the Slint window to the runtime channel and action executor.
 fn wire_window_callbacks(
     window: &QueryWindow,
     tx: mpsc::UnboundedSender<HostMessage>,
@@ -189,8 +166,7 @@ fn wire_window_callbacks(
 }
 
 /// Resolve the highlighted row, execute its action, and bump frecency on
-/// success. Pulled out of [`wire_window_callbacks`] so the line budget is
-/// readable and we can describe the contract in one place.
+/// success.
 fn invoke_selected(
     weak: &slint::Weak<QueryWindow>,
     latest: &Arc<Mutex<Vec<RankedResult>>>,
@@ -225,12 +201,8 @@ fn invoke_selected(
     window::hide(&w);
 }
 
-/// Open the frecency DB at the platform default path.
-///
-/// Failures (no `ProjectDirs`, can't open file, schema init error) are
-/// logged and we return `None` so the daemon stays functional with default
-/// (Stage 4) ranking. The user sees a single warning at startup, not a
-/// crash.
+/// Open the frecency DB at the platform default path. Returns `None` on
+/// failure so the daemon stays functional with default ranking.
 fn open_frecency_db() -> Option<FrecencyDb> {
     let Some(path) = frecency::default_db_path() else {
         eprintln!("frecency: could not resolve data dir; running without frecency");
@@ -248,9 +220,9 @@ fn open_frecency_db() -> Option<FrecencyDb> {
     }
 }
 
-/// Run the pick bump off the UI thread. We use a plain OS thread (not a
-/// tokio task) because the bump callsite is on the Slint event-loop thread
-/// where no tokio runtime is registered.
+/// Run the pick bump off the UI thread. A plain OS thread (not a tokio
+/// task) — the callsite is on the Slint event-loop thread where no tokio
+/// runtime is registered.
 fn spawn_pick_bump(db: &FrecencyDb, plugin_name: String, result_key: String) {
     let db = db.clone();
     thread::Builder::new()
@@ -265,8 +237,6 @@ fn spawn_pick_bump(db: &FrecencyDb, plugin_name: String, result_key: String) {
 
 /// Start a fresh query: clear the row list, kick off the streaming dispatch,
 /// and spawn a receiver task that merges yields into the UI as they arrive.
-/// Returns the dispatch's cancellation token so the next keystroke can fire
-/// it.
 fn handle_query(
     id: u64,
     input: &str,
@@ -278,7 +248,6 @@ fn handle_query(
 ) -> CancellationToken {
     let cancel = CancellationToken::new();
 
-    // Reset the live row list on the main thread.
     let weak_reset = weak.clone();
     let _ = slint::invoke_from_event_loop(move || {
         if let Some(w) = weak_reset.upgrade() {
@@ -330,15 +299,10 @@ fn handle_query(
 
 /// Push the dispatch results into the window's row model.
 ///
-/// Preserves `selected-index` if the previously-selected row still exists;
-/// otherwise resets to 0. (Stage 3 always reset; Stage 4's streaming model
-/// would make that thrash the user's selection.)
-///
-/// Icons are decoded here, on the Slint thread, because each `ResultRow`
-/// carries an `image` value and `slint::Image` isn't trivially constructed
-/// off-thread without dragging in the renderer's pixel-buffer types upstream.
-/// Doing it per-yield keeps the cost bounded — `max_rows` is 9 — and means a
-/// malformed data URI surfaces as a blank slot, not a crash.
+/// Preserves `selected-index` when the previously-selected row still exists;
+/// otherwise resets to 0. Icons are decoded on this thread because
+/// `slint::Image` isn't trivially constructed off-thread; the per-yield cost
+/// is bounded by `max_rows` (9).
 fn render_results(window: &QueryWindow, results: &[RankedResult]) {
     let previously_selected = window.get_selected_index();
     let rows: Vec<ResultRow> = results
@@ -363,9 +327,8 @@ fn render_results(window: &QueryWindow, results: &[RankedResult]) {
     }
 }
 
-/// `has-icon` drives the row's placeholder vs icon styling. We treat anything
-/// that doesn't look like a base64 data URI as "no icon" so the row gets the
-/// muted outline rather than appearing to load something we never resolved.
+/// Anything that isn't a base64 data URI is treated as "no icon" so the row
+/// renders the muted placeholder rather than appearing to load nothing.
 fn is_renderable_icon(spec: Option<&str>) -> bool {
     spec.is_some_and(|s| s.starts_with("data:") && s.contains(";base64,"))
 }

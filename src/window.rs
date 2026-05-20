@@ -1,8 +1,8 @@
 //! Slint window construction and lifecycle.
 //!
-//! The `QueryWindow` markup is included via the `slint::include_modules!` macro
-//! in the crate root. Window-level behaviour that the .slint markup can't
-//! express — sizing, native center positioning, blur-to-close — lives here.
+//! `QueryWindow` markup is included via `slint::include_modules!`. Anything
+//! the .slint file can't express — sizing, native center positioning,
+//! blur-to-close, macOS app activation — lives here.
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -16,13 +16,10 @@ use crate::theme::Theme;
 /// Wire up the `QueryWindow` callbacks and native-window behaviour.
 ///
 /// Caller is responsible for showing/hiding the window in response to hotkey
-/// or IPC events. This function only attaches handlers.
+/// or IPC events; this only attaches handlers. The plugin-state-dependent
+/// `on_query_edited` and `on_invoke_selected` callbacks are wired by
+/// `crate::app::start`.
 pub(crate) fn configure(window: &QueryWindow) {
-    // `on_query_edited` and `on_invoke_selected` are wired by `crate::app::start`
-    // because they need the plugin host's channel / latest-results snapshot.
-    // Anything that doesn't depend on host state stays here.
-
-    // Esc closes the window. The daemon stays running.
     let weak_for_esc = window.as_weak();
     window.on_escape_pressed(move || {
         if let Some(w) = weak_for_esc.upgrade() {
@@ -30,17 +27,10 @@ pub(crate) fn configure(window: &QueryWindow) {
         }
     });
 
-    // Handle window-level focus events:
-    //   * Focused(true)  — the OS just made our window the key window. Forward
-    //     focus to the TextInput now. Doing this from `show()` directly is too
-    //     early on macOS: even after `window.show()` returns, the NSWindow is
-    //     not yet the key window, so Slint's focus request gets dropped. By the
-    //     time we receive this event the window is actually mapped and active.
-    //   * Focused(false) — blur-to-close. Daemon keeps running; window hides.
-    // reason: winit Focused(true) is the earliest tick at which Slint's focus
-    // request is guaranteed to land on the input. Tried calling
-    // `invoke_focus_input` from `show()` — focus was lost before the window
-    // became key, so the user had to click into the field.
+    // winit Focused(true) is the earliest tick at which Slint's focus request
+    // is guaranteed to land on the input. Calling `invoke_focus_input` from
+    // `show()` is too early on macOS — the NSWindow isn't yet the key window
+    // and the request gets dropped, leaving the user clicking into the field.
     let weak_for_focus = window.as_weak();
     window
         .window()
@@ -62,15 +52,13 @@ pub(crate) fn configure(window: &QueryWindow) {
         });
 
     // TODO: hide macOS Dock/Cmd-Tab presence via
-    // `NSApp.setActivationPolicy(NSApplicationActivationPolicyAccessory)` (or,
-    // cleaner, bundle the app with `LSUIElement=1` in Info.plist when we ship
-    // a real .app target). Independent from the activation logic below: that
-    // call only governs frontmost/key state, not whether we appear in
-    // Cmd-Tab / Dock.
+    // `NSApp.setActivationPolicy(NSApplicationActivationPolicyAccessory)`, or
+    // bundle as `.app` with `LSUIElement=1` in Info.plist. Independent of the
+    // activation logic below.
 }
 
-/// Push theme tokens into the window's `in-out` properties. Runs once at
-/// startup; theme reload is restart-only (no file watcher).
+/// Push theme tokens into the window's `in-out` properties. Theme reload
+/// is restart-only.
 pub(crate) fn apply_theme(window: &QueryWindow, theme: &Theme) {
     window.set_background_color(theme.colors.background);
     window.set_foreground_color(theme.colors.foreground);
@@ -86,18 +74,15 @@ pub(crate) fn apply_theme(window: &QueryWindow, theme: &Theme) {
     window.set_window_border_radius(theme.window.border_radius);
 }
 
-/// Show the window, center it, and focus the input. Idempotent — calling this
-/// while the window is already visible just re-centers and re-focuses, which
-/// matches v2's behaviour and the spec ("focuses it if already open").
+/// Show the window, center it, and focus the input. Idempotent — calling
+/// while already visible just re-centers and re-focuses ("focuses it if
+/// already open").
 ///
-/// On macOS, simply calling `window.show()` + `invoke_focus_input()` is not
-/// enough: our daemon process isn't necessarily the frontmost app, and even
-/// once Slint creates the `NSWindow` it isn't automatically the key window.
-/// Slint will dutifully ask the `TextInput` to take focus, but the OS routes
-/// keystrokes to whoever is actually key, so the field appears focused
-/// visually (or not at all) and typing goes nowhere. We replicate what
-/// Spotlight/Alfred/Raycast do: activate the app process and make the
-/// `NSWindow` key + frontmost ourselves before asking Slint for focus.
+/// On macOS, `window.show()` + `invoke_focus_input()` alone isn't enough:
+/// our process isn't necessarily frontmost, the new `NSWindow` isn't yet
+/// the key window, and Slint's focus request gets dropped. We replicate
+/// the Spotlight/Alfred/Raycast pattern: activate the app process and make
+/// the `NSWindow` key + frontmost ourselves before asking Slint for focus.
 pub(crate) fn show(window: &QueryWindow) {
     if let Err(err) = window.show() {
         eprintln!("failed to show window: {err}");
@@ -110,8 +95,7 @@ pub(crate) fn show(window: &QueryWindow) {
 }
 
 /// Hide the window. Clears the input text so the next open starts fresh —
-/// covers every close path (Esc, blur, and any future programmatic close)
-/// because they all funnel through here.
+/// every close path (Esc, blur, programmatic) funnels through here.
 pub(crate) fn hide(window: &QueryWindow) {
     window.invoke_clear_input();
     if let Err(err) = window.hide() {
@@ -121,11 +105,9 @@ pub(crate) fn hide(window: &QueryWindow) {
 
 /// Center horizontally and place vertically at ~1/3 from the top, Spotlight-style.
 fn center_on_focused_display(window: &QueryWindow) {
-    // Resolve the monitor under the current cursor; on macOS that's the screen
-    // the user is actively looking at, which matches what users expect from
-    // Spotlight. Falls back to the primary monitor if winit can't tell us.
-    // We work in physical pixels throughout, so the monitor's scale factor is
-    // irrelevant here.
+    // Resolve the monitor under the current cursor — on macOS that's the
+    // screen the user is actively looking at. Falls back to primary if winit
+    // can't tell us. Works in physical pixels so scale factor is irrelevant.
     let slint_window = window.window();
     let Some((monitor_pos, monitor_size)) = slint_window
         .with_winit_window(|w: &winit::window::Window| {
@@ -141,16 +123,14 @@ fn center_on_focused_display(window: &QueryWindow) {
     };
 
     let window_size = slint_window.size();
-    // Monitor sizes from winit are u32. They're physical pixel counts of a
-    // single display, which fits comfortably in i32 in any reasonable setup.
     let monitor_w = i32::try_from(monitor_size.width).unwrap_or(i32::MAX);
     let monitor_h = i32::try_from(monitor_size.height).unwrap_or(i32::MAX);
     let win_w = i32::try_from(window_size.width).unwrap_or(i32::MAX);
     let win_h = i32::try_from(window_size.height).unwrap_or(i32::MAX);
 
     let x = monitor_pos.x + (monitor_w - win_w) / 2;
-    // Place the top of the window at roughly 1/3 of the screen height — that
-    // sits above center the way Spotlight does, regardless of window height.
+    // Top of the window at ~1/3 of screen height — that sits above center the
+    // way Spotlight does, regardless of window height.
     let y = monitor_pos.y + (monitor_h / 3) - (win_h / 2);
 
     slint_window.set_position(slint::PhysicalPosition::new(x, y));
@@ -159,10 +139,9 @@ fn center_on_focused_display(window: &QueryWindow) {
 #[cfg(target_os = "macos")]
 mod macos {
     //! macOS-specific app/window activation. Without this the launcher window
-    //! opens behind whatever was previously frontmost and the `TextInput` never
-    //! actually receives keystrokes — Slint's focus request is meaningless if
-    //! the OS-level key window is still someone else's. See `show()` for the
-    //! call site and rationale.
+    //! opens behind whatever was previously frontmost and the `TextInput`
+    //! receives no keystrokes — Slint's focus request is meaningless if the
+    //! OS-level key window is still someone else's.
 
     use std::ptr::NonNull;
 
@@ -176,17 +155,11 @@ mod macos {
 
     /// Activate our app process and make our `NSWindow` key + frontmost.
     ///
-    /// Order matters:
-    ///   1. `NSApp.activate(ignoringOtherApps: true)` — flips the process to
-    ///      frontmost. Without this, `makeKeyAndOrderFront` on a background
-    ///      app's window may show the window but won't move keyboard focus.
-    ///   2. `nsWindow.makeKeyAndOrderFront(nil)` — makes our specific window
-    ///      the key window and brings it to the front of the app's stack.
-    ///
-    /// The Slint event loop guarantees we're on the main thread, so the
-    /// `MainThreadMarker` ask is just paperwork. We do check with `::new()`
-    /// rather than `::new_unchecked()` so a future off-thread caller fails
-    /// loudly instead of being undefined behaviour.
+    /// Order matters: `NSApp.activate(ignoringOtherApps: true)` first to
+    /// flip the process to frontmost; without it `makeKeyAndOrderFront` on
+    /// a background app's window may show the window but won't move keyboard
+    /// focus. `MainThreadMarker::new()` (rather than `new_unchecked()`) makes
+    /// a future off-thread caller fail loudly instead of being UB.
     pub fn activate_and_make_key(window: &QueryWindow) {
         let Some(mtm) = MainThreadMarker::new() else {
             eprintln!("activate_and_make_key called off the main thread");
@@ -194,18 +167,14 @@ mod macos {
         };
 
         let app = NSApplication::sharedApplication(mtm);
-        // reason: `activateIgnoringOtherApps:` is marked deprecated in macOS 14
-        // in favour of the cooperative `activate()`, but launchers explicitly
-        // *don't* want to be cooperative — the whole point is "I am being
-        // summoned over whatever you were doing." Spotlight/Alfred/Raycast all
-        // still use the ignoring-other-apps variant for the same reason.
+        // reason: `activateIgnoringOtherApps:` is deprecated in macOS 14 in
+        // favour of cooperative `activate()`, but launchers explicitly do NOT
+        // want to be cooperative — the whole point is being summoned over
+        // whatever was frontmost. Spotlight/Alfred/Raycast use the same call.
         #[allow(deprecated)]
         app.activateIgnoringOtherApps(true);
 
-        // Walk winit -> raw-window-handle -> NSView -> NSWindow. The Slint
-        // `with_winit_window` accessor returns `Some(T)` if the closure ran;
-        // we additionally encode "did we find an NSWindow" in the inner
-        // `Option`, then flatten so a single None means "no window to focus".
+        // Walk winit -> raw-window-handle -> NSView -> NSWindow.
         let ns_window = window
             .window()
             .with_winit_window(|w: &winit::window::Window| ns_window_from_winit(w))
@@ -221,10 +190,8 @@ mod macos {
     fn ns_window_from_winit(
         winit_window: &winit::window::Window,
     ) -> Option<objc2::rc::Retained<NSWindow>> {
-        // `raw-window-handle` only exposes the `NSView` pointer for the
-        // window's content view; we walk up via `[NSView window]` to get the
-        // `NSWindow` itself. This is the path the raw-window-handle docs
-        // explicitly call out as the supported way to reach the NSWindow.
+        // `raw-window-handle` only exposes the content view's `NSView` ptr;
+        // walk up via `[NSView window]` per the raw-window-handle docs.
         let handle = winit_window.window_handle().ok()?;
         let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
             return None;
@@ -241,16 +208,11 @@ mod macos {
 
 /// Decode a plugin-supplied icon spec into a `slint::Image`.
 ///
-/// The renderer feeds the returned image into each row's `icon` field. A
-/// `None`/empty/non-data-URI input — or any failure along the decode path —
-/// produces `Image::default()`, which paints as nothing; the row markup then
-/// draws a muted outline placeholder so titles stay column-aligned across
-/// rows whether or not an icon is present.
-///
-/// Bare filesystem paths are deliberately *not* loaded: plugins are expected
-/// to pre-resolve via `highbeam:icons.forPath(...)` which already returns a
-/// data URI. Touching the filesystem from the render path would couple the UI
-/// thread to disk latency.
+/// Anything that isn't a `data:<mime>;base64,...` URI returns
+/// `Image::default()` (paints blank, placeholder row styling kicks in).
+/// Bare filesystem paths are deliberately not loaded — plugins resolve via
+/// `highbeam:icons.forPath(...)`; touching the filesystem from the render
+/// path would couple the UI thread to disk latency.
 pub(crate) fn decode_icon(spec: Option<&str>) -> Image {
     let Some(spec) = spec else {
         return Image::default();
@@ -264,8 +226,6 @@ pub(crate) fn decode_icon(spec: Option<&str>) -> Image {
     decode_bytes(mime, &bytes).unwrap_or_default()
 }
 
-/// Split a `data:<mime>;base64,<payload>` URI into the mime type and the
-/// base64 payload. Returns `None` for anything that isn't a base64 data URI.
 fn parse_data_uri(spec: &str) -> Option<(&str, &str)> {
     let rest = spec.strip_prefix("data:")?;
     let (meta, payload) = rest.split_once(',')?;
@@ -273,8 +233,6 @@ fn parse_data_uri(spec: &str) -> Option<(&str, &str)> {
     Some((meta, payload))
 }
 
-/// Decode raw image bytes into a `slint::Image`. Returns `None` on any error
-/// so the caller can fall back to a blank placeholder rather than panicking.
 fn decode_bytes(mime: &str, bytes: &[u8]) -> Option<Image> {
     if mime.eq_ignore_ascii_case("image/svg+xml") {
         return Image::load_from_svg_data(bytes).ok();
@@ -290,13 +248,10 @@ fn decode_bytes(mime: &str, bytes: &[u8]) -> Option<Image> {
 mod tests {
     use super::*;
 
-    // 1×1 green PNG, hand-encoded once with a tiny zlib-deflated IDAT.
-    // Inlined as a const so the test stays self-contained.
+    // 1×1 green PNG, hand-encoded so the test stays self-contained.
     const PNG_1X1_B64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
 
-    // 1×1 JPEG produced offline with the same approach. JPEG is rare for
-    // launcher icons but Spotlight-class plugins occasionally hand them over,
-    // so we cover the path.
+    // 1×1 JPEG — rare in launcher icons but the decode path needs coverage.
     const TINY_JPEG_B64: &str = "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/2wBDAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/wAARCAABAAEDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD9/KKKKAP/2Q==";
 
     #[test]
@@ -313,8 +268,8 @@ mod tests {
 
     #[test]
     fn decode_icon_non_data_uri_returns_default() {
-        // A bare filesystem path is the documented "no, the plugin forgot"
-        // case — we must not try to load it from disk.
+        // Bare filesystem path: plugin was supposed to pre-resolve via
+        // `highbeam:icons.forPath(...)`; do NOT touch the disk here.
         let img = decode_icon(Some(
             "/Applications/Safari.app/Contents/Resources/AppIcon.icns",
         ));
@@ -351,16 +306,13 @@ mod tests {
 
     #[test]
     fn decode_icon_unsupported_mime_returns_default() {
-        // Non-image data URI (text/plain). Decoder rejects it, caller gets
-        // the blank placeholder.
         let img = decode_icon(Some("data:text/plain;base64,aGVsbG8="));
         assert_eq!(img.size().width, 0);
     }
 
     #[test]
     fn decode_icon_missing_base64_marker_returns_default() {
-        // `data:image/png,<raw>` (no `;base64`) — we only support base64
-        // payloads. Falls back to blank rather than guessing.
+        // No `;base64` suffix — we only support base64 payloads.
         let img = decode_icon(Some("data:image/png,abc"));
         assert_eq!(img.size().width, 0);
     }

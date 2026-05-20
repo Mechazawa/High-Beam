@@ -1,7 +1,5 @@
-// D&D 5e spell search. Triggers on `spell <q>` or `5e spell <q>`; the
-// keyword gate keeps the plugin out of unrelated result lists since the
-// bundled spell corpus is several hundred KB and fuzzy-ranking it on every
-// keystroke would drown out other plugins.
+// D&D 5e spell search. Triggers on `spell <q>` or `5e spell <q>` — the
+// keyword gate avoids fuzzy-ranking 300KB of spells on every keystroke.
 
 import { openUrl } from "highbeam:actions";
 import { fuzzy } from "highbeam:match";
@@ -9,7 +7,7 @@ import { readText } from "highbeam:fs";
 
 const TRIGGER = /^\s*(?:5e\s+)?spells?(?:\s+(.*))?$/i;
 
-// Cached on first match — the JSON is bulky and most queries never need it.
+// Cached on first match — JSON is bulky and most queries never need it.
 let spellsPromise = null;
 
 function loadSpells() {

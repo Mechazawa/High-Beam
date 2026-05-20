@@ -1,9 +1,5 @@
-// `highbeam:actions` — builders for the `Result.action` field. Always
-// available (gated only by the `actions` capability — declare it in
-// `manifest.json`).
-//
-// These builders return plain objects matching the host's `Action` wire
-// shape; the host deserialises them via serde when your `query()` yields.
+// `highbeam:actions` — builders for `Result.action`. Requires the `actions`
+// capability. Returns plain objects matching the host's wire shape.
 
 import type { Action } from './types';
 

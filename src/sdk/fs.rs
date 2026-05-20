@@ -1,27 +1,9 @@
 //! Host implementation of the `highbeam:fs` module.
 //!
-//! Surface:
-//!
-//! ```ts
-//! import { readDir, readFile, readText, readCache, writeCache } from 'highbeam:fs';
-//!
-//! for await (const entry of readDir('/Applications', { recursive: true })) {
-//!     if (entry.isDir && entry.name.endsWith('.app')) yield entry;
-//! }
-//! const bytes = await readFile('/tmp/x.bin');
-//! const text = await readText('/tmp/x.txt');
-//! await writeCache('apps.json', JSON.stringify(apps));
-//! const cached = await readCache('apps.json');
-//! ```
-//!
-//! Capabilities:
-//!   * `fs.read` grants `readDir`, `readFile`, `readText`
-//!   * `fs.cache` grants `readCache`, `writeCache` — scoped to the plugin's
-//!     own cache dir; cross-plugin reads are impossible by construction
-//!
-//! Cache name sanitization rejects path-traversal attempts (`..`, leading `/`,
-//! embedded separators). Cache files live one flat layer deep under the
-//! plugin's own directory.
+//! `fs.read` grants `readDir`, `readFile`, `readText`. `fs.cache` grants
+//! `readCache`, `writeCache` — scoped to the plugin's own cache dir by
+//! construction. Cache names are sanitised against `..`, leading `/`, and
+//! embedded separators; cache files live one flat layer deep.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -84,7 +66,8 @@ fn cap_error_thrower<'js>(ctx: &Ctx<'js>, cap: &'static str) -> JsResult<Functio
     )
 }
 
-/// Per-plugin bindings, installed before the plugin's entry module evaluates.
+/// Install per-plugin bindings. Must run BEFORE the plugin's entry module
+/// evaluates.
 ///
 /// # Errors
 ///
@@ -179,9 +162,9 @@ pub fn install<'js>(
     Ok(())
 }
 
-/// JS-side glue: wrap a host-driven `next()` callable into an async iterator
-/// whose `Symbol.asyncIterator` returns itself. Plugin code does `for await
-/// (const x of readDir(p))` and gets one entry at a time.
+/// JS-side glue: wrap a host-driven `next()` into an async iterator whose
+/// `Symbol.asyncIterator` returns itself. Lets plugin code use
+/// `for await (const x of readDir(...))`.
 fn readdir_iterator_js() -> &'static str {
     static SRC: OnceLock<String> = OnceLock::new();
     SRC.get_or_init(|| {
@@ -217,7 +200,6 @@ fn build_dir_async_iterator<'js>(
         None => CancellationToken::new(),
     };
 
-    // The walker stack: each entry is a directory we still need to read.
     let walker = std::sync::Arc::new(std::sync::Mutex::new(DirWalker::new(
         path.to_path_buf(),
         recursive,
@@ -277,9 +259,9 @@ impl Iterator for DirWalker {
                 let dir = self.stack.pop()?;
                 match std::fs::read_dir(&dir) {
                     Ok(rd) => self.current = Some(rd),
-                    // Permission errors on system dirs (e.g. /Library/PreferencePanes
-                    // under SIP) are normal on macOS; swallow and keep walking
-                    // rather than terminating the iterator.
+                    // SIP-protected dirs (`/Library/PreferencePanes` etc.)
+                    // surface as permission errors on macOS — swallow and
+                    // keep walking rather than terminating.
                     Err(_) => continue,
                 }
             }
@@ -361,10 +343,8 @@ async fn read_text_impl<'js>(ctx: Ctx<'js>, path: PathBuf, opts: Value<'js>) -> 
     Ok(s)
 }
 
-/// Resolve a JS-side path against the plugin's directory: absolute paths pass
-/// through, relative paths are joined onto the plugin dir. Plugins that
-/// `readText('./bundled.json')` get the file alongside their `plugin.js`
-/// regardless of the daemon's cwd.
+/// Absolute paths pass through; relative paths join onto the plugin dir so
+/// `readText('./bundled.json')` works regardless of the daemon's cwd.
 fn resolve_plugin_path(plugin_dir: &Path, path: &str) -> PathBuf {
     let p = Path::new(path);
     if p.is_absolute() {
@@ -436,9 +416,9 @@ fn signal_to_token<'js>(ctx: &Ctx<'js>, opts: &Value<'js>) -> JsResult<Cancellat
     abort::token_from_js_signal(ctx, &sig)
 }
 
-/// Resolve a cache name to an absolute path inside `cache_dir`, rejecting
-/// anything that could escape (path separators, parent refs, hidden files,
-/// empty/over-long names).
+/// Resolve a cache name to an absolute path inside `cache_dir`. Rejects
+/// anything that could escape (separators, parent refs, hidden, empty,
+/// over-long, control chars).
 fn resolve_cache_path(cache_dir: &Path, name: &str) -> Result<PathBuf, &'static str> {
     if name.is_empty() {
         return Err("cache name must not be empty");

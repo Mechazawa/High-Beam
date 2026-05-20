@@ -1,15 +1,8 @@
 //! Per-keystroke query dispatch — streaming + per-plugin debounce + abort.
 //!
-//! Each plugin gets its own `mpsc::Receiver` from
-//! [`LoadedPlugin::run_query_stream`]; we merge those receivers into a single
-//! tagged stream so the renderer can react to each yielded result immediately.
-//! Per-plugin debounce is enforced before `run_query_stream` is called. Every
-//! dispatch round produces a fresh root [`CancellationToken`]; when a new
-//! keystroke arrives the previous token's `cancel()` is called and the old
-//! per-plugin streams drain quickly.
-//!
-//! The dispatcher itself is just glue — the caller (`crate::app`) owns
-//! scheduling.
+//! Each plugin's `mpsc::Receiver` is tagged with its plugin name and merged
+//! into the caller's single tx so yields render as they arrive. Scheduling
+//! lives in `crate::app`; this module is just glue.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,22 +15,19 @@ use crate::frecency::{Snapshot, frecency_modifier, now_seconds};
 use crate::plugins::result::{PluginResult, RankedResult};
 use crate::plugins::runtime::LoadedPlugin;
 
-/// Maximum a manifest's `debounceMs` can claim. Clamp keeps a pathological
-/// plugin from holding up an otherwise responsive UI.
+/// Cap on a manifest's `debounceMs` — keeps a pathological plugin from
+/// holding up an otherwise responsive UI.
 pub(crate) const MAX_DEBOUNCE_MS: u64 = 2000;
 
-/// One result, tagged with the plugin name that produced it. The dispatcher
-/// caller uses these to merge + re-sort + render.
+/// One result, tagged with the plugin name that produced it.
 #[derive(Debug)]
 pub(crate) struct StreamedResult {
     pub plugin_name: String,
     pub result: PluginResult,
 }
 
-/// Run `query(input)` against every plugin in `plugins`, with per-plugin
-/// debounce, and stream each plugin's yields through `tx`. The function
-/// returns immediately after spawning per-plugin tasks; it does NOT wait for
-/// every plugin to finish. Per-plugin tasks honor `cancel` and drain when it
+/// Spawn a per-plugin task for every loaded plugin (and the synchronous Core
+/// built-in). Returns immediately; tasks honor `cancel` and drain when it
 /// flips.
 pub(crate) fn dispatch_streaming(
     plugins: &[Arc<LoadedPlugin>],
@@ -45,9 +35,7 @@ pub(crate) fn dispatch_streaming(
     cancel: &CancellationToken,
     tx: &mpsc::UnboundedSender<StreamedResult>,
 ) {
-    // Built-in plugins emit synchronously; spawning them on the same channel
-    // before the JS pipeline runs gives Core results a chance to land before
-    // the first keystroke-debounced JS plugin even starts.
+    // Built-in Core emits synchronously, ahead of the JS pipeline.
     for result in crate::plugins::builtin::core::query(input) {
         if tx.send(result).is_err() {
             return;
@@ -63,17 +51,14 @@ pub(crate) fn dispatch_streaming(
 
         tokio::spawn(async move {
             if !debounce.is_zero() {
-                // Wait out the debounce; abort the sleep on a new keystroke
-                // so we never spawn a query whose result was already stale
-                // before it started.
+                // Abort the sleep on a new keystroke so we never spawn a query
+                // whose result was already stale before it started.
                 tokio::select! {
                     () = sleep(debounce) => {}
                     () = plugin_cancel.cancelled() => return,
                 }
             }
             let mut rx_inner = plugin_arc.run_query_stream(&plugin_input, plugin_cancel);
-            // Plugin's stream_query honors cancel directly; when cancelled it
-            // drops its tx and we drop out of this loop naturally.
             while let Some(result) = rx_inner.recv().await {
                 if tx_clone
                     .send(StreamedResult {
@@ -96,14 +81,11 @@ fn clamp_debounce(ms: u64) -> Duration {
 /// Merge a freshly-yielded result into the live row list and re-sort.
 ///
 /// Sort order:
-///   1. **Pinned first**, sorted by `weight` desc — frecency doesn't apply
-///      to pinned results (they're authoritative for their input shape).
-///   2. **Non-pinned next**, sorted by `weight * frecency_modifier(picks, age)`
+///   1. Pinned first, sorted by `weight` desc — frecency doesn't apply
+///      to pinned results.
+///   2. Non-pinned next, sorted by `weight * frecency_modifier(picks, age)`
 ///      desc. `frecency = None` ⇒ modifier 1.0 ⇒ pure weight ordering.
 ///   3. Ties broken by insertion order (stable).
-///
-/// `now` is taken as a parameter so unit tests can produce deterministic
-/// ages; production callers pass [`now_seconds`].
 pub(crate) fn merge_into_live(
     live: &mut Vec<RankedResult>,
     next_order: &mut usize,
@@ -118,8 +100,7 @@ pub(crate) fn merge_into_live(
     };
     *next_order += 1;
     live.push(entry);
-    // With nine rows max this is trivially cheap; accepting the per-yield
-    // sort saves us a priority structure.
+    // Nine rows max — per-yield re-sort is cheaper than maintaining a heap.
     live.sort_by(|a, b| {
         b.result
             .pinned
@@ -135,11 +116,8 @@ pub(crate) fn merge_into_live(
     });
 }
 
-/// Effective sort key for one result.
-///
-/// Pinned results stay on pure `weight` so the calculator-class plugins
-/// don't drift relative to one another; non-pinned results get the
-/// frecency modifier folded in.
+/// Effective sort key. Pinned results stay on pure `weight`; non-pinned get
+/// the frecency modifier folded in.
 fn score_for(entry: &RankedResult, frecency: Option<&Snapshot>, now: i64) -> f64 {
     let weight = entry.result.weight;
     if entry.result.pinned {
@@ -153,9 +131,8 @@ fn score_for(entry: &RankedResult, frecency: Option<&Snapshot>, now: i64) -> f64
     weight * modifier
 }
 
-/// Convenience wrapper around [`merge_into_live`] using the system clock —
-/// used by the dispatcher receive loop where the snapshot is per-query but
-/// `now` is per-yield.
+/// Convenience wrapper using the system clock — the snapshot is per-query
+/// but `now` is per-yield.
 pub(crate) fn merge_with_snapshot(
     live: &mut Vec<RankedResult>,
     next_order: &mut usize,
@@ -274,9 +251,6 @@ mod tests {
 
     #[test]
     fn frecency_promotes_recent_picks_above_tied_weights() {
-        // All three rows have weight 50; only `gamma` has a pick. With
-        // 1 pick at age 0 the modifier is ~1.10, so gamma should rank
-        // ahead of alpha + beta on the second query.
         let snap = Snapshot::from_rows(vec![(
             "a".into(),
             "gamma".into(),
@@ -299,9 +273,6 @@ mod tests {
 
     #[test]
     fn frecency_does_not_promote_pinned_results_relative_to_one_another() {
-        // Two pinned results, equal weight. Even if beta has 100 picks,
-        // the modifier should NOT apply to pinned — they sort by raw
-        // weight then insertion order.
         let snap = Snapshot::from_rows(vec![(
             "a".into(),
             "beta".into(),
@@ -341,7 +312,7 @@ mod tests {
 
     #[test]
     fn frecency_keyed_on_plugin_name_too() {
-        // A pick on (plugin=a, key=x) must NOT bump (plugin=b, key=x).
+        // (plugin=a, key=x) must NOT bump (plugin=b, key=x).
         let snap = Snapshot::from_rows(vec![(
             "a".into(),
             "x".into(),
@@ -358,9 +329,7 @@ mod tests {
             Some(&snap),
             1_000,
         );
-        // a:x has a 5-pick bonus, b:x has none.
+        // a:x carries the 5-pick bonus; b:x doesn't.
         assert_eq!(keys, ["x", "x"]);
-        // Insertion order still decides ties — but here the bonus
-        // shouldn't apply to b's `x`, so a:x wins outright.
     }
 }

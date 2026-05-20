@@ -1,9 +1,7 @@
-//! Catches QuickJS-specific regressions (Promise scheduling, regex
-//! engine quirks) that wouldn't surface under Node-based vitest tests.
-//!
-//! Authoritative correctness lives in each plugin's `*.test.js`; this only
-//! confirms the plugin loads in real rquickjs and survives one round-trip
-//! through `query()` without panicking.
+//! Catches QuickJS-specific regressions (Promise scheduling, regex engine
+//! quirks) that wouldn't surface under Node-based vitest. Authoritative
+//! correctness lives in each plugin's `*.test.js`; this just confirms the
+//! plugin loads and survives one round-trip without panicking.
 
 use std::path::Path;
 use std::time::Duration;
@@ -40,8 +38,8 @@ fn smoke_test(dir: &str) {
         let manifest_bytes = std::fs::read(path.join("manifest.json")).expect("read manifest.json");
         let manifest = Manifest::parse(&manifest_bytes).expect("parse manifest");
 
-        // The loader gates by `platforms`; the smoke runner bypasses the
-        // loader, so re-apply the gate here to keep the test green on every OS.
+        // Smoke runner bypasses the loader, so re-apply the platforms gate
+        // here to stay green on every OS.
         if !manifest.supports_current_platform() {
             return;
         }
@@ -104,8 +102,8 @@ fn app_launcher_loads_in_rquickjs() {
 
 #[test]
 fn examples_list_matches_disk() {
-    // Hardcoded list above; this test fails loudly if a new example plugin
-    // shows up on disk so the smoke runner doesn't silently skip it.
+    // Fail loudly when a new example shows up so the smoke runner doesn't
+    // silently skip it.
     let mut found: Vec<String> = std::fs::read_dir("examples/plugins")
         .expect("read examples/plugins")
         .filter_map(Result::ok)

@@ -1,23 +1,13 @@
 //! Per-plugin `plugin.log` writer.
 //!
-//! Each loaded plugin gets a `PluginLog` pointing at `<plugin_dir>/plugin.log`.
-//! The file is created lazily on the first write so plugins that never log
-//! don't leave empty files behind. Writes are append-only with no rotation in
-//! v1.
-//!
-//! Lines look like:
-//!
 //! ```text
 //! [2026-05-20T15:30:42.123Z] [INFO ] message goes here
+//!     continuation lines indent four spaces
 //! ```
 //!
-//! Levels are padded to five characters so columns align in `tail -f`. Multi-
-//! line messages get a four-space continuation indent on subsequent lines so
-//! log readers can group them visually.
-//!
-//! The handle is `Send`/`Sync`-safe: a `Mutex<Option<File>>` guards the lazy
-//! file open so JS-side callbacks (running on the tokio worker) and host code
-//! on other threads (the loader's capability gate) can share one writer.
+//! Lazy create on first write (plugins that never log leave no file behind).
+//! Append-only, no rotation in v1. `Mutex<Option<File>>` so JS-side
+//! callbacks (tokio worker) and host code (loader) can share one writer.
 
 use std::fmt::Write as _;
 use std::fs::{File, OpenOptions};
@@ -27,7 +17,7 @@ use std::sync::{Arc, Mutex};
 
 use chrono::SecondsFormat;
 
-/// Log severity. Five characters padded for column alignment in the file.
+/// Log severity. Rendered padded to 5 chars so columns align in `tail -f`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogLevel {
     Debug,
@@ -48,17 +38,14 @@ impl LogLevel {
 }
 
 /// Append-only writer for one plugin's `plugin.log`. Cheap to clone via `Arc`.
-///
-/// File creation is deferred to the first `write` call: a plugin that never
-/// logs gets no logfile on disk.
 pub struct PluginLog {
     path: PathBuf,
     file: Mutex<Option<File>>,
 }
 
 impl PluginLog {
-    /// Build a writer pointing at `<plugin_dir>/plugin.log` without touching
-    /// the filesystem.
+    /// Build a writer pointing at `<plugin_dir>/plugin.log`. The file is
+    /// created lazily on first `write`.
     #[must_use]
     pub fn for_plugin_dir(plugin_dir: &Path) -> Arc<Self> {
         Arc::new(Self {
@@ -105,9 +92,9 @@ impl PluginLog {
     }
 }
 
-/// Render one logfile line, including the trailing newline. Multi-line
-/// messages get a four-space continuation indent so a `grep` for a level still
-/// catches the first row and the indent visually anchors the rest to it.
+/// Render one logfile line including the trailing newline. Continuation
+/// lines are indented so `grep` for a level catches the leading line and
+/// the indent visually anchors the rest.
 fn format_line(level: LogLevel, message: &str) -> String {
     let timestamp = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
     let mut out = String::with_capacity(message.len() + 48);
@@ -160,7 +147,6 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert!(lines[0].contains("[INFO ] first"), "got {:?}", lines[0]);
         assert!(lines[1].contains("[WARN ] second"), "got {:?}", lines[1]);
-        // ISO-8601 UTC: 4-digit year, ends in `Z`.
         assert!(lines[0].starts_with('['));
         assert!(lines[0].contains('T'));
         assert!(lines[0].contains("Z]"));
@@ -184,7 +170,6 @@ mod tests {
     #[test]
     fn appending_does_not_truncate_prior_content() {
         let dir = tmp_dir("append");
-        // First handle writes one line, drops, second handle writes another.
         {
             let log = PluginLog::for_plugin_dir(&dir);
             log.write(LogLevel::Info, "alpha");

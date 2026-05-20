@@ -1,15 +1,6 @@
 //! CI: assert each `highbeam:*` module's runtime exports match the
-//! hand-written `.d.ts` declarations under `sdk/highbeam/`.
-//!
-//! Drift is the failure mode this guards against — a developer adds a new
-//! Rust-side export and forgets the TypeScript declaration (or vice versa),
-//! and plugin authors hit "Property 'foo' does not exist on type 'X'" or
-//! the equally cryptic runtime "`TypeError`: foo is not a function".
-//!
-//! We use rquickjs directly here (no plugin loader) so the test is independent
-//! of the wider runtime infrastructure. Each module gets loaded into a fresh
-//! context, its named exports listed, and compared against a hardcoded list
-//! that mirrors the `.d.ts` file.
+//! hand-written `.d.ts` under `sdk/highbeam/`. Drift surfaces as a failing
+//! test rather than as cryptic plugin-author errors at runtime.
 
 use rquickjs::loader::{Loader, Resolver};
 use rquickjs::{AsyncContext, AsyncRuntime, Ctx, Error as JsError, Module, Object, async_with};
@@ -23,7 +14,7 @@ use high_beam::sdk::r#match::MatchModule;
 use high_beam::sdk::platform::PlatformModule;
 use high_beam::sdk::system::SystemModule;
 
-/// Expected exports per module. Mirrors `sdk/highbeam/<name>.d.ts`.
+/// Mirrors `sdk/highbeam/<name>.d.ts`.
 fn expected_for(name: &str) -> &'static [&'static str] {
     match name {
         "highbeam:actions" => &["openUrl", "copy", "exec", "reveal"],
@@ -40,7 +31,6 @@ fn expected_for(name: &str) -> &'static [&'static str] {
     }
 }
 
-/// Tiny resolver that accepts only the specifier under test.
 struct OneShotResolver(&'static str);
 
 impl Resolver for OneShotResolver {
@@ -56,7 +46,6 @@ impl Resolver for OneShotResolver {
     }
 }
 
-/// Loader stub — only ever called for the specifier under test.
 enum OneShotLoader {
     Actions,
     Http,
@@ -96,8 +85,8 @@ fn assert_module_exports(specifier: &'static str, loader: OneShotLoader) {
             .await;
         let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
         async_with!(ctx => |ctx| {
-            // Eval a tiny entry module that imports the SDK module and stashes
-            // its namespace on globalThis so we can introspect from JS.
+            // Tiny entry module imports the SDK module and stashes its
+            // namespace on globalThis so we can introspect.
             let src = format!(
                 r#"
                 import * as ns from "{specifier}";

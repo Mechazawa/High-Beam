@@ -1,5 +1,5 @@
-// Stub of `highbeam:http` for vitest. Default returns a 200/OK empty body;
-// plugin tests override per-call with `vi.mocked(get).mockResolvedValueOnce`.
+// `highbeam:http` stub for vitest. Default returns 200/OK empty body —
+// override per call via `vi.mocked(get).mockResolvedValueOnce(...)`.
 
 import { vi } from 'vitest';
 

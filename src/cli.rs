@@ -1,8 +1,4 @@
 //! Command-line interface.
-//!
-//! High Beam is a daemon. `highbeam` with no args starts and registers the
-//! global hotkey. `--open` either tells a running daemon to show its window,
-//! or — if no daemon is running — starts one and opens the window immediately.
 
 use std::path::PathBuf;
 
@@ -21,7 +17,7 @@ pub struct Args {
     pub open: bool,
 
     /// Override the plugin discovery directory. Defaults to `./plugins` (if
-    /// present) or the platform plugin dir from `docs/04-platform.md`.
+    /// present) or the platform plugin dir.
     #[arg(long, value_name = "PATH")]
     pub plugins_dir: Option<PathBuf>,
 }

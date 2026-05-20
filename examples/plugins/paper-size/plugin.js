@@ -1,7 +1,6 @@
 import { copy } from "highbeam:actions";
 
-// Inlined from legacy/plugins/paper-sizes.json. Small + stable, so reading it
-// at runtime via fs would be wasted overhead and a needless capability ask.
+// Inlined — small, stable; reading from fs would just need a capability.
 const PAPER_SIZES = {
     A0: { mm: "841 x 1189" },
     A1: { mm: "594 x 841" },
@@ -49,7 +48,7 @@ const PAPER_PREFIX = /^\s*paper\s+/i;
 export async function* query(input, _signal) {
     if (!input) return;
 
-    // Strip optional `paper ` prefix so `paper A4` behaves like `A4`.
+    // Strip optional `paper ` prefix.
     const raw = input.replace(PAPER_PREFIX, "").trim();
     if (!raw) return;
 

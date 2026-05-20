@@ -1,11 +1,9 @@
-// Stub of `highbeam:fs` for vitest. All entries are `vi.fn()`s — fixtures
-// belong in the plugin's test file, not here. `readDir` returns an async
-// iterable; the default yields zero entries.
+// `highbeam:fs` stub for vitest. `vi.fn()`s — plugin tests supply their
+// own fixtures. `readDir` returns an empty async iterable by default.
 
 import { vi } from 'vitest';
 
 async function* emptyAsyncIterable() {
-    // Empty by design — see module header.
 }
 
 export const readDir = vi.fn((_path, _opts) => emptyAsyncIterable());

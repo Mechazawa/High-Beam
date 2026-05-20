@@ -1,9 +1,6 @@
-//! End-to-end check that the plugin runtime can load + run a tiny JS
-//! plugin and surface its results in the shape the dispatcher consumes.
-//!
-//! Integration test (not in `src/`) because rquickjs evaluation needs a
-//! real tokio runtime, and the inline `cfg(test)` modules in `src/` would
-//! drag the `QuickJS` engine into unit-test builds we don't want it in.
+//! End-to-end check that the plugin runtime can load + run a tiny JS plugin
+//! and surface its results in the dispatcher's expected shape. Lives outside
+//! `src/` because rquickjs evaluation needs a real tokio runtime.
 
 use std::fs;
 use std::path::PathBuf;
@@ -40,8 +37,7 @@ import fs from "fs";
 export async function* query(input, _signal) { yield { key: "k", title: input, action: { kind: "copy", text: input } }; }
 "#;
 
-/// Slow-streaming plugin used for the streaming/abort tests. Yields three
-/// rows with a 150ms pause between each.
+/// Three rows with a 150ms pause between each.
 const SLOW_STREAM_PLUGIN: &str = r#"
 import { copy } from "highbeam:actions";
 
@@ -84,8 +80,6 @@ fn rt() -> tokio::runtime::Runtime {
         .expect("tokio rt")
 }
 
-/// Drain the streaming receiver into a Vec for assertion-style testing.
-/// Stops when the channel closes (plugin finished or cancelled).
 async fn drain(rx: &mut tokio::sync::mpsc::UnboundedReceiver<PluginResult>) -> Vec<PluginResult> {
     let mut out = Vec::new();
     while let Some(r) = rx.recv().await {
@@ -236,8 +230,7 @@ fn abort_stops_in_flight_streaming_query() {
         let cancel = CancellationToken::new();
         let mut rx = plugin.run_query_stream("x", cancel.clone());
 
-        // Read the first row, then abort. We should not receive the third
-        // row (3 rows * 150ms = 450ms total; we cancel inside 250ms).
+        // 3 rows × 150ms total — cancel inside 250ms.
         let first = tokio::time::timeout(Duration::from_secs(2), rx.recv())
             .await
             .expect("first row arrived")
@@ -246,7 +239,6 @@ fn abort_stops_in_flight_streaming_query() {
 
         cancel.cancel();
 
-        // After cancel, the stream should close quickly.
         let close = tokio::time::timeout(Duration::from_secs(2), async {
             while rx.recv().await.is_some() {}
         })

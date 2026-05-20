@@ -1,5 +1,4 @@
-// Stub of `highbeam:clipboard` for vitest. Pure side effect in production,
-// so the test stub returns `vi.fn()`s plugin authors can spy on and
+// `highbeam:clipboard` stub for vitest. `vi.fn()`s so tests can spy /
 // override via `vi.mocked(read).mockResolvedValueOnce(...)`.
 
 import { vi } from 'vitest';

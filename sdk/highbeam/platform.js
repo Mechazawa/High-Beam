@@ -1,6 +1,5 @@
-// Stub of `highbeam:platform`. Pure metadata — derive from Node's `process`
-// and `os` instead of stubbing; plugin tests want real values so they can
-// branch on `isMacOS()` without setting up mocks.
+// `highbeam:platform` — real metadata from Node so tests can branch on
+// `isMacOS()` without mocks.
 
 import nodeOs from 'node:os';
 

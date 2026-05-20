@@ -1,7 +1,7 @@
 //! `manifest.json` parsing.
 //!
-//! Unknown fields are tolerated (`#[serde(default)]` + no `deny_unknown_fields`)
-//! so new fields can land without breaking older plugins.
+//! Unknown fields are tolerated (no `deny_unknown_fields`) so new fields can
+//! land without breaking older plugins.
 
 use std::path::{Path, PathBuf};
 
@@ -12,10 +12,9 @@ const DEFAULT_TIMEOUT_MS: u64 = 500;
 const DEFAULT_MEMORY_MB: u32 = 32;
 const DEFAULT_DEBOUNCE_MS: u64 = 0;
 
-/// Platforms the host can gate plugins on today. Kept as a `&[&str]` rather
-/// than an enum so unknown future values (e.g. `"windows"`) round-trip through
-/// the manifest unchanged and only get flagged at gating time — matches the
-/// "tolerant to additions" requirement in the v1 spec.
+/// Platforms the host gates on. `&[&str]` (rather than an enum) so unknown
+/// future values like `"windows"` round-trip unchanged and are flagged only
+/// at gating time.
 const KNOWN_PLATFORMS: &[&str] = &["macos", "linux"];
 
 /// Plugin metadata as it appears on disk.
@@ -36,24 +35,18 @@ pub struct Manifest {
     #[serde(default = "default_memory_mb")]
     pub memory_mb: u32,
     /// Per-plugin debounce in milliseconds — the dispatcher waits this long
-    /// after the latest keystroke before invoking `query()`. `0` (the
-    /// default) dispatches every keystroke immediately. The dispatcher caps
-    /// the effective value at [`crate::plugins::dispatch::MAX_DEBOUNCE_MS`].
+    /// after the latest keystroke before invoking `query()`. `0` dispatches
+    /// every keystroke immediately. Effective value capped at
+    /// [`crate::plugins::dispatch::MAX_DEBOUNCE_MS`].
     #[serde(default = "default_debounce_ms")]
     pub debounce_ms: u64,
     #[serde(default)]
     pub capabilities: Vec<String>,
-    /// Platforms this plugin opts into. Three meaningful cases:
-    ///   * `None` — field absent (or JSON `null`): loads everywhere. This is
-    ///     the backward-compatible default for every plugin written before
-    ///     gating existed.
-    ///   * `Some(vec![])` — explicit empty array: plugin is shelved and
-    ///     never loads. Lets an author keep the directory in place without
-    ///     uninstalling.
-    ///   * `Some(list)` — load only where `std::env::consts::OS` matches one
-    ///     of the strings. Unknown strings are tolerated for forward-compat
-    ///     (a v2 plugin declaring `"windows"` must still parse on v1) but
-    ///     are ignored by the gate.
+    /// Platforms this plugin opts into:
+    ///   * `None` — loads everywhere (back-compat default).
+    ///   * `Some(vec![])` — explicit shelving: never loads.
+    ///   * `Some(list)` — load only where `std::env::consts::OS` matches.
+    ///     Unknown strings parse but never match.
     #[serde(default)]
     pub platforms: Option<Vec<String>>,
 }
@@ -91,10 +84,9 @@ impl Manifest {
         plugin_dir.join(&self.entry)
     }
 
-    /// Whether this plugin should load on the platform this binary runs on.
-    /// Drives loader-side gating; see [`Self::platforms`] for the field
-    /// semantics. Warnings for unknown platform strings are emitted here
-    /// rather than at parse time so the manifest stays a passive data type.
+    /// Whether this plugin should load on the host platform. Warnings for
+    /// unknown platform strings are emitted here (not at parse time) so the
+    /// manifest stays a passive data type.
     #[must_use]
     pub fn supports_current_platform(&self) -> bool {
         match &self.platforms {
@@ -119,9 +111,8 @@ impl Manifest {
         }
     }
 
-    /// Human-readable reason describing why the plugin was gated out, for the
-    /// loader's INFO log. Returns `None` when the platform actually matches —
-    /// callers only need this when they're already about to skip.
+    /// Human-readable reason describing why the plugin was gated out.
+    /// `None` when the platform actually matches.
     #[must_use]
     pub fn platform_skip_reason(&self) -> Option<String> {
         let list = self.platforms.as_ref()?;
@@ -200,7 +191,6 @@ mod tests {
 
     #[test]
     fn platforms_absent_supports_every_platform() {
-        // Backward-compat: manifests without the field load everywhere.
         let m = Manifest::parse(br#"{ "name": "old" }"#).unwrap();
         assert!(m.platforms.is_none());
         assert!(m.supports_current_platform());
@@ -209,7 +199,6 @@ mod tests {
 
     #[test]
     fn platforms_null_supports_every_platform() {
-        // Explicit `null` is treated identically to "field absent".
         let m = Manifest::parse(br#"{ "name": "null", "platforms": null }"#).unwrap();
         assert!(m.platforms.is_none());
         assert!(m.supports_current_platform());
@@ -217,7 +206,6 @@ mod tests {
 
     #[test]
     fn platforms_empty_array_is_shelved() {
-        // `"I'm shelving this plugin without uninstalling."`
         let m = Manifest::parse(br#"{ "name": "shelved", "platforms": [] }"#).unwrap();
         assert_eq!(m.platforms.as_deref(), Some(&[][..]));
         assert!(!m.supports_current_platform());
@@ -226,8 +214,6 @@ mod tests {
 
     #[test]
     fn platforms_matching_current_os_supports() {
-        // Use the OS string the test is actually running on so this test is
-        // valid both on macOS dev boxes and Linux CI.
         let json = format!(
             r#"{{ "name": "matched", "platforms": ["{}"] }}"#,
             std::env::consts::OS,
@@ -238,7 +224,6 @@ mod tests {
 
     #[test]
     fn platforms_excluding_current_os_does_not_support() {
-        // Pick a known platform that is definitely *not* the current one.
         let other = if std::env::consts::OS == "macos" {
             "linux"
         } else {
@@ -254,18 +239,13 @@ mod tests {
 
     #[test]
     fn platforms_unknown_string_is_warned_and_ignored() {
-        // `"haiku"` is not a known platform; it must NOT count as a match,
-        // and the parse step itself must still succeed.
         let m = Manifest::parse(br#"{ "name": "future", "platforms": ["haiku"] }"#).unwrap();
         assert_eq!(m.platforms.as_deref().map(<[String]>::len), Some(1));
-        // Unknown alone => no platform matched => not supported.
         assert!(!m.supports_current_platform());
     }
 
     #[test]
     fn platforms_unknown_alongside_match_still_supports() {
-        // Known-matching entry must win even when an unknown sits next to it,
-        // confirming unknowns are ignored rather than treated as exclusions.
         let json = format!(
             r#"{{ "name": "mixed", "platforms": ["haiku", "{}"] }}"#,
             std::env::consts::OS,

@@ -8,8 +8,8 @@ const MAC_APP_DIRECTORIES = [
     "/Applications",
     "/System/Applications",
     "/System/Library/CoreServices",
-    // No HOME lookup in QuickJS; the SDK silently rejects unreadable dirs,
-    // so listing the per-user path unconditionally is cheap and safe.
+    // QuickJS doesn't expose `$HOME`; the SDK silently skips unreadable dirs,
+    // so listing this unconditionally is cheap and safe.
     "~/Applications",
 ];
 
@@ -24,8 +24,8 @@ const DESKTOP_EXT = ".desktop";
 const RESULT_LIMIT = 10;
 const SCORE_THRESHOLD = 0.05;
 
-// Module-level cache: scanning these directories takes ~hundreds of ms;
-// the host re-imports the module rarely, so this survives across queries.
+// Module-level cache — scanning these dirs is hundreds of ms; the host
+// re-imports rarely, so this survives across queries.
 let appsCache = null;
 
 function basenameWithoutExt(path, ext) {
@@ -40,8 +40,8 @@ async function collectMacApps() {
     for (const dir of MAC_APP_DIRECTORIES) {
         try {
             for await (const entry of readDir(dir, { recursive: false })) {
-                // Filter on basename so we catch `.app` bundles regardless of
-                // whether the host flags them as file vs dir (varies by FS).
+                // Filter on basename — `.app` bundles flip between file vs
+                // dir depending on filesystem.
                 const name = entry.name ?? "";
                 if (!name.endsWith(APP_EXT)) continue;
                 apps.push({
@@ -51,17 +51,13 @@ async function collectMacApps() {
                 });
             }
         } catch {
-            // Missing/unreadable dir shouldn't kill the scan — e.g.
-            // /System/Applications doesn't exist on older macOS, and
-            // ~/Applications may not be present.
+            // Missing dirs are normal (~/Applications, older macOS layouts).
         }
     }
     return apps;
 }
 
 // Strip freedesktop field codes (%f %F %u %U %d %D %n %N %i %c %k %v %m).
-// Some legacy `.desktop` files use uppercase or lowercase; the spec treats
-// them as one-character placeholders so a single regex covers all cases.
 function stripExecPlaceholders(execLine) {
     return execLine.replace(/%[fFuUdDnNickvm]/g, "").replace(/\s+/g, " ").trim();
 }
@@ -74,8 +70,7 @@ function parseDesktopFile(text) {
         if (line.length === 0) continue;
         if (line.startsWith("#")) continue;
         if (line.startsWith("[")) {
-            // Only the `[Desktop Entry]` group is relevant; ignore actions and
-            // localized sub-groups (e.g. `[Desktop Action New]`).
+            // Ignore action / localized sub-groups (`[Desktop Action New]`).
             inDesktopEntry = line === "[Desktop Entry]";
             continue;
         }
@@ -83,7 +78,7 @@ function parseDesktopFile(text) {
         const eq = line.indexOf("=");
         if (eq < 0) continue;
         const key = line.slice(0, eq).trim();
-        // Skip localized keys like `Name[de]`; only the bare key is used here.
+        // Skip localized keys (`Name[de]`).
         if (key.includes("[")) continue;
         const value = line.slice(eq + 1).trim();
         entry[key] = value;
@@ -111,8 +106,7 @@ async function collectLinuxApps() {
                 if (!fields.Exec) continue;
                 const command = stripExecPlaceholders(fields.Exec);
                 if (!command) continue;
-                // Only absolute icon paths are usable today — XDG icon theme
-                // lookup for bare icon names is out of scope for v1.
+                // XDG icon-theme lookup is post-v1; only absolute paths work.
                 const iconPath =
                     fields.Icon && fields.Icon.startsWith("/")
                         ? fields.Icon
@@ -126,7 +120,7 @@ async function collectLinuxApps() {
                 });
             }
         } catch {
-            // Missing dir is normal — most distros only populate one or two.
+            // Missing dir is normal — most distros populate one or two.
         }
     }
     return apps;
@@ -159,8 +153,8 @@ function actionFor(app) {
     if (app.kind === "mac") {
         return openUrl(app.path);
     }
-    // `sh -c` lets the parsed Exec line keep its existing quoting/pipes/etc;
-    // re-tokenizing it in JS would risk dropping shell metacharacters.
+    // `sh -c` preserves whatever quoting/pipes the Exec line had — JS-side
+    // tokenisation would drop shell metacharacters.
     return exec("sh", ["-c", app.command]);
 }
 

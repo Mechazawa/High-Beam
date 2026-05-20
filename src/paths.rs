@@ -1,10 +1,9 @@
 //! Platform-specific path resolution.
 //!
-//! See `docs/04-platform.md`. We use `directories` rather than `dirs` to get
-//! the convenience wrapper that already knows our `<qualifier>/<organization>/<app>`
-//! triple — we keep qualifier and organization empty so the Linux config dir
-//! lands at `~/.config/high-beam` and the macOS Application Support folder at
-//! `~/Library/Application Support/high-beam`.
+//! We use `directories` (rather than `dirs`) so the same `<qualifier>/
+//! <organization>/<app>` triple covers both platforms — with empty qualifier
+//! and organization, the Linux config dir lands at `~/.config/high-beam` and
+//! macOS Application Support at `~/Library/Application Support/high-beam`.
 
 use std::io;
 use std::path::PathBuf;

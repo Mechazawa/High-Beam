@@ -1,16 +1,15 @@
 //! Unix-domain-socket IPC for single-instance coordination.
 //!
-//! Wire format is intentionally tiny: newline-terminated ASCII commands. Right
-//! now there's exactly one — `open` — so a fixed read buffer is fine. Stage 3+
-//! will add more; we'll move to length-prefixed framing if we ever carry
-//! payloads bigger than a few bytes.
+//! Newline-terminated ASCII commands; today there's exactly one (`open`),
+//! so a fixed read buffer is fine. Length-prefixed framing waits until we
+//! carry payloads bigger than a few bytes.
 
 use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 
-/// Commands accepted by the running daemon. Keep the wire representation
-/// stable across stages — `Display` is the format that goes over the socket.
+/// Commands accepted by the running daemon. Wire format is stable; do not
+/// rename without considering compat with running daemons.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
     /// Open the query window (or focus it if already open).
@@ -47,11 +46,9 @@ impl std::fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
-/// Server side of the single-instance lock.
-///
-/// `bind` removes a stale socket file if it exists and the previous owner is
-/// gone; if a live daemon is listening, `bind` returns an error and callers
-/// should switch to `send`.
+/// Server side of the single-instance lock. `bind` removes a stale socket
+/// file if the previous owner is gone; if a live daemon is listening it
+/// returns `AddrInUse` so callers can switch to `send`.
 #[derive(Debug)]
 pub(crate) struct Server {
     listener: UnixListener,
@@ -59,8 +56,6 @@ pub(crate) struct Server {
 }
 
 impl Server {
-    /// Bind to `path`. If a daemon is already listening, returns
-    /// `io::ErrorKind::AddrInUse` so the caller can fall back to client mode.
     pub(crate) fn bind(path: &Path) -> io::Result<Self> {
         crate::paths::ensure_parent_dir(path)?;
 
@@ -70,7 +65,6 @@ impl Server {
                 path: path.to_path_buf(),
             }),
             Err(err) if err.kind() == io::ErrorKind::AddrInUse => {
-                // Either a live daemon owns this, or it's a stale file from a crash.
                 // Probe by connecting; if we can't, the socket is stale.
                 if UnixStream::connect(path).is_err() {
                     std::fs::remove_file(path)?;
@@ -91,10 +85,8 @@ impl Server {
     }
 
     /// Block on the listener, calling `handler` for each parsed command.
-    ///
-    /// Returns only on accept-loop error. The intended pattern is to spawn a
-    /// dedicated thread that owns the `Server` and forwards commands to the
-    /// main thread (which owns the UI).
+    /// Intended pattern: dedicate a thread that owns the `Server` and
+    /// forwards commands to the UI thread.
     pub(crate) fn run<F>(self, mut handler: F) -> io::Result<()>
     where
         F: FnMut(Command) + Send + 'static,
@@ -117,8 +109,8 @@ impl Server {
 
 impl Drop for Server {
     fn drop(&mut self) {
-        // Best-effort cleanup. If we crashed instead of dropping, the stale
-        // socket gets removed on next start (see `Server::bind`).
+        // If we crashed instead of dropping, `Server::bind` clears the stale
+        // file on next start.
         let _ = std::fs::remove_file(&self.path);
     }
 }
@@ -127,9 +119,9 @@ impl Drop for Server {
 ///
 /// # Errors
 ///
-/// Returns an [`io::Error`] if connecting or writing fails. The most common
-/// case is `ConnectionRefused` / `NotFound`, which means no daemon is
-/// currently listening — callers should fall back to starting one.
+/// Returns an [`io::Error`] if connecting or writing fails. The common case
+/// is `ConnectionRefused`/`NotFound` — no daemon listening, caller should
+/// fall back to starting one.
 pub fn send(path: &Path, command: Command) -> io::Result<()> {
     let mut stream = UnixStream::connect(path)?;
     writeln!(stream, "{}", command.as_wire())?;
@@ -151,7 +143,6 @@ mod tests {
             name,
             std::process::id()
         ));
-        // Clean up any leftovers from a prior run.
         let _ = std::fs::remove_file(&path);
         path
     }
@@ -171,14 +162,12 @@ mod tests {
 
         let (tx, rx) = mpsc::channel();
         let handle = thread::spawn(move || {
-            // The server runs until the listener closes; here we just need one
-            // event, so we listen on a worker and shut down after recv.
             let _ = server.run(move |cmd| {
                 let _ = tx.send(cmd);
             });
         });
 
-        // Tiny race window before the listener is ready; this is enough.
+        // Tiny race window before the listener is ready.
         thread::sleep(Duration::from_millis(50));
         send(&path, Command::Open).expect("client send");
 
@@ -187,9 +176,6 @@ mod tests {
             .expect("receive command");
         assert_eq!(received, Command::Open);
 
-        // Drop the listener thread by deleting the socket; the accept loop will
-        // exit on the next iteration. We don't join — the test process exit
-        // will reap it.
         drop(handle);
         let _ = std::fs::remove_file(&path);
     }
@@ -207,11 +193,9 @@ mod tests {
         let path = tmp_socket("stale");
         {
             let _first = Server::bind(&path).expect("bind first");
-            // Drop runs and removes the file. Simulate a crash instead by
-            // shadow-creating a leftover file with no listener.
         }
+        // Simulate a crash: leftover file with no listener.
         std::fs::File::create(&path).expect("create stale socket file");
-        // Second bind should detect the stale file and replace it.
         let _second = Server::bind(&path).expect("bind succeeds over stale file");
         let _ = std::fs::remove_file(&path);
     }

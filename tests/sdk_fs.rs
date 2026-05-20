@@ -1,8 +1,5 @@
-//! Behavioural tests for `highbeam:fs`.
-//!
-//! Covers capability gating, recursive readDir traversal, and cache scoping
-//! (the plugin can read/write its own cache dir; path-traversal names are
-//! rejected).
+//! Behavioural tests for `highbeam:fs` — capability gating, recursive
+//! readDir traversal, and cache scoping (path-traversal names are rejected).
 
 use std::path::PathBuf;
 

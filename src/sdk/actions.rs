@@ -1,23 +1,14 @@
 //! Host implementation of the `highbeam:actions` module.
 //!
-//! ```js
-//! import { openUrl, copy, exec, reveal } from 'highbeam:actions';
-//! openUrl('https://example.com');         // { kind: 'openUrl', url: '…' }
-//! copy('hello');                          // { kind: 'copy',    text: '…' }
-//! exec('/usr/bin/say', ['hello']);        // { kind: 'exec',    cmd, args }
-//! reveal('/Users/me/Downloads/file.pdf'); // { kind: 'reveal',  path: '…' }
-//! ```
+//! Each builder returns a plain JS object matching
+//! [`crate::plugins::result::Action`]'s wire shape so `serde_json` can
+//! deserialise the yielded result directly.
 //!
-//! All builders return a plain JS object matching [`crate::plugins::result::Action`]'s
-//! wire shape so `serde_json` can deserialise the yielded result directly.
-//!
-//! Note: `exec` here is the *action builder*. Live subprocess execution is
-//! `highbeam:system.exec` (capability `system.exec`); returning an exec
-//! action from `query()` does NOT require that capability.
+//! `exec` here is the action builder (no capability required). Live
+//! subprocess execution lives in `highbeam:system.exec`.
 
 use rquickjs::{Ctx, Object, Result, Value, module::ModuleDef};
 
-/// Module definition registered against the `highbeam:actions` import specifier.
 pub struct ActionsModule;
 
 impl ModuleDef for ActionsModule {
@@ -48,9 +39,8 @@ impl ModuleDef for ActionsModule {
                 let obj = Object::new(ctx.clone())?;
                 obj.set("kind", "exec")?;
                 obj.set("cmd", cmd)?;
-                // Coerce `args` to an array — if the plugin passed undefined,
-                // treat it as an empty arg vector. Otherwise pass through and
-                // let serde reject malformed shapes at deserialize time.
+                // Treat undefined as `[]`; pass arrays through and let serde
+                // reject malformed shapes at deserialize time.
                 if args.is_undefined() || args.is_null() {
                     let empty = rquickjs::Array::new(ctx)?;
                     obj.set("args", empty)?;

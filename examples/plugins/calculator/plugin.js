@@ -1,8 +1,6 @@
 import { copy } from "highbeam:actions";
 
-// Shunting-yard evaluator. Hand-rolled so the plugin can ship without an npm
-// dep — the legacy v2 plugin used mathjs which would pull megabytes of code
-// into the QuickJS sandbox.
+// Hand-rolled shunting-yard evaluator — keeps the plugin npm-free.
 
 const CONSTANTS = {
     pi: Math.PI,
@@ -20,8 +18,8 @@ const FUNCTIONS = {
     pow: { arity: 2, fn: (a, b) => a ** b },
 };
 
-// Higher precedence binds tighter. `**` is right-associative; everything else
-// left-associative. Unary minus gets its own precedence above `**`.
+// `**` is right-associative; everything else left-associative. Unary minus
+// gets its own precedence above `**`.
 const BINARY_OPS = {
     "+": { prec: 1, assoc: "left", fn: (a, b) => a + b },
     "-": { prec: 1, assoc: "left", fn: (a, b) => a - b },
@@ -112,9 +110,8 @@ function applyOp(op, stack) {
     stack.push(BINARY_OPS[op.op].fn(a, b));
 }
 
-// Returns true when the topmost operator on `ops` should be applied before
-// pushing `incoming` — standard shunting-yard precedence-and-associativity
-// rule, generalised to unary ops and function frames.
+// Standard shunting-yard precedence/associativity rule, generalised to
+// unary ops and function frames.
 function shouldPopBefore(ops, incoming) {
     if (ops.length === 0) return false;
     const top = ops[ops.length - 1];
@@ -132,12 +129,10 @@ function parseAndEvaluate(src) {
     if (tokens.length === 0) throw new Error("empty");
     const output = [];
     const ops = [];
-    // Tracks whether the next token starts a fresh expression — used to
-    // distinguish unary minus from binary minus and to allow `()` only after
-    // an operator / opening paren / function call.
+    // Distinguishes unary minus from binary minus and allows `()` only after
+    // an operator / open paren / function call.
     let expectOperand = true;
-    // Parallel to `ops`: for each function frame, count args seen. A comma
-    // bumps the count; `)` closes and reads the final count.
+    // Parallel to `ops`: per function frame, count args; `,` bumps it.
     const fnArgs = [];
 
     for (let idx = 0; idx < tokens.length; idx += 1) {
@@ -182,8 +177,8 @@ function parseAndEvaluate(src) {
             if (opener.kind === "fn-open") {
                 const fnIdx = fnArgs.pop();
                 const fnFrame = ops[fnIdx];
-                // If the parens were empty (`fn()`) the argc should be 0 — we
-                // started at 1 assuming at least one operand would arrive.
+                // Empty parens (`fn()`) → argc 0. We start at 1 assuming an
+                // operand; reset here if none arrived.
                 if (expectOperand && fnFrame.argc === 1) fnFrame.argc = 0;
                 ops.splice(fnIdx, 1);
                 applyOp(fnFrame, output);
@@ -229,8 +224,8 @@ function parseAndEvaluate(src) {
     return output[0];
 }
 
-// Render numbers without exponential noise for small magnitudes while still
-// trimming the inevitable float fuzz (e.g. `0.1 + 0.2`).
+// Trim float fuzz (e.g. `0.1 + 0.2`) without flipping into exponential
+// notation for small magnitudes.
 function formatResult(value) {
     if (Number.isInteger(value)) return String(value);
     const rounded = Math.round(value * 1e12) / 1e12;
@@ -239,9 +234,8 @@ function formatResult(value) {
 
 export async function* query(input, _signal) {
     if (!input || !input.trim()) return;
-    // `=` prefix forces a row even on failure so the user gets feedback while
-    // typing a long expression; the bare form stays silent for compatibility
-    // with the existing global-query behaviour.
+    // `=` prefix surfaces feedback during long-expression typing even when
+    // the partial parse fails; bare form stays silent.
     const trimmed = input.trimStart();
     const forced = trimmed.startsWith("=");
     const expression = forced ? trimmed.slice(1) : input;
@@ -273,16 +267,14 @@ export async function* query(input, _signal) {
             pinned: true,
             action: copy(text),
         };
-        // Only the `=` path surfaces the source expression in the subtitle;
-        // the bare form keeps its lean single-line look.
+        // `=` mode also surfaces the source expression as a subtitle.
         if (forced) row.subtitle = expression.trim();
         yield row;
         return;
     }
     if (!forced) return;
-    // Surface the parser's own message when available; fall back to a generic
-    // label for divide-by-zero / overflow which produce non-finite numbers
-    // without throwing.
+    // Divide-by-zero / overflow produce non-finite numbers without throwing,
+    // so we describe those separately from real parser exceptions.
     const reason = error ? errorReason(error) : nonFiniteReason(value);
     yield {
         key: `calc:=${expression.trim() || expression}`,

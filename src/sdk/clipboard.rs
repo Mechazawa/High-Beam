@@ -1,41 +1,23 @@
 //! Host implementation of the `highbeam:clipboard` module.
 //!
-//! ```ts
-//! import { read, write } from 'highbeam:clipboard';
-//! await write('hi');
-//! const text = await read();
-//! ```
+//! Module loads if the plugin has either `clipboard.read` or
+//! `clipboard.write`; each function guards itself on its specific cap.
 //!
-//! Capability gating: the module loads if the plugin has *either*
-//! `clipboard.read` or `clipboard.write`. Each function additionally guards
-//! itself on its specific capability — calling `write()` from a plugin that
-//! only declared `clipboard.read` throws a `CapabilityError`.
-//!
-//! The bound functions are constructed *outside* `ModuleDef::evaluate`
-//! (which has no per-plugin state) and stashed on `globalThis` under reserved
-//! names. `evaluate` re-exports them from the namespace. This lets the same
-//! `ClipboardModule` symbol serve every plugin while still gating per-plugin
-//! caps. The reserved global names are documented constants below.
-//!
-//! Each call constructs a fresh `arboard::Clipboard` — cheap on macOS, fine
-//! on Linux. Avoiding a global keeps us from worrying about thread-affinity
-//! issues on X11.
+//! Per-plugin bindings live on `globalThis` under reserved names because
+//! `ModuleDef::evaluate` has no per-plugin state — one `ClipboardModule`
+//! symbol serves every plugin via late re-export. A fresh
+//! `arboard::Clipboard` per call sidesteps X11 thread-affinity issues.
 
 use rquickjs::function::Async;
 use rquickjs::{Ctx, Function, Result as JsResult, Value, module::ModuleDef};
 
 use crate::sdk::errors::{throw_cap, throw_named};
 
-/// Where [`install`] stashes the read/write callables so the module's
-/// `evaluate()` can re-export them as `read` / `write`. Plugin code should
-/// never reach for these directly.
 const READ_GLOBAL: &str = "__highbeam_clipboard_read";
 const WRITE_GLOBAL: &str = "__highbeam_clipboard_write";
 
-/// Module definition registered against the `highbeam:clipboard` specifier.
-///
-/// State-less — per-plugin gating lives in the bound functions [`install`]
-/// places on globalThis before module evaluation.
+/// Stateless module — per-plugin gating lives in the bound functions
+/// [`install`] places on globalThis before module evaluation.
 pub struct ClipboardModule;
 
 impl ModuleDef for ClipboardModule {
@@ -46,10 +28,9 @@ impl ModuleDef for ClipboardModule {
     }
 
     fn evaluate<'js>(ctx: &Ctx<'js>, exports: &rquickjs::module::Exports<'js>) -> JsResult<()> {
-        // Pull the bound functions off the global object. If the runtime
-        // didn't install them, fall back to capability-error stubs so an
-        // accidental import of the module without proper cap binding still
-        // gives an actionable error rather than a `TypeError: undefined`.
+        // If the runtime didn't install bound functions, fall back to
+        // CapabilityError stubs so plugin authors get an actionable error
+        // rather than `TypeError: undefined`.
         let globals = ctx.globals();
         let read_val: Value<'js> = globals
             .get(READ_GLOBAL)
@@ -61,7 +42,6 @@ impl ModuleDef for ClipboardModule {
         let read_fn = if let Some(f) = read_val.into_function() {
             f
         } else {
-            // No host binding installed → return a cap-error thrower.
             Function::new(
                 ctx.clone(),
                 Async(
@@ -85,11 +65,9 @@ impl ModuleDef for ClipboardModule {
     }
 }
 
-/// Build the per-plugin bound `read` / `write` functions. Stashes them on
-/// `globalThis` under [`READ_GLOBAL`] / [`WRITE_GLOBAL`] so the module's
-/// `evaluate` can pick them up at import time.
-///
-/// Must be called *before* the plugin's entry module evaluates.
+/// Build per-plugin `read`/`write` and stash them on globalThis under
+/// [`READ_GLOBAL`]/[`WRITE_GLOBAL`]. Must run BEFORE the plugin's entry
+/// module evaluates.
 ///
 /// # Errors
 ///

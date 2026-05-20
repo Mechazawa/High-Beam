@@ -1,5 +1,5 @@
 //! Daemon entry point — owns the Slint event loop, the global hotkey, and the
-//! IPC socket. All cross-thread work routes through `slint::invoke_from_event_loop`
+//! IPC socket. Cross-thread work routes through `slint::invoke_from_event_loop`
 //! so UI work stays on the main thread.
 
 use std::io;
@@ -19,8 +19,8 @@ pub struct Options {
     pub open_on_start: bool,
     /// Path to the unix socket we'll bind for single-instance.
     pub socket_path: PathBuf,
-    /// Override for the plugins directory. `None` falls back to
-    /// [`crate::plugins::loader::LoaderOptions::resolve`]'s defaults.
+    /// Override for the plugins directory. `None` uses the default search
+    /// order in [`crate::plugins::loader::LoaderOptions::resolve`].
     pub plugins_dir: Option<PathBuf>,
 }
 
@@ -32,13 +32,11 @@ pub struct Options {
 /// fails to construct, the unix socket can't be bound (e.g. another daemon
 /// is already running), or the event loop reports a runtime error.
 // reason: `Options` is a config struct created by the caller and consumed
-// here; taking it by value is more ergonomic than forcing the caller to keep
-// it alive across `run`.
+// here; by-value is more ergonomic than forcing the caller to keep it alive.
 #[allow(clippy::needless_pass_by_value)]
 pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
-    // Pin the winit backend explicitly. We rely on it for monitor enumeration
-    // and focus events; if a future Slint default-backend swap changed that,
-    // the failure would be opaque.
+    // Pin the winit backend explicitly — we rely on it for monitor enumeration
+    // and focus events; a default-backend swap would otherwise fail opaquely.
     slint::BackendSelector::new()
         .backend_name("winit".into())
         .select()?;
@@ -47,10 +45,7 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     window::configure(&window);
     window::apply_theme(&window, &Theme::load_or_default());
 
-    // Start the plugin runtime. The host owns a background thread + tokio
-    // runtime and wires the per-keystroke `query_edited` and `Enter`
-    // `invoke_selected` callbacks. We hold onto the handle so it lives as
-    // long as the daemon does — `Drop` sends Shutdown to the worker.
+    // Keep the host alive for the daemon's lifetime; `Drop` sends Shutdown.
     let _plugin_host = app::start(&window, options.plugins_dir.clone())?;
 
     spawn_ipc_listener(&options.socket_path, window.as_weak())?;
@@ -62,12 +57,9 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
         window::show(&window);
     }
 
-    // Use `run_event_loop_until_quit` instead of `window.run()` so the daemon
-    // stays alive when the window is hidden. `ComponentHandle::run()` shows the
-    // window unconditionally and exits the event loop when the last window
-    // closes — neither matches our "background daemon, window opens on demand"
-    // model. With this, Esc and blur can hide the window without killing the
-    // daemon, and `--open`/Shift+Space can re-show it.
+    // `run_event_loop_until_quit` (not `window.run()`) — the daemon must
+    // survive window hide/show; `ComponentHandle::run()` ends the loop when
+    // the last window closes, which would kill the daemon on the first Esc.
     slint::run_event_loop_until_quit()?;
     Ok(())
 }
@@ -102,9 +94,8 @@ fn spawn_hotkey_listener(
     use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 
     // GlobalHotKeyManager has to be created and kept alive on the same thread
-    // for the duration we want hotkey events. We construct it on the main
-    // thread (current thread) and hand it back so the caller can keep it
-    // alive for the life of the daemon.
+    // for the duration we want hotkey events; the caller holds it for the
+    // life of the daemon.
     let manager = match GlobalHotKeyManager::new() {
         Ok(m) => m,
         Err(err) => {
@@ -120,8 +111,6 @@ fn spawn_hotkey_listener(
     }
     let hotkey_id = hotkey.id();
 
-    // Drain events on a dedicated thread; for each Pressed event matching our
-    // hotkey, hop back to the Slint event loop and toggle the window.
     thread::Builder::new()
         .name("highbeam-hotkey".into())
         .spawn(move || {

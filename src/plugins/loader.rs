@@ -1,18 +1,9 @@
 //! Discover and load plugins from a directory.
 //!
-//! Default location is the platform data dir:
-//!   * macOS: `~/Library/Application Support/high-beam/plugins/`
-//!   * Linux: `$XDG_DATA_HOME/high-beam/plugins/`
-//!
-//! …but if a `./plugins` directory exists next to the binary's cwd, that
-//! wins (dev convenience). A `--plugins-dir <path>` CLI flag overrides
-//! everything for testing. See [`LoaderOptions::resolve`].
-//!
 //! Each plugin gets its own [`LoadedPlugin`] (independent JS runtime +
-//! context), wrapped in `Arc` so the dispatcher can clone the handle into
-//! per-plugin spawned tasks. Failures during load are logged to stderr and
-//! the bad plugin is skipped — one syntax error shouldn't take the whole
-//! launcher down.
+//! context). Load failures are logged and the plugin is skipped — one bad
+//! manifest must not take the whole launcher down. See
+//! [`LoaderOptions::resolve`] for the directory search order.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -38,10 +29,9 @@ impl LoaderOptions {
     ///   2. `./plugins` next to the binary's cwd, if that dir exists
     ///   3. Platform default from `directories::ProjectDirs` data dir
     ///
-    /// We don't *create* the platform dir if it's missing — letting the
-    /// directory not exist (and the loader yield zero plugins) is fine,
-    /// and creating it eagerly would litter the user's filesystem with
-    /// empty dirs on a first run that never installs a plugin.
+    /// The platform dir is NOT created if missing — letting the loader
+    /// yield zero plugins is fine; eagerly creating it would litter the
+    /// filesystem with empty dirs on first runs that never install a plugin.
     #[must_use]
     pub fn resolve(cli_override: Option<PathBuf>) -> Self {
         if let Some(p) = cli_override {
@@ -58,18 +48,14 @@ impl LoaderOptions {
     }
 }
 
-/// Platform default plugin dir. Returns `None` if `ProjectDirs` couldn't be
-/// resolved (extremely unusual).
 fn platform_plugins_dir() -> Option<PathBuf> {
     let dirs = ProjectDirs::from("", "", "high-beam")?;
     Some(dirs.data_dir().join("plugins"))
 }
 
-/// Scan `plugins/` and async-load every valid plugin we find.
-///
-/// Plugins that fail to load are skipped with a stderr message; the returned
-/// vec only contains plugins ready to handle queries. Each plugin is wrapped
-/// in `Arc` so the dispatcher can hand clones to per-plugin spawned tasks.
+/// Scan `plugins/` and async-load every valid plugin we find. Plugins that
+/// fail to load are skipped with a stderr message; the returned vec only
+/// contains plugins ready to handle queries.
 pub async fn load_all(options: &LoaderOptions) -> Vec<Arc<LoadedPlugin>> {
     let entries = match std::fs::read_dir(&options.plugins_dir) {
         Ok(e) => e,
@@ -99,7 +85,7 @@ pub async fn load_all(options: &LoaderOptions) -> Vec<Arc<LoadedPlugin>> {
                 plugins.push(Arc::new(plugin));
             }
             Err(LoadError::Skipped { name, reason }) => {
-                // INFO-level: deliberate gate, not an error condition.
+                // Deliberate gate (e.g. platform), not an error condition.
                 eprintln!("plugins: skipping {name}: {reason}");
             }
             Err(LoadError::Failed(err)) => {
@@ -115,10 +101,9 @@ async fn load_one(plugin_dir: &Path) -> Result<LoadedPlugin, LoadError> {
     let bytes = std::fs::read(&manifest_path).map_err(|err| {
         LoadError::Failed(format!("read {}: {err}", manifest_path.display()).into())
     })?;
-    // Manifest parse failures are reported to stderr rather than plugin.log:
-    // we have no per-plugin identity yet (the file is the source of truth for
-    // the name), so writing into a per-plugin file before the manifest parses
-    // would mean inventing a name — leaving stderr as the only honest channel.
+    // Manifest parse failures are reported to stderr rather than plugin.log
+    // because the manifest is the source of the plugin's name — writing into
+    // a per-plugin file before the parse succeeds would require inventing one.
     let manifest = Manifest::parse(&bytes)
         .map_err(|err| LoadError::Failed(format!("parse manifest.json: {err}").into()))?;
 
@@ -137,8 +122,7 @@ async fn load_one(plugin_dir: &Path) -> Result<LoadedPlugin, LoadError> {
         }
     }
 
-    // Gate before paying the rquickjs Context cost — that's where the expense
-    // sits, and we'd be evaluating an entry module just to discard it.
+    // Gate before paying the rquickjs Context cost.
     if !manifest.supports_current_platform() {
         let reason = manifest
             .platform_skip_reason()
@@ -193,17 +177,10 @@ mod tests {
 
     #[test]
     fn resolve_returns_a_path() {
-        // We can't assert much about the resolved path without messing with
-        // CWD, but it should always produce *some* path the loader can read.
         let opts = LoaderOptions::resolve(None);
-        // The plugins dir under our control either exists or doesn't —
-        // either way `resolve` should hand us a non-empty PathBuf.
         assert!(!opts.plugins_dir.as_os_str().is_empty());
     }
 
-    /// Build a throwaway plugin tree on disk so the loader can scan it.
-    /// We hand-roll a temp dir via `std::env::temp_dir` + nanos so the test
-    /// has zero extra deps and doesn't fight cargo's lack of `tempfile`.
     fn write_plugin(root: &Path, name: &str, manifest: &str, entry: &str) {
         let dir = root.join(name);
         std::fs::create_dir_all(&dir).unwrap();
@@ -224,8 +201,6 @@ mod tests {
     #[test]
     fn platform_gated_plugin_is_skipped_by_loader() {
         let root = fresh_tmp("gate");
-        // A "wrong-os" plugin that declares only the OTHER known platform —
-        // gating must skip it without crashing or polluting the result set.
         let other = if std::env::consts::OS == "macos" {
             "linux"
         } else {
@@ -260,9 +235,6 @@ mod tests {
             .expect("tokio rt")
             .block_on(load_all(&opts));
 
-        // The wrong-os plugin must be absent from the loaded set; the right-os
-        // plugin must be present. Anything else (panic, both present, both
-        // absent) is a regression.
         let names: Vec<_> = plugins.iter().map(|p| p.manifest.name.as_str()).collect();
         assert!(
             !names.contains(&"wrong-os"),

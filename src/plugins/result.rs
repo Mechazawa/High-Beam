@@ -1,14 +1,12 @@
 //! Result + Action types — the cross-plugin schema rendered in the window.
 //!
-//! JS plugins yield objects that the host parses via `serde` into [`Result`].
-//! The wire shape mirrors the `Action` tagged-union (`kind` discriminator)
-//! so the SDK module exports in `crate::sdk::actions` and the Rust enum stay
-//! aligned without bespoke (de)serialization code.
+//! JS plugins yield objects that the host parses via `serde` into
+//! [`PluginResult`]. The `Action` wire shape uses a `kind` discriminator so
+//! the Rust enum and the SDK `highbeam:actions` builders stay aligned without
+//! bespoke (de)serialization.
 //!
-//! `Quit` is host-only: the Core built-in is the sole producer; the
-//! `highbeam:actions` module never exposes a builder for it. Keeping it as
-//! a regular `Action` variant lets the existing dispatch + executor pipeline
-//! handle it without a parallel control path.
+//! `Quit` is host-only — only the Core built-in produces it; the
+//! `highbeam:actions` module never exposes a builder for it.
 
 use std::path::PathBuf;
 
@@ -21,10 +19,9 @@ pub struct PluginResult {
     pub title: String,
     #[serde(default)]
     pub subtitle: Option<String>,
-    /// Optional icon for the row. Plugins should populate this with a
-    /// `data:image/...;base64,...` URI — typically from
-    /// `highbeam:icons.forPath(...)`. Bare filesystem paths are treated as
-    /// missing by the renderer; resolution is the plugin's job.
+    /// Optional icon — `data:image/...;base64,...` URI. Bare filesystem paths
+    /// are treated as missing; the plugin is expected to pre-resolve via
+    /// `highbeam:icons.forPath(...)`.
     #[serde(default)]
     pub icon: Option<String>,
     #[serde(default)]
@@ -67,20 +64,19 @@ pub enum Action {
     Noop,
 }
 
-/// A result enriched with the plugin name that produced it.
-///
-/// The plugin name keys frecency and namespaces row keys so different plugins
-/// emitting the same `key` string don't collide.
+/// A result enriched with the plugin name that produced it. Two plugins
+/// emitting the same `key` string don't collide because frecency is keyed on
+/// `(plugin_name, key)`.
 #[derive(Debug, Clone)]
 pub struct RankedResult {
     pub plugin_name: String,
     pub result: PluginResult,
-    /// Insertion order across the merge, used to break ties stably.
+    /// Insertion order, used to break ties stably.
     pub order: usize,
 }
 
 impl RankedResult {
-    /// Composite key: `<plugin>:<result_key>`. Used by the UI as a row id.
+    /// `<plugin>:<result_key>` — used by the UI as a row id.
     #[must_use]
     pub fn composite_key(&self) -> String {
         format!("{}:{}", self.plugin_name, self.result.key)

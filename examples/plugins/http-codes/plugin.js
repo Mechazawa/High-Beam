@@ -1,9 +1,5 @@
-// HTTP status code lookup — port of the v2 HttpCodePlugin.
-//
-// Pinned plugin: results always show regardless of the user's full query,
-// because the trigger regex tolerates a stray space ("http", "http 4",
-// "http404"). The bundled `http.json` is loaded once on first invocation
-// and cached in-module to keep the per-keystroke budget tight.
+// HTTP status code lookup. Pinned results — the trigger tolerates "http",
+// "http 4", "http404". `http.json` is loaded once and cached in-module.
 
 import { openUrl } from "highbeam:actions";
 import { readText } from "highbeam:fs";
@@ -11,8 +7,7 @@ import { readText } from "highbeam:fs";
 const TRIGGER = /^http\s*(\d*)/i;
 const MAX_RESULTS = 9;
 
-// Resolved relative to the plugin's own directory by the host loader, so
-// every install location works without hand-edited absolute paths.
+// Resolved relative to the plugin dir by the host loader.
 const DATA_PATH = "./http.json";
 
 let codesPromise = null;
@@ -30,9 +25,8 @@ export async function* query(input, _signal) {
 
     const prefix = match[1] ?? "";
     const codes = await loadCodes();
-    // Clamp the weight so longer-than-3-digit prefixes (e.g. someone
-    // typing "http 4040") don't push above the 100 ceiling the host
-    // expects for pinned results.
+    // Clamp at 100 — the host caps pinned weight at 100, and the user can
+    // type more than 3 digits.
     const weight = Math.min(100 * (prefix.length / 3), 100);
 
     let yielded = 0;

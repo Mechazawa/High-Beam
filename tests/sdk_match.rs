@@ -1,8 +1,5 @@
-//! Behavioural tests for `highbeam:match`.
-//!
-//! The fuzzy matcher is implemented in Rust but only callable via JS, so we
-//! exercise it by loading the module into rquickjs and asserting against the
-//! returned ranking.
+//! Behavioural tests for `highbeam:match` — the fuzzy matcher is Rust but
+//! only callable via JS, so we exercise it via rquickjs.
 
 use rquickjs::loader::{Loader, Resolver};
 use rquickjs::{
@@ -36,7 +33,6 @@ fn rt() -> tokio::runtime::Runtime {
         .expect("tokio rt")
 }
 
-/// Run a tiny harness script that returns a JSON-serialisable value.
 fn run_harness(script: &str) -> serde_json::Value {
     let rt = rt();
     rt.block_on(async {
@@ -72,8 +68,6 @@ fn fuzzy_returns_matches_sorted_by_score() {
     );
     let arr = out.as_array().expect("array");
     assert!(!arr.is_empty(), "got nothing for 'cal'");
-    // Both Calculator and Calendar match; the matcher should pick them ahead
-    // of unrelated items like Mail/Maps.
     let titles: Vec<String> = arr
         .iter()
         .map(|m| m["item"].as_str().unwrap().to_owned())
@@ -105,8 +99,6 @@ fn fuzzy_respects_threshold_option() {
         ",
     );
     let arr = out.as_array().expect("array");
-    // With threshold near 1.0 we expect zero results because no item matches
-    // perfectly enough.
     assert!(
         arr.is_empty(),
         "threshold should have filtered everything, got {arr:?}"

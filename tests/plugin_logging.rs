@@ -1,9 +1,9 @@
-//! End-to-end tests for Stage 10: per-plugin logging.
+//! End-to-end tests for per-plugin logging.
 //!
 //! Each scenario builds a throwaway plugin on disk, loads it through the real
 //! runtime (so the JS `console` binding, the timeout interrupt hook, and the
-//! capability gate all fire for real), and reads `plugin.log` back from disk
-//! to assert what the user would see when diagnosing a misbehaving plugin.
+//! capability gate all fire), and reads `plugin.log` back from disk to assert
+//! what the user would see when diagnosing a misbehaving plugin.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -46,13 +46,9 @@ fn read_log(dir: &Path) -> String {
     fs::read_to_string(dir.join("plugin.log")).unwrap_or_default()
 }
 
-/// Format invariants every log line must satisfy. Used as a one-liner so each
-/// test that asserts on a log can also confirm we're producing the expected
-/// shape, not just substring-matching against gibberish.
-///
-/// Lines come in two shapes:
-///   * leading lines — `[timestamp] [LEVEL] body`
-///   * continuation lines — start with four spaces; carry no level/timestamp.
+/// Confirm we're producing well-formed log lines, not just substring-matching
+/// gibberish. Two shapes: leading `[timestamp] [LEVEL] body`, continuation
+/// lines indented four spaces.
 fn assert_well_formed_lines(body: &str) {
     for line in body.lines() {
         if line.starts_with("    ") || line.is_empty() {
@@ -126,9 +122,8 @@ export async function* query(input, _signal) {
         let plugin = LoadedPlugin::load(&dir, manifest).await.expect("load");
         let mut rx = plugin.run_query_stream("oops", CancellationToken::new());
         drain(&mut rx).await;
-        // Logging happens on the spawn-task; give it a tick to flush before
-        // we read the file. Without this the assert occasionally races the
-        // background task's final `log.write`.
+        // Outcome logging runs on a spawn task; give it a tick to flush
+        // before we read the file or we race the final `log.write`.
         tokio::time::sleep(Duration::from_millis(50)).await;
     });
 
@@ -146,9 +141,8 @@ fn timeout_is_logged_at_warn() {
     let dir = unique_tmp_dir("timeout");
     write_plugin(
         &dir,
-        // 50ms budget; the plugin awaits a setTimeout well past it. The host
-        // timer task cancels the in-flight query, and the runtime classifies
-        // the resulting outcome as a timeout because `timed_out` is set.
+        // 50ms budget vs setTimeout(1000) — the host timer task cancels and
+        // the outcome logger classifies as Timeout via `timed_out`.
         r#"{"name":"slowpoke","entry":"plugin.js","timeoutMs":50,"capabilities":[]}"#,
         r#"
 export async function* query(_input, _signal) {
@@ -179,8 +173,8 @@ export async function* query(_input, _signal) {
 
 #[test]
 fn capability_violation_at_load_writes_to_plugin_log() {
-    // Plugin imports `highbeam:http` without declaring `http` capability. The
-    // loader must reject it AND write the failure into the plugin's own log.
+    // Plugin imports `highbeam:http` without declaring `http`. The loader
+    // must reject AND write the failure into plugin.log so users can debug.
     let dir = unique_tmp_dir("capviolation");
     write_plugin(
         &dir,
@@ -194,9 +188,8 @@ export async function* query(input, _signal) {
 "#,
     );
 
-    // The loader scans a *parent* directory and treats each child as a plugin
-    // dir; to isolate this test from siblings we re-home the bad plugin under
-    // its own scratch parent and point the loader at that.
+    // The loader scans a parent and treats each child as a plugin dir;
+    // re-home the bad plugin under a scratch parent so siblings can't bleed in.
     let scratch_parent = unique_tmp_dir("cap-parent");
     let plugin_dir = scratch_parent.join("capviolation");
     fs::create_dir_all(&plugin_dir).expect("mk plugin dir");
