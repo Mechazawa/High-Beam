@@ -1,0 +1,32 @@
+[
+  {
+    "prefix": "gh",
+    "template": "https://github.com/{}",
+    "description": "GitHub repository or user"
+  },
+  {
+    "prefix": "npm",
+    "template": "https://www.npmjs.com/package/{}",
+    "description": "npm package"
+  },
+  {
+    "prefix": "mdn",
+    "template": "https://developer.mozilla.org/en-US/search?q={}",
+    "description": "MDN docs search"
+  },
+  {
+    "prefix": "crate",
+    "template": "https://crates.io/crates/{}",
+    "description": "crates.io crate"
+  },
+  {
+    "prefix": "docs",
+    "template": "https://docs.rs/{}",
+    "description": "docs.rs"
+  },
+  {
+    "prefix": "rfc",
+    "template": "https://www.rfc-editor.org/rfc/rfc{}.html",
+    "description": "IETF RFC by number"
+  }
+]
