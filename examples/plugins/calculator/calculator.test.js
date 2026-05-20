@@ -103,4 +103,57 @@ describe('calculator plugin', () => {
         const [b] = await run(' 1+1 ');
         expect(a.key).toBe(b.key);
     });
+
+    test('= prefix forces a result on clean evaluation', async () => {
+        const [r, ...rest] = await run('=1+1');
+        expect(rest).toEqual([]);
+        expect(r.title).toBe('2');
+        expect(r.subtitle).toBe('1+1');
+        expect(r.pinned).toBe(true);
+        expect(r.action.kind).toBe('copy');
+        expect(r.action.text).toBe('2');
+    });
+
+    test('= alone yields a syntax-error row labelled empty expression', async () => {
+        const [r, ...rest] = await run('=');
+        expect(rest).toEqual([]);
+        expect(r.title).toBe('Syntax error');
+        expect(r.subtitle).toBe('empty expression');
+        expect(r.pinned).toBe(true);
+        expect(r.action.kind).toBe('copy');
+        // Enter copies what they typed so the keystroke isn't lost.
+        expect(r.action.text).toBe('=');
+    });
+
+    test('=10/0 yields a syntax-error row labelled divide by zero or overflow', async () => {
+        const [r, ...rest] = await run('=10/0');
+        expect(rest).toEqual([]);
+        expect(r.title).toBe('Syntax error');
+        expect(r.subtitle).toBe('divide by zero or overflow');
+        expect(r.pinned).toBe(true);
+        expect(r.action.text).toBe('=10/0');
+    });
+
+    test('= prefix on garbled input yields a syntax-error row', async () => {
+        const [r, ...rest] = await run('=oops syntax');
+        expect(rest).toEqual([]);
+        expect(r.title).toBe('Syntax error');
+        expect(typeof r.subtitle).toBe('string');
+        expect(r.subtitle.length).toBeGreaterThan(0);
+        expect(r.pinned).toBe(true);
+        expect(r.action.text).toBe('=oops syntax');
+    });
+
+    test('no prefix keeps clean evaluation unchanged', async () => {
+        const [r, ...rest] = await run('1+1');
+        expect(rest).toEqual([]);
+        expect(r.title).toBe('2');
+        // The bare form must not gain a subtitle — that would shift the layout
+        // of every successful calc row across the launcher.
+        expect(r.subtitle).toBeUndefined();
+    });
+
+    test('no prefix stays silent on garbled input', async () => {
+        expect(await run('oops syntax')).toEqual([]);
+    });
 });
