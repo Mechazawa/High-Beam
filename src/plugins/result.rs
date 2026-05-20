@@ -59,6 +59,11 @@ pub enum Action {
     /// boundary, only produced by built-in plugins.
     #[serde(rename = "quit")]
     Quit,
+    /// Open the settings view in place of the launcher view. Host-only —
+    /// produced by the Core `settings` verb; the JS `highbeam:actions`
+    /// module deliberately doesn't expose a builder for it.
+    #[serde(rename = "openSettings")]
+    OpenSettings,
     /// A no-op result that just sits in the list (e.g. version readout).
     #[serde(rename = "noop")]
     Noop,

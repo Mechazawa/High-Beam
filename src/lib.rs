@@ -11,6 +11,7 @@ pub mod paths;
 pub mod plugins;
 pub mod sdk;
 pub mod settings;
+pub mod settings_ui;
 pub mod theme;
 pub mod ui;
 pub mod window;

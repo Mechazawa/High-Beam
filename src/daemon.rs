@@ -13,6 +13,9 @@ use crate::app;
 use crate::bundle_install;
 use crate::ipc::{Command, Server};
 use crate::logging;
+use crate::plugins::loader::{self, LoaderOptions};
+use crate::settings::Settings;
+use crate::settings_ui::SettingsController;
 use crate::theme::Theme;
 use crate::window;
 
@@ -58,6 +61,16 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     let window = QueryWindow::new()?;
     window::configure(&window);
     window::apply_theme(&window, &Theme::load_or_default());
+
+    // Wire the settings view. We scan manifests synchronously here (cheap —
+    // just reads `manifest.json` from each plugin dir) so the controller can
+    // render rows for every plugin including disabled ones; the runtime
+    // thread re-scans through `loader::load_all` for the JS load path.
+    let loader_opts = LoaderOptions::resolve(options.plugins_dir.clone());
+    let manifests = loader::scan_manifests(&loader_opts);
+    let settings_for_ui = Settings::load_or_default();
+    let settings_controller = SettingsController::new(manifests, settings_for_ui);
+    settings_controller.wire(&window);
 
     // Keep the host alive for the daemon's lifetime; `Drop` sends Shutdown.
     let _plugin_host = app::start(&window, options.plugins_dir.clone())?;

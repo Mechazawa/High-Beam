@@ -54,6 +54,34 @@ fn platform_plugins_dir() -> Option<PathBuf> {
     Some(dirs.data_dir().join("plugins"))
 }
 
+/// Cheap synchronous scan of `plugins_dir` returning every well-formed
+/// manifest. Used by the settings UI, which wants to render an option row
+/// per plugin regardless of whether each one currently loads — disabled and
+/// platform-gated plugins still appear in settings so the user can flip
+/// the toggle.
+#[must_use]
+pub fn scan_manifests(options: &LoaderOptions) -> Vec<Manifest> {
+    let Ok(entries) = std::fs::read_dir(&options.plugins_dir) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let manifest_path = path.join("manifest.json");
+        let Ok(bytes) = std::fs::read(&manifest_path) else {
+            continue;
+        };
+        if let Ok(manifest) = Manifest::parse(&bytes) {
+            out.push(manifest);
+        }
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
+}
+
 /// Scan `plugins/` and async-load every valid plugin we find. Plugins that
 /// fail to load are skipped with a stderr message; the returned vec only
 /// contains plugins ready to handle queries.

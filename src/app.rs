@@ -191,16 +191,27 @@ fn invoke_selected(
     let result_key = picked.result.key.clone();
     drop(snapshot);
     match actions::execute(&action) {
-        Ok(()) => {
+        Ok(outcome) => {
             if let Some(db) = frecency_db {
                 spawn_pick_bump(db, plugin_name, result_key);
+            }
+            match outcome {
+                actions::ActionOutcome::HideWindow => window::hide(&w),
+                actions::ActionOutcome::OpenSettingsView => {
+                    // Clear the input so the window doesn't briefly re-show
+                    // a stale `settings` query the next time the launcher
+                    // view comes up.
+                    w.invoke_clear_input();
+                    w.invoke_show_settings();
+                }
+                actions::ActionOutcome::KeepOpen => {}
             }
         }
         Err(err) => {
             tracing::error!(plugin = %plugin_name, %err, "plugins: action failed");
+            window::hide(&w);
         }
     }
-    window::hide(&w);
 }
 
 /// Open the frecency DB at the platform default path. Returns `None` on

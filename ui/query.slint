@@ -1,6 +1,11 @@
-// Query input + result rows. The single source of truth for what's displayed
-// sits on the Rust side; Slint-side state is just `query-text`, `results`,
-// and `selected-index`.
+// Query input + result rows + settings view. The single source of truth for
+// what's displayed sits on the Rust side; Slint-side state is just
+// `query-text`, `results`, `selected-index`, and `current-view`.
+//
+// The window switches between two views: the launcher (`current-view ==
+// VIEW-QUERY`) and the settings screen (`current-view == VIEW-SETTINGS`).
+// Cmd+, opens settings from the launcher; Esc returns to the launcher (or
+// hides if already on the launcher).
 //
 // Colors and dimensions exposed as `in-out` tokens at the top of `QueryWindow`.
 // Defaults match the bundled yosemite-spotlight theme so a theme-free run is
@@ -24,6 +29,33 @@ export struct ResultRow {
     has-icon: bool,
 }
 
+// One plugin slot in the settings sidebar.
+export struct PluginSlot {
+    name: string,
+    display-name: string,    // falls back to `name` when empty
+    enabled: bool,
+}
+
+// One option input in the settings detail pane. Option `kind` is one of:
+//   "string" | "bool" | "int" | "enum"
+// `value-*` columns are all populated; the matching one for `kind` is the
+// truth. `choices` is a CSV of enum choices (Slint structs can't carry
+// `[string]` directly without naming a model type).
+export struct PluginOption {
+    plugin-name: string,
+    key: string,
+    label: string,
+    kind: string,
+    value-string: string,
+    value-bool: bool,
+    value-int: int,
+    int-min: int,
+    int-max: int,
+    has-int-min: bool,
+    has-int-max: bool,
+    enum-choices: string,
+}
+
 export component QueryWindow inherits Window {
     title: "High Beam";
     no-frame: true;
@@ -36,6 +68,16 @@ export component QueryWindow inherits Window {
     in-out property <[ResultRow]> results: [];
     in-out property <int> selected-index: 0;
     in-out property <int> max-rows: 9;
+
+    // View state. 0 = launcher (query), 1 = settings.
+    property <int> VIEW-QUERY: 0;
+    property <int> VIEW-SETTINGS: 1;
+    in-out property <int> current-view: 0;
+
+    // Settings view state.
+    in-out property <[PluginSlot]> plugin-slots: [];
+    in-out property <int> selected-plugin-index: 0;
+    in-out property <[PluginOption]> plugin-options: [];
 
     // Theme tokens. Defaults reproduce the bundled yosemite-spotlight theme so
     // a missing theme.toml is byte-identical to the pre-theming build.
@@ -60,6 +102,16 @@ export component QueryWindow inherits Window {
     // looks up the corresponding result and runs its action.
     callback invoke-selected();
 
+    // Settings-related callbacks. Rust persists state, then pushes the
+    // re-rendered slots/options back through the `in-out` properties.
+    callback open-settings();
+    callback close-settings();
+    callback select-plugin(int);
+    callback toggle-plugin(string, bool);
+    callback set-option-string(string, string, string);
+    callback set-option-bool(string, string, bool);
+    callback set-option-int(string, string, int);
+
     // forward-focus makes the input the focus target whenever the window
     // itself is focused. Combined with the explicit `input.focus()` call in
     // `focus-input()` (invoked from Rust after each show), this ensures the
@@ -83,14 +135,31 @@ export component QueryWindow inherits Window {
         root.selected-index = 0;
     }
 
+    // Switch between launcher and settings views. Public so Rust can invoke
+    // (from the Core `settings` verb action).
+    public function show-settings() {
+        root.current-view = root.VIEW-SETTINGS;
+        root.open-settings();
+        settings-focus.focus();
+    }
+    public function show-query() {
+        root.current-view = root.VIEW-QUERY;
+        input.focus();
+    }
+
     // Derived: how tall the rows area should be. Each row is ~52px (padding
     // included). 9 rows max keeps the window from swallowing the whole screen.
     property <int> visible-row-count: min(results.length, max-rows);
     property <length> rows-height: visible-row-count * 56px;
     property <length> input-height: 80px;
+    // Settings view geometry: wider + taller than the launcher so the plugin
+    // list and option inputs both have breathing room.
+    property <length> settings-height: 480px;
 
     width: root.window-width;
-    height: input-height + (results.length > 0 ? rows-height + 1px : 0);
+    height: root.current-view == root.VIEW-SETTINGS
+        ? settings-height
+        : input-height + (results.length > 0 ? rows-height + 1px : 0);
 
     // Translucent rounded panel sits inside a transparent window so the corner
     // radius reads cleanly on the desktop.
@@ -100,7 +169,13 @@ export component QueryWindow inherits Window {
         border-width: 1px;
         border-color: root.border-color;
 
-        VerticalLayout {
+        // ---- Launcher view ----
+        // Visible-toggle (rather than `if`) keeps the `input` id in scope for
+        // `focus-input()` / `clear-input()` regardless of which view is up,
+        // which Slint requires because element ids only exist when the
+        // element itself is instantiated.
+        launcher-view := VerticalLayout {
+            visible: root.current-view == root.VIEW-QUERY;
             // Input area
             Rectangle {
                 height: input-height;
@@ -125,6 +200,14 @@ export component QueryWindow inherits Window {
                     }
 
                     key-pressed(event) => {
+                        // Cmd+, (macOS) / Ctrl+, (Linux) opens the settings
+                        // view. Slint's event.modifiers struct surfaces both
+                        // — checking either lets the same binding work on
+                        // both platforms without #[cfg].
+                        if (event.text == "," && (event.modifiers.meta || event.modifiers.control)) {
+                            root.show-settings();
+                            return accept;
+                        }
                         if (event.text == Key.Escape) {
                             root.escape-pressed();
                             return accept;
@@ -235,6 +318,265 @@ export component QueryWindow inherits Window {
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // ---- Settings view ----
+        settings-view := VerticalLayout {
+            visible: root.current-view == root.VIEW-SETTINGS;
+            // Header bar.
+            Rectangle {
+                height: 48px;
+                background: transparent;
+                HorizontalLayout {
+                    padding-left: 20px;
+                    padding-right: 20px;
+                    padding-top: 12px;
+                    padding-bottom: 12px;
+                    spacing: 12px;
+                    alignment: space-between;
+
+                    Text {
+                        text: "Settings";
+                        color: root.foreground-color;
+                        font-size: 18px;
+                        vertical-alignment: center;
+                    }
+
+                    TouchArea {
+                        width: 80px;
+                        height: 24px;
+                        clicked => { root.close-settings(); root.show-query(); }
+                        Rectangle {
+                            background: root.selection-color;
+                            border-radius: 6px;
+                            Text {
+                                text: "Done (Esc)";
+                                color: root.foreground-color;
+                                font-size: root.font-size-subtitle;
+                                vertical-alignment: center;
+                                horizontal-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                height: 1px;
+                background: root.border-color;
+            }
+
+            // Body: split into left rail (plugin list) + right pane (options).
+            HorizontalLayout {
+                spacing: 0px;
+
+                // Left rail — plugin list with enable toggles.
+                Rectangle {
+                    width: 260px;
+                    background: transparent;
+                    border-color: root.border-color;
+                    ScrollView {
+                        VerticalLayout {
+                            spacing: 0px;
+                            for slot[i] in plugin-slots: TouchArea {
+                                height: 44px;
+                                clicked => {
+                                    root.selected-plugin-index = i;
+                                    root.select-plugin(i);
+                                }
+                                Rectangle {
+                                    background: i == root.selected-plugin-index ? root.selection-color : transparent;
+                                    HorizontalLayout {
+                                        padding-left: 16px;
+                                        padding-right: 12px;
+                                        padding-top: 6px;
+                                        padding-bottom: 6px;
+                                        spacing: 8px;
+                                        alignment: space-between;
+                                        VerticalLayout {
+                                            alignment: center;
+                                            Text {
+                                                text: slot.display-name == "" ? slot.name : slot.display-name;
+                                                color: root.foreground-color;
+                                                font-size: root.font-size-title;
+                                                overflow: elide;
+                                            }
+                                        }
+                                        // Tiny enable/disable toggle: just a checkbox-style square.
+                                        TouchArea {
+                                            width: 44px;
+                                            height: 22px;
+                                            clicked => {
+                                                root.toggle-plugin(slot.name, !slot.enabled);
+                                            }
+                                            Rectangle {
+                                                background: slot.enabled ? root.highlight-color : root.muted-color.with-alpha(0.3);
+                                                border-radius: 11px;
+                                                Rectangle {
+                                                    x: slot.enabled ? parent.width - self.width - 2px : 2px;
+                                                    y: (parent.height - self.height) / 2;
+                                                    width: 18px;
+                                                    height: 18px;
+                                                    background: white;
+                                                    border-radius: 9px;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Vertical divider.
+                Rectangle {
+                    width: 1px;
+                    background: root.border-color;
+                }
+
+                // Right pane — options for the selected plugin.
+                Rectangle {
+                    background: transparent;
+                    ScrollView {
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 12px;
+                            // Selected-plugin header.
+                            if plugin-slots.length > 0 && root.selected-plugin-index < plugin-slots.length: Text {
+                                text: plugin-slots[root.selected-plugin-index].display-name == ""
+                                    ? plugin-slots[root.selected-plugin-index].name
+                                    : plugin-slots[root.selected-plugin-index].display-name;
+                                color: root.foreground-color;
+                                font-size: 16px;
+                            }
+
+                            if plugin-options.length == 0: Text {
+                                text: "This plugin has no configurable options.";
+                                color: root.muted-color;
+                                font-size: root.font-size-subtitle;
+                            }
+
+                            for opt in plugin-options: Rectangle {
+                                height: 56px;
+                                background: transparent;
+                                VerticalLayout {
+                                    spacing: 4px;
+                                    Text {
+                                        text: opt.label;
+                                        color: root.foreground-color;
+                                        font-size: root.font-size-title;
+                                    }
+
+                                    if opt.kind == "string": Rectangle {
+                                        height: 28px;
+                                        background: root.muted-color.with-alpha(0.08);
+                                        border-radius: 4px;
+                                        border-width: 1px;
+                                        border-color: root.border-color;
+                                        opt-string-input := TextInput {
+                                            x: 8px;
+                                            y: 0;
+                                            width: parent.width - 16px;
+                                            height: parent.height;
+                                            font-size: root.font-size-title;
+                                            color: root.foreground-color;
+                                            single-line: true;
+                                            vertical-alignment: center;
+                                            text: opt.value-string;
+                                            edited => {
+                                                root.set-option-string(opt.plugin-name, opt.key, self.text);
+                                            }
+                                        }
+                                    }
+
+                                    if opt.kind == "bool": TouchArea {
+                                        width: 44px;
+                                        height: 22px;
+                                        clicked => {
+                                            root.set-option-bool(opt.plugin-name, opt.key, !opt.value-bool);
+                                        }
+                                        Rectangle {
+                                            background: opt.value-bool ? root.highlight-color : root.muted-color.with-alpha(0.3);
+                                            border-radius: 11px;
+                                            Rectangle {
+                                                x: opt.value-bool ? parent.width - self.width - 2px : 2px;
+                                                y: (parent.height - self.height) / 2;
+                                                width: 18px;
+                                                height: 18px;
+                                                background: white;
+                                                border-radius: 9px;
+                                            }
+                                        }
+                                    }
+
+                                    if opt.kind == "int": Rectangle {
+                                        height: 28px;
+                                        background: root.muted-color.with-alpha(0.08);
+                                        border-radius: 4px;
+                                        border-width: 1px;
+                                        border-color: root.border-color;
+                                        opt-int-input := TextInput {
+                                            x: 8px;
+                                            y: 0;
+                                            width: parent.width - 16px;
+                                            height: parent.height;
+                                            font-size: root.font-size-title;
+                                            color: root.foreground-color;
+                                            single-line: true;
+                                            input-type: number;
+                                            vertical-alignment: center;
+                                            text: opt.value-int;
+                                            edited => {
+                                                // Slint doesn't surface parsed int — pass the text
+                                                // through and let Rust validate / clamp.
+                                                root.set-option-string(opt.plugin-name, opt.key, self.text);
+                                            }
+                                        }
+                                    }
+
+                                    if opt.kind == "enum": Rectangle {
+                                        height: 28px;
+                                        background: root.muted-color.with-alpha(0.08);
+                                        border-radius: 4px;
+                                        border-width: 1px;
+                                        border-color: root.border-color;
+                                        // Minimal "cycle through choices on click" v1 — proper
+                                        // dropdowns belong to a later iteration. Choices are
+                                        // CSV so we don't need a per-option model.
+                                        TouchArea {
+                                            clicked => {
+                                                root.set-option-string(opt.plugin-name, opt.key, opt.enum-choices);
+                                            }
+                                            Text {
+                                                x: 8px;
+                                                text: opt.value-string + "  (click to cycle: " + opt.enum-choices + ")";
+                                                color: root.foreground-color;
+                                                font-size: root.font-size-subtitle;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Hidden focus catcher so Esc works in the settings view.
+            settings-focus := FocusScope {
+                width: 0px;
+                height: 0px;
+                key-pressed(event) => {
+                    if (event.text == Key.Escape) {
+                        root.close-settings();
+                        root.show-query();
+                        return accept;
+                    }
+                    reject
                 }
             }
         }

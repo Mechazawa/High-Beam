@@ -6,5 +6,21 @@
   "debounceMs": 50,
   "timeoutMs": 100,
   "memoryMb": 16,
-  "capabilities": ["actions", "fs.read"]
+  "capabilities": ["actions", "fs.read"],
+  "options": [
+    {
+      "key": "github_username",
+      "type": "string",
+      "label": "GitHub username (for bare `gh repo` lookups)",
+      "default": ""
+    },
+    {
+      "key": "result_limit",
+      "type": "int",
+      "label": "Max results per prefix",
+      "default": 10,
+      "min": 1,
+      "max": 50
+    }
+  ]
 }

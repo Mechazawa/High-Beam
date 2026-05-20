@@ -25,6 +25,11 @@ fn keywords() -> Vec<Keyword> {
             make_action: || Action::Quit,
         },
         Keyword {
+            label: "settings",
+            subtitle: Some("open the High Beam settings screen"),
+            make_action: || Action::OpenSettings,
+        },
+        Keyword {
             label: "shutdown",
             subtitle: Some("shut down this computer"),
             make_action: shutdown_action,
@@ -342,6 +347,25 @@ mod tests {
         #[allow(clippy::cast_precision_loss)]
         let expected = (2.0 / "shutdown".len() as f64) * 100.0;
         assert!((shutdown.result.weight - expected).abs() < 1e-6);
+    }
+
+    #[test]
+    fn settings_verb_produces_open_settings_action() {
+        let results = query("settings");
+        let r = results
+            .iter()
+            .find(|r| r.result.title == "settings")
+            .expect("settings result");
+        assert!(matches!(r.result.action, Action::OpenSettings));
+    }
+
+    #[test]
+    fn settings_verb_matches_prefix() {
+        let results = query("sett");
+        assert!(
+            results.iter().any(|r| r.result.title == "settings"),
+            "expected settings result for prefix 'sett', got {results:?}",
+        );
     }
 
     #[test]

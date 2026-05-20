@@ -1,0 +1,414 @@
+//! Settings-view controller: turns plugin manifests + persisted `Settings`
+//! into the Slint models the settings view renders, and the inverse —
+//! callbacks from the view feed back into a `Mutex<Settings>` that owns
+//! disk persistence.
+//!
+//! Lives in its own module so `app.rs` stays focused on the launcher
+//! pipeline; the settings view talks to the same `QueryWindow` but its
+//! state is independent of the query/results state.
+
+use std::sync::{Arc, Mutex};
+
+use serde_json::Value as JsonValue;
+use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+
+use crate::QueryWindow;
+use crate::plugins::manifest::{Manifest, OptionDef, OptionKind};
+use crate::settings::Settings;
+use crate::ui::{PluginOption, PluginSlot};
+
+/// Shared state for the settings view. Cloned into every callback closure;
+/// internally `Arc`-wrapped so writes from the UI thread land in one place.
+#[derive(Clone)]
+pub struct SettingsController {
+    inner: Arc<Inner>,
+}
+
+struct Inner {
+    /// All manifests we found in the plugins dir. The settings view shows
+    /// every entry — even ones the runtime didn't load (because the user
+    /// disabled them) — so toggling the switch can re-enable them.
+    manifests: Vec<Manifest>,
+    /// Persisted state. Mutex because multiple callbacks (toggle, set
+    /// option) can fire from different Slint events; no concurrent writes
+    /// in practice but the borrow checker doesn't care.
+    settings: Mutex<Settings>,
+}
+
+impl SettingsController {
+    /// Build a controller from the manifest scan + initial loaded settings.
+    #[must_use]
+    pub fn new(manifests: Vec<Manifest>, settings: Settings) -> Self {
+        Self {
+            inner: Arc::new(Inner {
+                manifests,
+                settings: Mutex::new(settings),
+            }),
+        }
+    }
+
+    /// Wire every settings callback on the given window. Idempotent; call
+    /// once per window. The controller is held by both the closures and by
+    /// the caller (it owns no Slint state of its own).
+    pub fn wire(&self, window: &QueryWindow) {
+        // Initial render so the user sees populated UI the first time they
+        // open settings rather than empty placeholders.
+        self.refresh_slots(window);
+
+        let ctrl = self.clone();
+        let weak = window.as_weak();
+        window.on_open_settings(move || {
+            if let Some(w) = weak.upgrade() {
+                ctrl.refresh_slots(&w);
+                ctrl.refresh_options(&w);
+            }
+        });
+
+        let ctrl = self.clone();
+        let weak = window.as_weak();
+        window.on_close_settings(move || {
+            // Persist on close — the toggle/set callbacks also persist, but
+            // close acts as a final commit point if anything fell through.
+            if let Some(w) = weak.upgrade() {
+                let _ = ctrl.persist();
+                w.set_current_view(0);
+            }
+        });
+
+        let ctrl = self.clone();
+        let weak = window.as_weak();
+        window.on_select_plugin(move |idx| {
+            if let Some(w) = weak.upgrade() {
+                w.set_selected_plugin_index(idx);
+                ctrl.refresh_options(&w);
+            }
+        });
+
+        let ctrl = self.clone();
+        let weak = window.as_weak();
+        window.on_toggle_plugin(move |name, enabled| {
+            ctrl.set_enabled(&name, enabled);
+            if let Some(w) = weak.upgrade() {
+                ctrl.refresh_slots(&w);
+            }
+        });
+
+        let ctrl = self.clone();
+        let weak = window.as_weak();
+        window.on_set_option_string(move |plugin, key, value| {
+            ctrl.set_option_for_kind(&plugin, &key, value.as_str());
+            if let Some(w) = weak.upgrade() {
+                ctrl.refresh_options(&w);
+            }
+        });
+
+        let ctrl = self.clone();
+        let weak = window.as_weak();
+        window.on_set_option_bool(move |plugin, key, value| {
+            ctrl.set_option(&plugin, key.as_str(), JsonValue::Bool(value));
+            if let Some(w) = weak.upgrade() {
+                ctrl.refresh_options(&w);
+            }
+        });
+
+        let ctrl = self.clone();
+        let weak = window.as_weak();
+        window.on_set_option_int(move |plugin, key, value| {
+            ctrl.set_option(
+                &plugin,
+                key.as_str(),
+                JsonValue::Number(i64::from(value).into()),
+            );
+            if let Some(w) = weak.upgrade() {
+                ctrl.refresh_options(&w);
+            }
+        });
+    }
+
+    fn refresh_slots(&self, window: &QueryWindow) {
+        let settings = self.inner.settings.lock().expect("settings lock");
+        let slots: Vec<PluginSlot> = self
+            .inner
+            .manifests
+            .iter()
+            .map(|m| PluginSlot {
+                name: SharedString::from(m.name.as_str()),
+                display_name: SharedString::from(m.display_name.as_deref().unwrap_or("")),
+                enabled: settings.is_plugin_enabled(&m.name),
+            })
+            .collect();
+        window.set_plugin_slots(ModelRc::new(VecModel::from(slots)));
+    }
+
+    fn refresh_options(&self, window: &QueryWindow) {
+        let idx = usize::try_from(window.get_selected_plugin_index().max(0)).unwrap_or(0);
+        let Some(manifest) = self.inner.manifests.get(idx) else {
+            window.set_plugin_options(ModelRc::new(VecModel::from(Vec::<PluginOption>::new())));
+            return;
+        };
+        let defs = manifest.parsed_options().defs;
+        let settings = self.inner.settings.lock().expect("settings lock");
+        let user_opts = settings.plugin_options(&manifest.name);
+        let options: Vec<PluginOption> = defs
+            .iter()
+            .map(|def| option_row(&manifest.name, def, &user_opts))
+            .collect();
+        window.set_plugin_options(ModelRc::new(VecModel::from(options)));
+    }
+
+    fn set_enabled(&self, plugin: &str, enabled: bool) {
+        {
+            let mut settings = self.inner.settings.lock().expect("settings lock");
+            settings.set_plugin_enabled(plugin, enabled);
+        }
+        if let Err(err) = self.persist() {
+            tracing::warn!(plugin, %err, "settings: persist after toggle failed");
+        }
+    }
+
+    fn set_option(&self, plugin: &str, key: &str, value: JsonValue) {
+        {
+            let mut settings = self.inner.settings.lock().expect("settings lock");
+            settings.set_plugin_option(plugin, key, value);
+        }
+        if let Err(err) = self.persist() {
+            tracing::warn!(plugin, key, %err, "settings: persist after option-set failed");
+        }
+    }
+
+    /// String callback handles two kinds: actual `string` options (pass
+    /// through), and `int`/`enum` options where Slint hands us text we have
+    /// to interpret. Looking the def up keeps each call type-correct.
+    fn set_option_for_kind(&self, plugin: &str, key: &str, raw: &str) {
+        let Some(manifest) = self.inner.manifests.iter().find(|m| m.name == plugin) else {
+            return;
+        };
+        let Some(def) = manifest
+            .parsed_options()
+            .defs
+            .into_iter()
+            .find(|d| d.key == key)
+        else {
+            return;
+        };
+        let value = match def.kind {
+            OptionKind::Int { min, max, .. } => {
+                let Ok(parsed) = raw.trim().parse::<i64>() else {
+                    return;
+                };
+                let clamped = clamp_int(parsed, min, max);
+                JsonValue::Number(clamped.into())
+            }
+            // For enums, the Slint-side cycles by re-emitting the CSV of
+            // choices; we pick the next one after the current value.
+            OptionKind::Enum { default, choices } => {
+                let current = {
+                    let settings = self.inner.settings.lock().expect("settings lock");
+                    settings
+                        .plugin_options(plugin)
+                        .get(key)
+                        .and_then(|v| v.as_str().map(str::to_owned))
+                        .unwrap_or(default)
+                };
+                let next = next_choice(&current, &choices);
+                JsonValue::String(next)
+            }
+            // Bool flows through `set_option_bool` in practice; if Slint
+            // ever routes through the string callback we still want the
+            // literal raw string preserved (same as the `String` case).
+            OptionKind::String { .. } | OptionKind::Bool { .. } => {
+                JsonValue::String(raw.to_owned())
+            }
+        };
+        self.set_option(plugin, key, value);
+    }
+
+    fn persist(&self) -> std::io::Result<()> {
+        let settings = self.inner.settings.lock().expect("settings lock");
+        settings.save()
+    }
+}
+
+fn option_row(
+    plugin_name: &str,
+    def: &OptionDef,
+    user_opts: &std::collections::HashMap<String, JsonValue>,
+) -> PluginOption {
+    let value = user_opts
+        .get(&def.key)
+        .cloned()
+        .unwrap_or_else(|| def.default_json());
+
+    let (kind, value_string, value_bool, value_int, int_min, int_max, has_min, has_max, choices) =
+        match &def.kind {
+            OptionKind::String { .. } => (
+                "string",
+                value.as_str().unwrap_or_default().to_owned(),
+                false,
+                0_i32,
+                0_i32,
+                0_i32,
+                false,
+                false,
+                String::new(),
+            ),
+            OptionKind::Bool { .. } => (
+                "bool",
+                String::new(),
+                value.as_bool().unwrap_or(false),
+                0,
+                0,
+                0,
+                false,
+                false,
+                String::new(),
+            ),
+            OptionKind::Int { min, max, .. } => {
+                let raw = value.as_i64().unwrap_or(0);
+                (
+                    "int",
+                    raw.to_string(),
+                    false,
+                    i32::try_from(raw).unwrap_or(0),
+                    min.and_then(|m| i32::try_from(m).ok()).unwrap_or(0),
+                    max.and_then(|m| i32::try_from(m).ok()).unwrap_or(0),
+                    min.is_some(),
+                    max.is_some(),
+                    String::new(),
+                )
+            }
+            OptionKind::Enum { choices, .. } => (
+                "enum",
+                value.as_str().unwrap_or_default().to_owned(),
+                false,
+                0,
+                0,
+                0,
+                false,
+                false,
+                choices.join(","),
+            ),
+        };
+
+    PluginOption {
+        plugin_name: SharedString::from(plugin_name),
+        key: SharedString::from(def.key.as_str()),
+        label: SharedString::from(def.label.as_str()),
+        kind: SharedString::from(kind),
+        value_string: SharedString::from(value_string),
+        value_bool,
+        value_int,
+        int_min,
+        int_max,
+        has_int_min: has_min,
+        has_int_max: has_max,
+        enum_choices: SharedString::from(choices),
+    }
+}
+
+fn clamp_int(v: i64, min: Option<i64>, max: Option<i64>) -> i64 {
+    let mut out = v;
+    if let Some(lo) = min {
+        out = out.max(lo);
+    }
+    if let Some(hi) = max {
+        out = out.min(hi);
+    }
+    out
+}
+
+/// Return the choice immediately after `current` in `choices`, wrapping
+/// around at the end. Used to implement the v1 "click-to-cycle" enum widget;
+/// proper dropdowns are post-v1.
+fn next_choice(current: &str, choices: &[String]) -> String {
+    let idx = choices.iter().position(|c| c == current).unwrap_or(0);
+    let next = (idx + 1) % choices.len().max(1);
+    choices
+        .get(next)
+        .cloned()
+        .unwrap_or_else(|| current.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clamp_int_respects_both_bounds() {
+        assert_eq!(clamp_int(5, Some(1), Some(10)), 5);
+        assert_eq!(clamp_int(0, Some(1), Some(10)), 1);
+        assert_eq!(clamp_int(11, Some(1), Some(10)), 10);
+        assert_eq!(clamp_int(11, None, None), 11);
+        assert_eq!(clamp_int(11, None, Some(7)), 7);
+        assert_eq!(clamp_int(-2, Some(0), None), 0);
+    }
+
+    #[test]
+    fn next_choice_wraps_around() {
+        let choices: Vec<String> = ["a", "b", "c"].iter().map(|&s| s.to_owned()).collect();
+        assert_eq!(next_choice("a", &choices), "b");
+        assert_eq!(next_choice("c", &choices), "a");
+    }
+
+    #[test]
+    fn next_choice_unknown_starts_from_first() {
+        let choices: Vec<String> = ["a", "b"].iter().map(|&s| s.to_owned()).collect();
+        // If the current value isn't a known choice (manifest renamed since
+        // the user's last save), restart from the first valid option.
+        assert_eq!(next_choice("xxx", &choices), "b");
+    }
+
+    fn manifest_with_options(name: &str, options_json: &str) -> Manifest {
+        let raw = format!(r#"{{ "name": "{name}", "options": {options_json} }}"#);
+        Manifest::parse(raw.as_bytes()).expect("manifest parse")
+    }
+
+    #[test]
+    fn controller_persists_toggle() {
+        let tmp = std::env::temp_dir().join(format!(
+            "high-beam-settings-ui-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("settings.toml");
+        let settings = Settings::load_from(&path);
+        let manifests = vec![manifest_with_options("echo", "[]")];
+        let ctrl = SettingsController::new(manifests, settings);
+
+        ctrl.set_enabled("echo", false);
+
+        let reloaded = Settings::load_from(&path);
+        assert!(!reloaded.is_plugin_enabled("echo"));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn controller_clamps_int_via_string_callback() {
+        let tmp = std::env::temp_dir().join(format!(
+            "high-beam-settings-int-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("settings.toml");
+        let settings = Settings::load_from(&path);
+        let manifests = vec![manifest_with_options(
+            "p",
+            r#"[{"key":"limit","type":"int","default":10,"min":1,"max":20}]"#,
+        )];
+        let ctrl = SettingsController::new(manifests, settings);
+
+        ctrl.set_option_for_kind("p", "limit", "999");
+        let reloaded = Settings::load_from(&path);
+        let opts = reloaded.plugin_options("p");
+        assert_eq!(opts.get("limit"), Some(&JsonValue::Number(20.into())));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+}
