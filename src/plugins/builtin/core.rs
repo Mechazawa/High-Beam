@@ -18,7 +18,7 @@ struct Keyword {
 }
 
 fn keywords() -> Vec<Keyword> {
-    vec![
+    let mut kws = vec![
         Keyword {
             label: "exit High Beam",
             subtitle: Some("quit the launcher daemon"),
@@ -39,10 +39,36 @@ fn keywords() -> Vec<Keyword> {
             subtitle: Some("restart this computer"),
             make_action: restart_action,
         },
+        // Alias for restart — same underlying action, different muscle memory.
+        Keyword {
+            label: "reboot",
+            subtitle: Some("restart this computer"),
+            make_action: restart_action,
+        },
         Keyword {
             label: "lock",
             subtitle: Some("lock the screen"),
             make_action: lock_action,
+        },
+        Keyword {
+            label: "log out",
+            subtitle: Some("end this user session"),
+            make_action: logout_action,
+        },
+        Keyword {
+            label: "screensaver",
+            subtitle: Some("start the screensaver"),
+            make_action: screensaver_action,
+        },
+        Keyword {
+            label: "display sleep",
+            subtitle: Some("turn the display off without sleeping the machine"),
+            make_action: display_sleep_action,
+        },
+        Keyword {
+            label: "empty trash",
+            subtitle: Some("permanently delete trashed files"),
+            make_action: empty_trash_action,
         },
         Keyword {
             label: "check for updates",
@@ -56,7 +82,18 @@ fn keywords() -> Vec<Keyword> {
             subtitle: None,
             make_action: || Action::Noop,
         },
-    ]
+    ];
+    // `eject` only ships on macOS — `gio mount --eject` / `udisksctl` would
+    // need a target device, so a bare verb makes no sense on Linux. The
+    // `#[cfg]` gate keeps `eject_action` from being referenced at all on
+    // non-macOS builds, where the function is not compiled.
+    #[cfg(target_os = "macos")]
+    kws.push(Keyword {
+        label: "eject",
+        subtitle: Some("eject all ejectable disks"),
+        make_action: eject_action,
+    });
+    kws
 }
 
 fn shutdown_action() -> Action {
@@ -129,6 +166,97 @@ fn lock_action() -> Action {
         Action::Exec {
             cmd: "loginctl".into(),
             args: vec!["lock-session".into()],
+        }
+    }
+}
+
+fn logout_action() -> Action {
+    #[cfg(target_os = "macos")]
+    {
+        Action::Exec {
+            cmd: "/usr/bin/osascript".into(),
+            args: vec![
+                "-e".into(),
+                "tell application \"System Events\" to log out".into(),
+            ],
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        // `terminate-session` needs a session id; `kill-session self` works
+        // from inside the session without one. `sh -c` lets us fall back at
+        // runtime: env var present → terminate; otherwise kill self.
+        Action::Exec {
+            cmd: "/bin/sh".into(),
+            args: vec![
+                "-c".into(),
+                "if [ -n \"$XDG_SESSION_ID\" ]; then loginctl terminate-session \"$XDG_SESSION_ID\"; else loginctl kill-session self; fi".into(),
+            ],
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn eject_action() -> Action {
+    Action::Exec {
+        cmd: "/usr/bin/osascript".into(),
+        args: vec![
+            "-e".into(),
+            "tell application \"Finder\" to eject (every disk whose ejectable is true)".into(),
+        ],
+    }
+}
+
+fn screensaver_action() -> Action {
+    #[cfg(target_os = "macos")]
+    {
+        Action::Exec {
+            cmd: "/usr/bin/open".into(),
+            args: vec!["-a".into(), "ScreenSaverEngine".into()],
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Action::Exec {
+            cmd: "xdg-screensaver".into(),
+            args: vec!["activate".into()],
+        }
+    }
+}
+
+fn display_sleep_action() -> Action {
+    #[cfg(target_os = "macos")]
+    {
+        Action::Exec {
+            cmd: "/usr/bin/pmset".into(),
+            args: vec!["displaysleepnow".into()],
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Action::Exec {
+            cmd: "xset".into(),
+            args: vec!["dpms".into(), "force".into(), "off".into()],
+        }
+    }
+}
+
+fn empty_trash_action() -> Action {
+    #[cfg(target_os = "macos")]
+    {
+        Action::Exec {
+            cmd: "/usr/bin/osascript".into(),
+            args: vec![
+                "-e".into(),
+                "tell application \"Finder\" to empty trash".into(),
+            ],
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Action::Exec {
+            cmd: "gio".into(),
+            args: vec!["trash".into(), "--empty".into()],
         }
     }
 }
@@ -270,5 +398,151 @@ mod tests {
             }
             other => panic!("expected Exec, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn lock_verb_still_matches() {
+        let results = query("lock");
+        let r = results
+            .iter()
+            .find(|r| r.result.title == "lock")
+            .expect("lock result");
+        assert!(matches!(r.result.action, Action::Exec { .. }));
+    }
+
+    #[test]
+    fn sleep_verb_still_matches() {
+        let results = query("sleep");
+        let r = results
+            .iter()
+            .find(|r| r.result.title == "sleep")
+            .expect("sleep result");
+        assert!(matches!(r.result.action, Action::Exec { .. }));
+    }
+
+    #[test]
+    fn restart_verb_still_matches() {
+        let results = query("restart");
+        let r = results
+            .iter()
+            .find(|r| r.result.title == "restart")
+            .expect("restart result");
+        assert!(matches!(r.result.action, Action::Exec { .. }));
+    }
+
+    #[test]
+    fn reboot_aliases_restart_action() {
+        let restart = query("restart")
+            .into_iter()
+            .find(|r| r.result.title == "restart")
+            .expect("restart result");
+        let reboot = query("reboot")
+            .into_iter()
+            .find(|r| r.result.title == "reboot")
+            .expect("reboot result");
+        // Same Action shape — different labels, identical command + args.
+        match (restart.result.action, reboot.result.action) {
+            (Action::Exec { cmd: c1, args: a1 }, Action::Exec { cmd: c2, args: a2 }) => {
+                assert_eq!(c1, c2);
+                assert_eq!(a1, a2);
+            }
+            other => panic!("expected Exec/Exec, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn log_out_matches_full_phrase() {
+        let results = query("log out");
+        let r = results
+            .iter()
+            .find(|r| r.result.title == "log out")
+            .expect("log out result");
+        assert!(matches!(r.result.action, Action::Exec { .. }));
+    }
+
+    #[test]
+    fn log_out_matches_prefix() {
+        let results = query("log");
+        assert!(results.iter().any(|r| r.result.title == "log out"));
+    }
+
+    #[test]
+    fn screensaver_matches_prefix() {
+        let results = query("screen");
+        let r = results
+            .iter()
+            .find(|r| r.result.title == "screensaver")
+            .expect("screensaver result");
+        assert!(matches!(r.result.action, Action::Exec { .. }));
+    }
+
+    #[test]
+    fn display_sleep_matches_prefix() {
+        let results = query("display");
+        let r = results
+            .iter()
+            .find(|r| r.result.title == "display sleep")
+            .expect("display sleep result");
+        assert!(matches!(r.result.action, Action::Exec { .. }));
+    }
+
+    #[test]
+    fn empty_trash_matches_prefix() {
+        let results = query("empty");
+        let r = results
+            .iter()
+            .find(|r| r.result.title == "empty trash")
+            .expect("empty trash result");
+        assert!(matches!(r.result.action, Action::Exec { .. }));
+    }
+
+    #[test]
+    fn new_verbs_are_unpinned() {
+        for q in [
+            "reboot",
+            "log out",
+            "screensaver",
+            "display sleep",
+            "empty trash",
+        ] {
+            let results = query(q);
+            assert!(
+                results.iter().any(|r| !r.result.pinned),
+                "expected unpinned result for {q}"
+            );
+            assert!(
+                results.iter().all(|r| !r.result.pinned),
+                "no core result should be pinned ({q})"
+            );
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn eject_is_present_on_macos() {
+        let results = query("eject");
+        let r = results
+            .iter()
+            .find(|r| r.result.title == "eject")
+            .expect("eject result on macOS");
+        match &r.result.action {
+            Action::Exec { cmd, args } => {
+                assert_eq!(cmd, "/usr/bin/osascript");
+                assert!(args.iter().any(|a| a.contains("eject")));
+            }
+            other => panic!("expected Exec, got {other:?}"),
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn eject_is_absent_on_linux() {
+        // `gio mount --eject` needs a target device, so the bare verb has
+        // no sensible Linux command — the table omits it entirely.
+        let results = query("eject");
+        assert!(
+            results.iter().all(|r| r.result.title != "eject"),
+            "eject should not appear on Linux, got {results:?}"
+        );
     }
 }
