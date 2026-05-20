@@ -23,6 +23,7 @@ use tokio::sync::mpsc;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
+use crate::frecency::{Snapshot, frecency_modifier, now_seconds};
 use crate::plugins::result::{PluginResult, RankedResult};
 use crate::plugins::runtime::LoadedPlugin;
 
@@ -88,15 +89,24 @@ fn clamp_debounce(ms: u64) -> Duration {
     Duration::from_millis(ms.min(MAX_DEBOUNCE_MS))
 }
 
-/// Merge a freshly-yielded result into the live row list (which is sorted
-/// pinned-first by weight, then by insertion order for non-pinned ties).
+/// Merge a freshly-yielded result into the live row list and re-sort.
 ///
-/// Mutates `live` in place. The caller pushes the resulting state back to
-/// the UI.
+/// Sort order, per `docs/01-architecture.md` and Stage 5 spec:
+///   1. **Pinned first**, sorted by `weight` desc — frecency doesn't apply
+///      to pinned results (they're authoritative for their input shape).
+///   2. **Non-pinned next**, sorted by `weight * frecency_modifier(picks, age)`
+///      desc. `frecency` is `None` ⇒ modifier 1.0 ⇒ Stage 4 behaviour, i.e.
+///      pure weight ordering.
+///   3. Ties broken by insertion order (stable).
+///
+/// `now` is taken as a parameter so unit tests can produce deterministic
+/// ages; production callers pass [`now_seconds`].
 pub(crate) fn merge_into_live(
     live: &mut Vec<RankedResult>,
     next_order: &mut usize,
     incoming: StreamedResult,
+    frecency: Option<&Snapshot>,
+    now: i64,
 ) {
     let entry = RankedResult {
         plugin_name: incoming.plugin_name,
@@ -105,32 +115,67 @@ pub(crate) fn merge_into_live(
     };
     *next_order += 1;
     live.push(entry);
-    // Re-sort the slice. With nine rows max this is trivially cheap; we
-    // accept the cost in exchange for not maintaining a separate priority
-    // structure. Stage 5 (frecency scoring) will revisit this if profiling
-    // turns up anything.
+    // With nine rows max this is trivially cheap; accepting the per-yield
+    // cost saves us a priority structure and matches the merge_into_live
+    // contract from Stage 4.
     live.sort_by(|a, b| {
         b.result
             .pinned
             .cmp(&a.result.pinned)
             .then_with(|| {
-                b.result
-                    .weight
-                    .partial_cmp(&a.result.weight)
+                let a_score = score_for(a, frecency, now);
+                let b_score = score_for(b, frecency, now);
+                b_score
+                    .partial_cmp(&a_score)
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
             .then_with(|| a.order.cmp(&b.order))
     });
 }
 
+/// Effective sort key for one result.
+///
+/// Pinned results stay on pure `weight` so the calculator-class plugins
+/// don't drift relative to one another; non-pinned results get the
+/// frecency modifier folded in.
+fn score_for(entry: &RankedResult, frecency: Option<&Snapshot>, now: i64) -> f64 {
+    let weight = entry.result.weight;
+    if entry.result.pinned {
+        return weight;
+    }
+    let modifier = frecency
+        .and_then(|snap| snap.get(&entry.plugin_name, &entry.result.key))
+        .map_or(1.0, |row| {
+            frecency_modifier(row.picks, now - row.last_picked_at)
+        });
+    weight * modifier
+}
+
+/// Convenience wrapper around [`merge_into_live`] using the system clock —
+/// used by the dispatcher receive loop where the snapshot is per-query but
+/// `now` is per-yield.
+pub(crate) fn merge_with_snapshot(
+    live: &mut Vec<RankedResult>,
+    next_order: &mut usize,
+    incoming: StreamedResult,
+    frecency: Option<&Snapshot>,
+) {
+    merge_into_live(live, next_order, incoming, frecency, now_seconds());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::frecency::PickRow;
     use crate::plugins::result::Action;
 
     fn streamed(key: &str, weight: f64, pinned: bool) -> StreamedResult {
+        streamed_from("a", key, weight, pinned)
+    }
+
+    fn streamed_from(plugin: &str, key: &str, weight: f64, pinned: bool) -> StreamedResult {
         StreamedResult {
-            plugin_name: "a".into(),
+            plugin_name: plugin.into(),
             result: PluginResult {
                 key: key.into(),
                 title: key.into(),
@@ -143,10 +188,18 @@ mod tests {
     }
 
     fn merge_all(items: Vec<StreamedResult>) -> Vec<String> {
+        merge_all_with(items, None, 0)
+    }
+
+    fn merge_all_with(
+        items: Vec<StreamedResult>,
+        snapshot: Option<&Snapshot>,
+        now: i64,
+    ) -> Vec<String> {
         let mut live = Vec::new();
         let mut order = 0usize;
         for it in items {
-            merge_into_live(&mut live, &mut order, it);
+            merge_into_live(&mut live, &mut order, it, snapshot, now);
         }
         live.iter().map(|r| r.result.key.clone()).collect()
     }
@@ -209,10 +262,102 @@ mod tests {
         let mut live = Vec::new();
         let mut order = 0usize;
         for k in ["a", "b", "c"] {
-            merge_into_live(&mut live, &mut order, streamed(k, 0.0, false));
+            merge_into_live(&mut live, &mut order, streamed(k, 0.0, false), None, 0);
         }
         assert_eq!(order, 3);
         let orders: Vec<_> = live.iter().map(|r| r.order).collect();
         assert_eq!(orders, [0, 1, 2]);
+    }
+
+    #[test]
+    fn frecency_promotes_recent_picks_above_tied_weights() {
+        // All three rows have weight 50; only `gamma` has a pick. With
+        // 1 pick at age 0 the modifier is ~1.10, so gamma should rank
+        // ahead of alpha + beta on the second query.
+        let snap = Snapshot::from_rows(vec![(
+            "a".into(),
+            "gamma".into(),
+            PickRow {
+                picks: 1,
+                last_picked_at: 1_000,
+            },
+        )]);
+        let keys = merge_all_with(
+            vec![
+                streamed("alpha", 50.0, false),
+                streamed("beta", 50.0, false),
+                streamed("gamma", 50.0, false),
+            ],
+            Some(&snap),
+            1_000,
+        );
+        assert_eq!(keys, ["gamma", "alpha", "beta"]);
+    }
+
+    #[test]
+    fn frecency_does_not_promote_pinned_results_relative_to_one_another() {
+        // Two pinned results, equal weight. Even if beta has 100 picks,
+        // the modifier should NOT apply to pinned — they sort by raw
+        // weight then insertion order.
+        let snap = Snapshot::from_rows(vec![(
+            "a".into(),
+            "beta".into(),
+            PickRow {
+                picks: 100,
+                last_picked_at: 1_000,
+            },
+        )]);
+        let keys = merge_all_with(
+            vec![streamed("alpha", 10.0, true), streamed("beta", 10.0, true)],
+            Some(&snap),
+            1_000,
+        );
+        assert_eq!(keys, ["alpha", "beta"]);
+    }
+
+    #[test]
+    fn pinned_still_beats_heavily_picked_non_pinned() {
+        let snap = Snapshot::from_rows(vec![(
+            "a".into(),
+            "non-pinned".into(),
+            PickRow {
+                picks: 1000,
+                last_picked_at: 1_000,
+            },
+        )]);
+        let keys = merge_all_with(
+            vec![
+                streamed("non-pinned", 100.0, false),
+                streamed("pinned", 1.0, true),
+            ],
+            Some(&snap),
+            1_000,
+        );
+        assert_eq!(keys, ["pinned", "non-pinned"]);
+    }
+
+    #[test]
+    fn frecency_keyed_on_plugin_name_too() {
+        // A pick on (plugin=a, key=x) must NOT bump (plugin=b, key=x).
+        let snap = Snapshot::from_rows(vec![(
+            "a".into(),
+            "x".into(),
+            PickRow {
+                picks: 5,
+                last_picked_at: 1_000,
+            },
+        )]);
+        let keys = merge_all_with(
+            vec![
+                streamed_from("a", "x", 50.0, false),
+                streamed_from("b", "x", 50.0, false),
+            ],
+            Some(&snap),
+            1_000,
+        );
+        // a:x has a 5-pick bonus, b:x has none.
+        assert_eq!(keys, ["x", "x"]);
+        // Insertion order still decides ties — but here the bonus
+        // shouldn't apply to b's `x`, so a:x wins outright.
     }
 }

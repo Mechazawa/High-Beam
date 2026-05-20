@@ -59,6 +59,15 @@ arboard = "3"
 # and Linux (`xdg-open`).
 open = "5"
 
+# Frecency persistence. `rusqlite` is the obvious choice — small, sync API
+# matches our "open one connection at startup, run a couple of statements"
+# usage, and the `bundled` feature ships SQLite with the binary so we don't
+# depend on whatever sqlite version the host OS happens to have. Stage 5's
+# frecency table only ever sees single-digit-millisecond reads/writes from
+# one thread, so we wrap the `Connection` in `std::sync::Mutex` rather than
+# pulling in `tokio-rusqlite` or sharded pools.
+rusqlite = { version = "0.32", features = ["bundled"] }
+
 # macOS-only deps:
 #   * `global-hotkey` — the only Rust crate that actually works on modern macOS
 #     for app-level global hotkeys without an Accessibility prompt; Linux is

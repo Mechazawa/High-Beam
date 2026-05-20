@@ -23,15 +23,19 @@ resolved in this priority order:
 3. Platform default — `~/Library/Application Support/high-beam/plugins/` on
    macOS, `$XDG_DATA_HOME/high-beam/plugins/` on Linux
 
-Stage 4 ships three example plugins to smoke-test the runtime:
+Stage 4 ships three example plugins to smoke-test the runtime; Stage 5
+adds a fourth that verifies frecency:
 
-    cp -r examples/plugins/echo plugins/echo               # one-shot echo
-    cp -r examples/plugins/slow-echo plugins/slow-echo     # streaming + abort demo
-    cp -r examples/plugins/echo-ts plugins/echo-ts         # TypeScript variant
+    cp -r examples/plugins/echo plugins/echo                       # one-shot echo
+    cp -r examples/plugins/slow-echo plugins/slow-echo             # streaming + abort demo
+    cp -r examples/plugins/echo-ts plugins/echo-ts                 # TypeScript variant
+    cp -r examples/plugins/frecency-demo plugins/frecency-demo     # frecency re-ranker demo
     just run
     # Press Shift+Space (or run `highbeam --open`) and type — Enter copies
     # the input to your clipboard. `slow-echo` yields three rows with a
     # 300ms gap each so you can see streaming and abort behaviour.
+    # `frecency-demo` always returns Alpha/Beta/Gamma (equal weight):
+    # pick one, run another query, and watch it bubble to the top.
 
 The manifest fields the host honors today (see `docs/02-plugin-sdk.md` for
 the full v1 spec):

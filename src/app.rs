@@ -26,6 +26,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::QueryWindow;
+use crate::frecency::{self, FrecencyDb};
 use crate::plugins::actions;
 use crate::plugins::dispatch::{self, StreamedResult};
 use crate::plugins::loader::{self, LoaderOptions};
@@ -55,7 +56,7 @@ pub fn start(
     window: &QueryWindow,
     plugins_override: Option<PathBuf>,
 ) -> Result<PluginHost, Box<dyn Error>> {
-    let (tx, mut rx) = mpsc::unbounded_channel::<HostMessage>();
+    let (tx, rx) = mpsc::unbounded_channel::<HostMessage>();
 
     // Latest results: shared between the main thread (Enter looks up actions
     // here) and the renderer closures that update it after each stream
@@ -68,10 +69,34 @@ pub fn start(
     // and ignores anything where the id is older than the current value.
     let latest_id = Arc::new(AtomicU64::new(0));
 
-    let weak_for_worker = window.as_weak();
-    let latest_for_worker = Arc::clone(&latest);
-    let latest_id_for_worker = Arc::clone(&latest_id);
+    // Frecency database — opened best-effort. A failure here logs and
+    // returns `None`; the daemon stays usable, just without re-ranking.
+    let frecency_db = open_frecency_db();
 
+    spawn_runtime_thread(
+        rx,
+        plugins_override,
+        window.as_weak(),
+        Arc::clone(&latest),
+        Arc::clone(&latest_id),
+        frecency_db.clone(),
+    )?;
+
+    wire_window_callbacks(window, tx.clone(), latest, &latest_id, frecency_db);
+
+    Ok(PluginHost { query_tx: tx })
+}
+
+/// Spawn the plugin-runtime background thread + tokio runtime that owns the
+/// loaded plugins and dispatches queries.
+fn spawn_runtime_thread(
+    mut rx: mpsc::UnboundedReceiver<HostMessage>,
+    plugins_override: Option<PathBuf>,
+    weak: slint::Weak<QueryWindow>,
+    latest: Arc<Mutex<Vec<RankedResult>>>,
+    latest_id: Arc<AtomicU64>,
+    frecency_db: Option<FrecencyDb>,
+) -> Result<(), Box<dyn Error>> {
     thread::Builder::new()
         .name("highbeam-plugin-runtime".into())
         .spawn(move || {
@@ -101,19 +126,23 @@ pub fn start(
                 while let Some(msg) = rx.recv().await {
                     match msg {
                         HostMessage::Query { id, input } => {
-                            if id < latest_id_for_worker.load(Ordering::Relaxed) {
+                            if id < latest_id.load(Ordering::Relaxed) {
                                 continue;
                             }
                             if let Some(prev) = current_cancel.take() {
                                 prev.cancel();
                             }
+                            // Eager per-query snapshot (Stage 5 architecture A):
+                            // simple, one source of truth, fast enough.
+                            let snapshot = frecency_db.as_ref().map(FrecencyDb::snapshot);
                             let cancel = handle_query(
                                 id,
                                 &input,
                                 &plugins,
-                                weak_for_worker.clone(),
-                                Arc::clone(&latest_for_worker),
-                                Arc::clone(&latest_id_for_worker),
+                                weak.clone(),
+                                Arc::clone(&latest),
+                                Arc::clone(&latest_id),
+                                snapshot,
                             );
                             current_cancel = Some(cancel);
                         }
@@ -127,12 +156,22 @@ pub fn start(
                 }
             });
         })?;
+    Ok(())
+}
 
-    let tx_for_query = tx.clone();
-    let latest_id_for_main = Arc::clone(&latest_id);
+/// Wire the per-keystroke `on_query_edited` and Enter-key `on_invoke_selected`
+/// callbacks on the Slint window to the runtime channel and action executor.
+fn wire_window_callbacks(
+    window: &QueryWindow,
+    tx: mpsc::UnboundedSender<HostMessage>,
+    latest: Arc<Mutex<Vec<RankedResult>>>,
+    latest_id: &Arc<AtomicU64>,
+    frecency_db: Option<FrecencyDb>,
+) {
+    let latest_id_for_main = Arc::clone(latest_id);
     window.on_query_edited(move |text| {
         let id = latest_id_for_main.fetch_add(1, Ordering::Relaxed) + 1;
-        if tx_for_query
+        if tx
             .send(HostMessage::Query {
                 id,
                 input: text.into(),
@@ -143,33 +182,85 @@ pub fn start(
         }
     });
 
-    let latest_for_invoke = Arc::clone(&latest);
     let weak_for_invoke = window.as_weak();
     window.on_invoke_selected(move || {
-        let Some(w) = weak_for_invoke.upgrade() else {
+        invoke_selected(&weak_for_invoke, &latest, frecency_db.as_ref());
+    });
+}
+
+/// Resolve the highlighted row, execute its action, and bump frecency on
+/// success. Pulled out of [`wire_window_callbacks`] so the line budget is
+/// readable and we can describe the contract in one place.
+fn invoke_selected(
+    weak: &slint::Weak<QueryWindow>,
+    latest: &Arc<Mutex<Vec<RankedResult>>>,
+    frecency_db: Option<&FrecencyDb>,
+) {
+    let Some(w) = weak.upgrade() else { return };
+    let idx = usize::try_from(w.get_selected_index().max(0)).unwrap_or(0);
+    let snapshot = match latest.lock() {
+        Ok(s) => s,
+        Err(err) => {
+            eprintln!("plugins: latest results lock poisoned: {err}");
             return;
-        };
-        let idx = usize::try_from(w.get_selected_index().max(0)).unwrap_or(0);
-        let snapshot = match latest_for_invoke.lock() {
-            Ok(s) => s,
-            Err(err) => {
-                eprintln!("plugins: latest results lock poisoned: {err}");
-                return;
+        }
+    };
+    let Some(picked) = snapshot.get(idx) else {
+        return;
+    };
+    let action = picked.result.action.clone();
+    let plugin_name = picked.plugin_name.clone();
+    let result_key = picked.result.key.clone();
+    drop(snapshot);
+    match actions::execute(&action) {
+        Ok(()) => {
+            if let Some(db) = frecency_db {
+                spawn_pick_bump(db, plugin_name, result_key);
             }
-        };
-        let Some(picked) = snapshot.get(idx) else {
-            return;
-        };
-        let action = picked.result.action.clone();
-        let plugin_name = picked.plugin_name.clone();
-        drop(snapshot);
-        if let Err(err) = actions::execute(&action) {
+        }
+        Err(err) => {
             eprintln!("plugins: {plugin_name}: action failed: {err}");
         }
-        window::hide(&w);
-    });
+    }
+    window::hide(&w);
+}
 
-    Ok(PluginHost { query_tx: tx })
+/// Open the frecency DB at the platform default path.
+///
+/// Failures (no `ProjectDirs`, can't open file, schema init error) are
+/// logged and we return `None` so the daemon stays functional with default
+/// (Stage 4) ranking. The user sees a single warning at startup, not a
+/// crash.
+fn open_frecency_db() -> Option<FrecencyDb> {
+    let Some(path) = frecency::default_db_path() else {
+        eprintln!("frecency: could not resolve data dir; running without frecency");
+        return None;
+    };
+    match FrecencyDb::open(&path) {
+        Ok(db) => Some(db),
+        Err(err) => {
+            eprintln!(
+                "frecency: failed to open {} ({err}); continuing without frecency",
+                path.display()
+            );
+            None
+        }
+    }
+}
+
+/// Run the pick bump off the UI thread. We use a plain OS thread (not a
+/// tokio task) because the bump callsite is on the Slint event-loop thread
+/// where no tokio runtime is registered.
+fn spawn_pick_bump(db: &FrecencyDb, plugin_name: String, result_key: String) {
+    let db = db.clone();
+    thread::Builder::new()
+        .name("highbeam-frecency-bump".into())
+        .spawn(move || {
+            if let Err(err) = db.bump(&plugin_name, &result_key) {
+                eprintln!("frecency: bump {plugin_name}:{result_key} failed: {err}");
+            }
+        })
+        .ok();
 }
 
 /// Start a fresh query: clear the row list, kick off the streaming dispatch,
@@ -183,6 +274,7 @@ fn handle_query(
     weak: slint::Weak<QueryWindow>,
     latest: Arc<Mutex<Vec<RankedResult>>>,
     latest_id: Arc<AtomicU64>,
+    frecency_snapshot: Option<crate::frecency::Snapshot>,
 ) -> CancellationToken {
     let cancel = CancellationToken::new();
 
@@ -210,7 +302,12 @@ fn handle_query(
                         if id < latest_id.load(Ordering::Relaxed) {
                             continue;
                         }
-                        dispatch::merge_into_live(&mut live, &mut order, streamed);
+                        dispatch::merge_with_snapshot(
+                            &mut live,
+                            &mut order,
+                            streamed,
+                            frecency_snapshot.as_ref(),
+                        );
                         let snapshot = live.clone();
                         if let Ok(mut slot) = latest.lock() {
                             slot.clone_from(&snapshot);

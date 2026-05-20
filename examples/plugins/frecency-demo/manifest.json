@@ -1,0 +1,10 @@
+{
+  "name": "frecency-demo",
+  "displayName": "Frecency Demo",
+  "version": "0.1.0",
+  "description": "Frecency test plugin — always yields three rows (Alpha, Beta, Gamma) with identical weight. Picking one bumps it; subsequent queries should show recently-picked rows above unpicked ones, confirming the Stage 5 frecency re-ranker is working end to end.",
+  "entry": "plugin.js",
+  "timeoutMs": 500,
+  "memoryMb": 32,
+  "capabilities": ["actions"]
+}
