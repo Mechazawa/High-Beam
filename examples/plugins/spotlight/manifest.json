@@ -1,0 +1,10 @@
+{
+  "name": "spotlight",
+  "displayName": "Spotlight",
+  "version": "0.1.0",
+  "description": "macOS app launcher — find and open installed applications",
+  "debounceMs": 100,
+  "timeoutMs": 800,
+  "memoryMb": 64,
+  "capabilities": ["actions", "fs.read", "icons"]
+}
