@@ -9,7 +9,7 @@
 //!   * resolver/loader pair that whitelists `highbeam:*` specifiers and gates
 //!     each module on the manifest's capability list
 //!
-//! Streaming + cancellation (Stage 4):
+//! Streaming + cancellation:
 //!   * `run_query` builds a host [`Abort`] and gives the plugin its
 //!     `AbortSignal` as the second argument to `query(input, signal)`.
 //!   * It returns an `mpsc::Receiver<PluginResult>` that the dispatcher reads
@@ -84,8 +84,6 @@ pub struct LoadedPlugin {
 }
 
 /// Errors surfaced while loading or running a plugin.
-///
-/// Stage 4 logs these to stderr (Stage 9 routes them to per-plugin logfiles).
 #[derive(Debug)]
 pub enum PluginError {
     Io(std::io::Error),
@@ -289,8 +287,7 @@ impl LoadedPlugin {
     ///
     /// Channel send is fallible (receiver dropped) but the worker treats that
     /// as a cancellation, not an error. Per-iteration JS errors close the
-    /// channel and are reported via the receiver returning `None`. (Stage 9
-    /// will route those errors to the plugin's logfile.)
+    /// channel and are reported via the receiver returning `None`.
     #[must_use]
     pub fn run_query_stream(
         &self,
@@ -339,9 +336,8 @@ impl LoadedPlugin {
 
 impl Drop for LoadedPlugin {
     fn drop(&mut self) {
-        // Best effort: clear the interrupt flag and drop the runtime. The
-        // AsyncRuntime/Context handle their own cleanup; no extra teardown
-        // needed for Stage 4.
+        // Best effort: clear the interrupt flag and let AsyncRuntime/Context
+        // handle the rest via their own cleanup.
         self.interrupt_flag.store(false, Ordering::Relaxed);
     }
 }
@@ -494,9 +490,7 @@ impl Resolver for HighbeamResolver {
         } else {
             Err(JsError::new_resolving(
                 "<plugin>",
-                format!(
-                    "high-beam plugins may only import from `highbeam:*` (got {name:?}); see docs/02-plugin-sdk.md"
-                ),
+                format!("high-beam plugins may only import from `highbeam:*` (got {name:?})"),
             ))
         }
     }

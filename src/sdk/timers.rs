@@ -4,14 +4,13 @@
 //! await new Promise(r => setTimeout(r, 250));
 //! ```
 //!
-//! …which is the canonical "wait 250ms" idiom most JS authors reach for. Raw
-//! `QuickJS` doesn't ship `setTimeout`/`setInterval` because they're browser/
-//! Node concepts; we provide a host-bound version that drives `tokio::time::sleep`.
+//! …the canonical "wait 250ms" idiom. Raw `QuickJS` doesn't ship
+//! `setTimeout`/`setInterval` because they're browser/Node concepts; we
+//! provide a host-bound version that drives `tokio::time::sleep`.
 //!
 //! `clearTimeout` / `clearInterval` are accepted as no-ops — we don't track
-//! ids yet. Stage 4 plugins are expected to `await` `setTimeout` directly
-//! rather than juggle handles; if Stage 7+ plugins need real clearance we'll
-//! revisit.
+//! ids. Plugins are expected to `await` `setTimeout` directly rather than
+//! juggle handles.
 
 use rquickjs::function::Async;
 use rquickjs::{Ctx, Error as JsError, Function};

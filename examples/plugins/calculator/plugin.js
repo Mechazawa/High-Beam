@@ -273,8 +273,8 @@ export async function* query(input, _signal) {
             pinned: true,
             action: copy(text),
         };
-        // Only the `=` path surfaces the source expression in the subtitle —
-        // the bare form keeps its lean single-line look from stage 8.
+        // Only the `=` path surfaces the source expression in the subtitle;
+        // the bare form keeps its lean single-line look.
         if (forced) row.subtitle = expression.trim();
         yield row;
         return;

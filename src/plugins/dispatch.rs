@@ -1,20 +1,15 @@
 //! Per-keystroke query dispatch — streaming + per-plugin debounce + abort.
 //!
-//! Stage 3's blocking "collect each plugin's Vec, sort, render once" model is
-//! gone. Stage 4 model:
-//!   * Each plugin gets its own `mpsc::Receiver` from
-//!     [`LoadedPlugin::run_query_stream`]. We merge those receivers into a
-//!     single tagged stream so the renderer can react to each yielded result
-//!     immediately.
-//!   * Per-plugin debounce is enforced *before* `run_query_stream` is called.
-//!   * Cancellation: every dispatch round produces a fresh root
-//!     [`CancellationToken`]; when a new keystroke arrives, the previous
-//!     token's `cancel()` is called and the old per-plugin streams drain
-//!     quickly.
+//! Each plugin gets its own `mpsc::Receiver` from
+//! [`LoadedPlugin::run_query_stream`]; we merge those receivers into a single
+//! tagged stream so the renderer can react to each yielded result immediately.
+//! Per-plugin debounce is enforced before `run_query_stream` is called. Every
+//! dispatch round produces a fresh root [`CancellationToken`]; when a new
+//! keystroke arrives the previous token's `cancel()` is called and the old
+//! per-plugin streams drain quickly.
 //!
-//! The dispatcher itself is intentionally just glue. The dispatcher caller
-//! (`crate::app`) owns the scheduling — they get a token, ask the dispatcher
-//! to run, and observe yielded results plus stream-complete signals.
+//! The dispatcher itself is just glue — the caller (`crate::app`) owns
+//! scheduling.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -100,12 +95,11 @@ fn clamp_debounce(ms: u64) -> Duration {
 
 /// Merge a freshly-yielded result into the live row list and re-sort.
 ///
-/// Sort order, per `docs/01-architecture.md` and Stage 5 spec:
+/// Sort order:
 ///   1. **Pinned first**, sorted by `weight` desc — frecency doesn't apply
 ///      to pinned results (they're authoritative for their input shape).
 ///   2. **Non-pinned next**, sorted by `weight * frecency_modifier(picks, age)`
-///      desc. `frecency` is `None` ⇒ modifier 1.0 ⇒ Stage 4 behaviour, i.e.
-///      pure weight ordering.
+///      desc. `frecency = None` ⇒ modifier 1.0 ⇒ pure weight ordering.
 ///   3. Ties broken by insertion order (stable).
 ///
 /// `now` is taken as a parameter so unit tests can produce deterministic

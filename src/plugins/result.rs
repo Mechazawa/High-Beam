@@ -69,10 +69,8 @@ pub enum Action {
 
 /// A result enriched with the plugin name that produced it.
 ///
-/// We carry the plugin name through the dispatch pipeline so future stages
-/// can key frecency / per-plugin logging on it. Stage 3 only uses it for the
-/// row `key` so different plugins emitting the same `key` string don't
-/// collide.
+/// The plugin name keys frecency and namespaces row keys so different plugins
+/// emitting the same `key` string don't collide.
 #[derive(Debug, Clone)]
 pub struct RankedResult {
     pub plugin_name: String,

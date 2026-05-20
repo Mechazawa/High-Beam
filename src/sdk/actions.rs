@@ -1,7 +1,5 @@
 //! Host implementation of the `highbeam:actions` module.
 //!
-//! Stage 4 surface:
-//!
 //! ```js
 //! import { openUrl, copy, exec, reveal } from 'highbeam:actions';
 //! openUrl('https://example.com');         // { kind: 'openUrl', url: '…' }
@@ -13,10 +11,9 @@
 //! All builders return a plain JS object matching [`crate::plugins::result::Action`]'s
 //! wire shape so `serde_json` can deserialise the yielded result directly.
 //!
-//! Note: `exec` here is the *action builder* — it returns a value the plugin
-//! attaches to a result. The capability gate on the live subprocess call
-//! (`highbeam:system.exec`) lives in Stage 7; returning an exec action from a
-//! result selection does NOT require the `system.exec` capability.
+//! Note: `exec` here is the *action builder*. Live subprocess execution is
+//! `highbeam:system.exec` (capability `system.exec`); returning an exec
+//! action from `query()` does NOT require that capability.
 
 use rquickjs::{Ctx, Object, Result, Value, module::ModuleDef};
 

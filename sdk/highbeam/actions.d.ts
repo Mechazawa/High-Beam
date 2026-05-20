@@ -17,11 +17,9 @@ export function openUrl(url: string): Action;
 export function copy(text: string): Action;
 
 /**
- * Spawn a subprocess. No stdout capture in v1 — see Stage 7's
- * `highbeam:system.exec` for the live-call variant.
- *
- * The `exec` capability is NOT required for this *action variant*; only the
- * Stage 7 live call requires `system.exec`.
+ * Spawn a subprocess fire-and-forget. No stdout capture — for that, use
+ * `highbeam:system.exec` (which requires the `system.exec` capability;
+ * this action variant does not).
  */
 export function exec(cmd: string, args: readonly string[]): Action;
 

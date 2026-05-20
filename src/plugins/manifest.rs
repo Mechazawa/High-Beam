@@ -1,23 +1,7 @@
 //! `manifest.json` parsing.
 //!
-//! Stage 3 only consumes a subset of the v1 manifest spec (`docs/02-plugin-sdk.md`):
-//!
-//! ```json
-//! {
-//!   "name": "echo",
-//!   "displayName": "Echo",
-//!   "version": "0.1.0",
-//!   "description": "Echo plugin",
-//!   "entry": "plugin.js",
-//!   "timeoutMs": 500,
-//!   "memoryMb": 32,
-//!   "capabilities": ["actions"]
-//! }
-//! ```
-//!
 //! Unknown fields are tolerated (`#[serde(default)]` + no `deny_unknown_fields`)
-//! so Stage 4+ can add `debounceMs`, `fs.*`, etc. without breaking Stage 3
-//! plugins.
+//! so new fields can land without breaking older plugins.
 
 use std::path::{Path, PathBuf};
 
@@ -53,8 +37,8 @@ pub struct Manifest {
     pub memory_mb: u32,
     /// Per-plugin debounce in milliseconds — the dispatcher waits this long
     /// after the latest keystroke before invoking `query()`. `0` (the
-    /// default) dispatches every keystroke immediately. Stage 4 clamps the
-    /// effective value to [`crate::plugins::dispatch::MAX_DEBOUNCE_MS`].
+    /// default) dispatches every keystroke immediately. The dispatcher caps
+    /// the effective value at [`crate::plugins::dispatch::MAX_DEBOUNCE_MS`].
     #[serde(default = "default_debounce_ms")]
     pub debounce_ms: u64,
     #[serde(default)]
@@ -153,7 +137,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_full_stage3_manifest() {
+    fn parses_full_manifest() {
         let json = br#"{
             "name": "echo",
             "displayName": "Echo",
@@ -216,7 +200,7 @@ mod tests {
 
     #[test]
     fn platforms_absent_supports_every_platform() {
-        // Backward-compat: every pre-Stage-8.5 manifest still loads.
+        // Backward-compat: manifests without the field load everywhere.
         let m = Manifest::parse(br#"{ "name": "old" }"#).unwrap();
         assert!(m.platforms.is_none());
         assert!(m.supports_current_platform());

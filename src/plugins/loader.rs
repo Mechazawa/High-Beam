@@ -1,6 +1,6 @@
 //! Discover and load plugins from a directory.
 //!
-//! Stage 4 prefers the platform plugin dir from `docs/04-platform.md`:
+//! Default location is the platform data dir:
 //!   * macOS: `~/Library/Application Support/high-beam/plugins/`
 //!   * Linux: `$XDG_DATA_HOME/high-beam/plugins/`
 //!
@@ -11,8 +11,8 @@
 //! Each plugin gets its own [`LoadedPlugin`] (independent JS runtime +
 //! context), wrapped in `Arc` so the dispatcher can clone the handle into
 //! per-plugin spawned tasks. Failures during load are logged to stderr and
-//! the bad plugin is skipped; one syntax error shouldn't take the whole
-//! launcher down. Stage 9 routes these to per-plugin logfiles.
+//! the bad plugin is skipped — one syntax error shouldn't take the whole
+//! launcher down.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -57,8 +57,8 @@ impl LoaderOptions {
     }
 }
 
-/// Platform plugin dir per `docs/04-platform.md`. Returns `None` if
-/// `ProjectDirs` couldn't be resolved (extremely unusual).
+/// Platform default plugin dir. Returns `None` if `ProjectDirs` couldn't be
+/// resolved (extremely unusual).
 fn platform_plugins_dir() -> Option<PathBuf> {
     let dirs = ProjectDirs::from("", "", "high-beam")?;
     Some(dirs.data_dir().join("plugins"))
@@ -126,11 +126,8 @@ async fn load_one(plugin_dir: &Path) -> Result<LoadedPlugin, LoadError> {
         }
     }
 
-    // Platform gating happens BEFORE we hand the manifest to `LoadedPlugin::load`,
-    // because instantiating the rquickjs context + evaluating the entry module
-    // is the expensive part — there's no point paying that cost for a plugin
-    // we're about to discard. A skipped plugin returns a typed `Skipped` so
-    // `load_all` can log INFO without conflating it with a real error.
+    // Gate before paying the rquickjs Context cost — that's where the expense
+    // sits, and we'd be evaluating an entry module just to discard it.
     if !manifest.supports_current_platform() {
         let reason = manifest
             .platform_skip_reason()
@@ -147,22 +144,12 @@ async fn load_one(plugin_dir: &Path) -> Result<LoadedPlugin, LoadError> {
     Ok(loaded)
 }
 
-/// Two-variant error so `load_all` can distinguish a deliberate platform-gate
-/// skip (logged at INFO) from a load failure (logged as an error). Without
-/// this split the user would see scary "skipping" lines for plugins that did
-/// nothing wrong.
+/// Distinguishes a deliberate platform-gate skip (logged at INFO) from a real
+/// load failure (logged as an error) so users don't see scary "skipping" lines
+/// for plugins that did nothing wrong.
 enum LoadError {
     Skipped { name: String, reason: String },
     Failed(Box<dyn std::error::Error>),
-}
-
-impl std::fmt::Display for LoadError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Skipped { reason, .. } => write!(f, "{reason}"),
-            Self::Failed(err) => write!(f, "{err}"),
-        }
-    }
 }
 
 #[cfg(test)]

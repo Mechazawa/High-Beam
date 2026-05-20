@@ -1,10 +1,9 @@
 //! Host-side execution of plugin [`Action`] variants.
 //!
-//! Stage 4 supports the full v1 set:
 //!   * `OpenUrl` — `open::that(url)` (system handler)
 //!   * `Copy`    — `arboard::Clipboard::set_text`
-//!   * `Exec`    — spawn a subprocess, no stdout capture (Stage 7 adds the
-//!     `highbeam:system.exec` story with stdout/stderr/code)
+//!   * `Exec`    — fire-and-forget subprocess (live capture lives in
+//!     `highbeam:system.exec`)
 //!   * `Reveal`  — open the parent dir with the file selected (macOS `open -R`;
 //!     Linux opens the parent dir best-effort, no selection)
 

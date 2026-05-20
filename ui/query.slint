@@ -1,24 +1,15 @@
-// Stage 3 layout: query input + result rows.
-//
-// The single source of truth for what's displayed sits on the Rust side. UI
-// state on the Slint side is kept to:
-//   * `query-text` — text input mirror (see clear-input() rationale below)
-//   * `results` — a model of rows pushed from Rust after each query dispatch
-//   * `selected-index` — which row is highlighted; reset to 0 on every new
-//     result set
-//
-// Theme tokens are still hard-coded (Stage 8 will bind them to runtime
-// properties from `theme.toml`).
+// Query input + result rows. The single source of truth for what's displayed
+// sits on the Rust side; Slint-side state is just `query-text`, `results`,
+// and `selected-index`. Theme tokens are hard-coded today — Stage 9 will
+// bind them to runtime properties from `theme.toml`.
 
 import { ScrollView } from "std-widgets.slint";
 
 // Wire shape sent across Rust -> Slint for each row. `key` is the composite
 // `<plugin>:<result_key>` so two plugins emitting the same `key` string don't
-// collide and the row keying is stable on re-renders. `icon` is set by the
-// Rust renderer to either a decoded pixmap or the default (empty) image —
-// Slint structs need fixed types so "no icon" is encoded as the empty image,
-// and the row paints a muted placeholder square in that case to keep title
-// columns aligned across rows.
+// collide. Slint structs need fixed types, so "no icon" is encoded as the
+// empty image (`has-icon = false`), and the row paints a muted placeholder
+// square in that case to keep title columns aligned.
 export struct ResultRow {
     key: string,
     title: string,

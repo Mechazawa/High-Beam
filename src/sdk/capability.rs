@@ -115,7 +115,7 @@ mod tests {
     }
 
     #[test]
-    fn known_capabilities_includes_stage4_set() {
+    fn known_capabilities_includes_baseline_set() {
         for cap in ["actions", "http", "clipboard.read", "clipboard.write"] {
             assert!(
                 KNOWN_CAPABILITIES.contains(&cap),
