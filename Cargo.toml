@@ -12,11 +12,28 @@ slint = { version = "1.16", features = ["unstable-winit-030"] }
 clap = { version = "4", features = ["derive"] }
 directories = "6"
 
-# macOS-only: global hotkey registration via the Tauri global-hotkey crate.
-# reason: only Rust crate that actually works on modern macOS for app-level
-# global hotkeys without an Accessibility prompt; Linux is punted to the WM.
+# macOS-only deps:
+#   * `global-hotkey` — the only Rust crate that actually works on modern macOS
+#     for app-level global hotkeys without an Accessibility prompt; Linux is
+#     punted to the WM.
+#   * `objc2` / `objc2-app-kit` / `objc2-foundation` — we need to call
+#     `NSApp.activate(ignoringOtherApps:)` and `NSWindow.makeKeyAndOrderFront`
+#     when summoning the launcher window so the OS-level key window / app
+#     activation actually flips to us. Without this, Slint's focus request on
+#     the TextInput silently drops because our process isn't frontmost.
+#   * `raw-window-handle` — pulls the underlying `NSView` pointer back out of
+#     the winit window so we can walk up to its `NSWindow`. Pinned to the same
+#     versions winit 0.30 uses to avoid dragging in a second objc2 family.
 [target.'cfg(target_os = "macos")'.dependencies]
 global-hotkey = "0.8"
+objc2 = "0.5"
+objc2-app-kit = { version = "0.2", features = [
+    "NSApplication",
+    "NSView",
+    "NSWindow",
+] }
+objc2-foundation = { version = "0.2", features = ["NSThread"] }
+raw-window-handle = "0.6"
 
 [build-dependencies]
 slint-build = "1.16"

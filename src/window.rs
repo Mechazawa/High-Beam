@@ -59,29 +59,34 @@ pub fn configure(window: &QueryWindow) {
             EventResult::Propagate
         });
 
-    // Hide the macOS Dock/Cmd-Tab presence by setting the app activation
-    // policy to "accessory". This must be done before any window is shown.
-    // TODO: revisit — the truly clean fix is bundling with `LSUIElement` in
-    // Info.plist when we ship a .app, but this works for `cargo run`.
-    #[cfg(target_os = "macos")]
-    set_macos_accessory_policy();
+    // TODO: hide macOS Dock/Cmd-Tab presence via
+    // `NSApp.setActivationPolicy(NSApplicationActivationPolicyAccessory)` (or,
+    // cleaner, bundle the app with `LSUIElement=1` in Info.plist when we ship
+    // a real .app target). Independent from the activation logic below: that
+    // call only governs frontmost/key state, not whether we appear in
+    // Cmd-Tab / Dock.
 }
 
 /// Show the window, center it, and focus the input. Idempotent — calling this
 /// while the window is already visible just re-centers and re-focuses, which
 /// matches v2's behaviour and the spec ("focuses it if already open").
 ///
-/// Focus on first show is driven by the `Focused(true)` winit event in
-/// `configure()` — that's the earliest point where the `NSWindow` is actually
-/// key on macOS. We also call `invoke_focus_input` here so a re-show while the
-/// window is already visible (and thus won't get a fresh Focused(true)) still
-/// pulls the caret back into the input.
+/// On macOS, simply calling `window.show()` + `invoke_focus_input()` is not
+/// enough: our daemon process isn't necessarily the frontmost app, and even
+/// once Slint creates the `NSWindow` it isn't automatically the key window.
+/// Slint will dutifully ask the `TextInput` to take focus, but the OS routes
+/// keystrokes to whoever is actually key, so the field appears focused
+/// visually (or not at all) and typing goes nowhere. We replicate what
+/// Spotlight/Alfred/Raycast do: activate the app process and make the
+/// `NSWindow` key + frontmost ourselves before asking Slint for focus.
 pub fn show(window: &QueryWindow) {
     if let Err(err) = window.show() {
         eprintln!("failed to show window: {err}");
         return;
     }
     center_on_focused_display(window);
+    #[cfg(target_os = "macos")]
+    macos::activate_and_make_key(window);
     window.invoke_focus_input();
 }
 
@@ -132,13 +137,84 @@ fn center_on_focused_display(window: &QueryWindow) {
 }
 
 #[cfg(target_os = "macos")]
-fn set_macos_accessory_policy() {
-    // The cleanest way to set NSApplicationActivationPolicyAccessory without
-    // pulling in `objc2`/`cocoa` is to bundle the app with LSUIElement=1 in
-    // its Info.plist. For `cargo run` we have no bundle, so the binary shows
-    // up in Cmd-Tab and bounces in the Dock. Living with that for Stage 2;
-    // revisit when we add a real .app bundle target.
-    //
-    // TODO: switch to a small `objc2` call (`NSApp.setActivationPolicy(...)`)
-    // or ship an Info.plist via cargo-bundle.
+mod macos {
+    //! macOS-specific app/window activation. Without this the launcher window
+    //! opens behind whatever was previously frontmost and the `TextInput` never
+    //! actually receives keystrokes — Slint's focus request is meaningless if
+    //! the OS-level key window is still someone else's. See `show()` for the
+    //! call site and rationale.
+
+    use std::ptr::NonNull;
+
+    use objc2_app_kit::{NSApplication, NSView, NSWindow};
+    use objc2_foundation::MainThreadMarker;
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use slint::ComponentHandle;
+    use slint::winit_030::{WinitWindowAccessor, winit};
+
+    use crate::QueryWindow;
+
+    /// Activate our app process and make our `NSWindow` key + frontmost.
+    ///
+    /// Order matters:
+    ///   1. `NSApp.activate(ignoringOtherApps: true)` — flips the process to
+    ///      frontmost. Without this, `makeKeyAndOrderFront` on a background
+    ///      app's window may show the window but won't move keyboard focus.
+    ///   2. `nsWindow.makeKeyAndOrderFront(nil)` — makes our specific window
+    ///      the key window and brings it to the front of the app's stack.
+    ///
+    /// The Slint event loop guarantees we're on the main thread, so the
+    /// `MainThreadMarker` ask is just paperwork. We do check with `::new()`
+    /// rather than `::new_unchecked()` so a future off-thread caller fails
+    /// loudly instead of being undefined behaviour.
+    pub fn activate_and_make_key(window: &QueryWindow) {
+        let Some(mtm) = MainThreadMarker::new() else {
+            eprintln!("activate_and_make_key called off the main thread");
+            return;
+        };
+
+        let app = NSApplication::sharedApplication(mtm);
+        // reason: `activateIgnoringOtherApps:` is marked deprecated in macOS 14
+        // in favour of the cooperative `activate()`, but launchers explicitly
+        // *don't* want to be cooperative — the whole point is "I am being
+        // summoned over whatever you were doing." Spotlight/Alfred/Raycast all
+        // still use the ignoring-other-apps variant for the same reason.
+        #[allow(deprecated)]
+        app.activateIgnoringOtherApps(true);
+
+        // Walk winit -> raw-window-handle -> NSView -> NSWindow. The Slint
+        // `with_winit_window` accessor returns `Some(T)` if the closure ran;
+        // we additionally encode "did we find an NSWindow" in the inner
+        // `Option`, then flatten so a single None means "no window to focus".
+        let ns_window = window
+            .window()
+            .with_winit_window(|w: &winit::window::Window| ns_window_from_winit(w))
+            .flatten();
+        let Some(ns_window) = ns_window else {
+            eprintln!("could not resolve NSWindow from winit window");
+            return;
+        };
+
+        ns_window.makeKeyAndOrderFront(None);
+    }
+
+    fn ns_window_from_winit(
+        winit_window: &winit::window::Window,
+    ) -> Option<objc2::rc::Retained<NSWindow>> {
+        // `raw-window-handle` only exposes the `NSView` pointer for the
+        // window's content view; we walk up via `[NSView window]` to get the
+        // `NSWindow` itself. This is the path the raw-window-handle docs
+        // explicitly call out as the supported way to reach the NSWindow.
+        let handle = winit_window.window_handle().ok()?;
+        let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
+            return None;
+        };
+        let ns_view_ptr: NonNull<NSView> = appkit.ns_view.cast();
+        // SAFETY: winit owns the NSView and keeps it alive for the lifetime
+        // of the winit window. The pointer it hands us via raw-window-handle
+        // is guaranteed valid while `winit_window` (the closure argument)
+        // exists. We only borrow it for the duration of `[NSView window]`.
+        let ns_view: &NSView = unsafe { ns_view_ptr.as_ref() };
+        ns_view.window()
+    }
 }
