@@ -1,0 +1,10 @@
+{
+  "name": "web-search",
+  "displayName": "Web Search",
+  "version": "0.1.0",
+  "description": "Search the web — `google <q>`, `ddg <q>`, `wiki <q>`, etc., plus a Google fallback for any input",
+  "debounceMs": 50,
+  "timeoutMs": 100,
+  "memoryMb": 16,
+  "capabilities": ["actions"]
+}
