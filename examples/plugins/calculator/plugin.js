@@ -239,19 +239,68 @@ function formatResult(value) {
 
 export async function* query(input, _signal) {
     if (!input || !input.trim()) return;
-    let value;
-    try {
-        value = parseAndEvaluate(input);
-    } catch {
+    // `=` prefix forces a row even on failure so the user gets feedback while
+    // typing a long expression; the bare form stays silent for compatibility
+    // with the existing global-query behaviour.
+    const trimmed = input.trimStart();
+    const forced = trimmed.startsWith("=");
+    const expression = forced ? trimmed.slice(1) : input;
+    if (!expression.trim()) {
+        if (!forced) return;
+        yield {
+            key: `calc:=`,
+            title: "Syntax error",
+            subtitle: "empty expression",
+            weight: 100,
+            pinned: true,
+            action: copy(input),
+        };
         return;
     }
-    if (!Number.isFinite(value)) return;
-    const text = formatResult(value);
+    let value;
+    let error;
+    try {
+        value = parseAndEvaluate(expression);
+    } catch (err) {
+        error = err;
+    }
+    if (error === undefined && Number.isFinite(value)) {
+        const text = formatResult(value);
+        const row = {
+            key: `calc:${expression.trim()}`,
+            title: text,
+            weight: 100,
+            pinned: true,
+            action: copy(text),
+        };
+        // Only the `=` path surfaces the source expression in the subtitle —
+        // the bare form keeps its lean single-line look from stage 8.
+        if (forced) row.subtitle = expression.trim();
+        yield row;
+        return;
+    }
+    if (!forced) return;
+    // Surface the parser's own message when available; fall back to a generic
+    // label for divide-by-zero / overflow which produce non-finite numbers
+    // without throwing.
+    const reason = error ? errorReason(error) : nonFiniteReason(value);
     yield {
-        key: `calc:${input.trim()}`,
-        title: text,
+        key: `calc:=${expression.trim() || expression}`,
+        title: "Syntax error",
+        subtitle: reason,
         weight: 100,
         pinned: true,
-        action: copy(text),
+        action: copy(input),
     };
+}
+
+function errorReason(err) {
+    const msg = err && err.message ? String(err.message) : "parse error";
+    return msg.length > 80 ? `${msg.slice(0, 77)}...` : msg;
+}
+
+function nonFiniteReason(value) {
+    if (Number.isNaN(value)) return "result is NaN";
+    if (value === Infinity || value === -Infinity) return "divide by zero or overflow";
+    return "result not finite";
 }
