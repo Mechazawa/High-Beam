@@ -26,7 +26,7 @@
 use rquickjs::function::Async;
 use rquickjs::{Ctx, Function, Object, Result as JsResult, Value, module::ModuleDef};
 
-/// Where [`build_functions`] stashes the read/write callables so the module's
+/// Where [`install`] stashes the read/write callables so the module's
 /// `evaluate()` can re-export them as `read` / `write`. Plugin code should
 /// never reach for these directly.
 pub const READ_GLOBAL: &str = "__highbeam_clipboard_read";
@@ -34,8 +34,8 @@ pub const WRITE_GLOBAL: &str = "__highbeam_clipboard_write";
 
 /// Module definition registered against the `highbeam:clipboard` specifier.
 ///
-/// State-less — per-plugin gating lives in the bound functions installed by
-/// [`build_functions`] before module evaluation.
+/// State-less — per-plugin gating lives in the bound functions [`install`]
+/// places on globalThis before module evaluation.
 pub struct ClipboardModule;
 
 impl ModuleDef for ClipboardModule {
