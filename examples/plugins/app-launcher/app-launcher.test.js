@@ -122,10 +122,7 @@ describe('app-launcher macOS', () => {
         const [first] = results;
         expect(first.key).toBe('/Applications/Safari.app');
         expect(first.subtitle).toBe('/Applications/Safari.app');
-        // Title carries HTML <b>...</b> around the fuzzy-matched chars so the
-        // UI can highlight them; strip tags before comparing.
-        expect(first.title.replace(/<[^>]+>/g, '')).toBe('Safari');
-        expect(first.title).toMatch(/<b>Saf<\/b>/i);
+        expect(first.title).toBe('Safari');
         expect(first.icon).toBe(ICON_SENTINEL);
         expect(first.action).toEqual({
             kind: 'openUrl',

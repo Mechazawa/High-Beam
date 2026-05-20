@@ -34,18 +34,6 @@ function basenameWithoutExt(path, ext) {
     return name.endsWith(ext) ? name.slice(0, -ext.length) : name;
 }
 
-function highlight(name, highlights) {
-    if (!highlights || highlights.length === 0) return name;
-    let out = "";
-    let cursor = 0;
-    for (const [start, end] of highlights) {
-        if (start > cursor) out += name.slice(cursor, start);
-        out += `<b>${name.slice(start, end)}</b>`;
-        cursor = end;
-    }
-    if (cursor < name.length) out += name.slice(cursor);
-    return out;
-}
 
 async function collectMacApps() {
     const apps = [];
@@ -193,7 +181,7 @@ export async function* query(input, _signal) {
         const icon = await resolveIcon(app);
         const result = {
             key: app.path,
-            title: highlight(app.appName, match.highlights),
+            title: app.appName,
             subtitle: app.path,
             weight: match.score * 100,
             action: actionFor(app),

@@ -72,7 +72,7 @@ export component QueryWindow inherits Window {
     // Derived: how tall the rows area should be. Each row is ~52px (padding
     // included). 9 rows max keeps the window from swallowing the whole screen.
     property <int> visible-row-count: min(results.length, max-rows);
-    property <length> rows-height: visible-row-count * 52px;
+    property <length> rows-height: visible-row-count * 56px;
     property <length> input-height: 80px;
 
     width: 760px;
@@ -166,7 +166,7 @@ export component QueryWindow inherits Window {
                 VerticalLayout {
                     spacing: 0px;
                     for row[idx] in results: TouchArea {
-                        height: 52px;
+                        height: 56px;
                         clicked => {
                             root.selected-index = idx;
                             root.invoke-selected();
@@ -181,13 +181,13 @@ export component QueryWindow inherits Window {
                                 spacing: 12px;
                                 alignment: start;
 
-                                // Icon slot — fixed 24x24 regardless of whether the row has an
+                                // Icon slot — fixed 36x36 regardless of whether the row has an
                                 // icon, so the title column lines up across rows. Image always
                                 // paints (defaults to a transparent empty image); the muted
                                 // outline behind it is what reads as "no icon" when present.
                                 Rectangle {
-                                    width: 24px;
-                                    height: 24px;
+                                    width: 36px;
+                                    height: 36px;
                                     y: (parent.height - self.height) / 2;
                                     border-radius: 4px;
                                     border-width: row.has-icon ? 0px : 1px;
