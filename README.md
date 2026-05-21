@@ -48,6 +48,16 @@ without the "unidentified developer" warning. Notarized builds — which
 wouldn't need this step — require a $99/yr Apple Developer ID; see
 [docs/distribution.md](docs/distribution.md) for the trade-off.
 
+### Release builds
+
+`.github/workflows/release.yml` builds macOS + Linux artifacts and
+publishes a GitHub Release whenever a `v*` tag is pushed. The notes are
+AI-summarised via the Anthropic API (set `ANTHROPIC_API_KEY` in repo
+secrets) with a raw-commit-log fallback; codesigned macOS builds need
+`MACOS_CERT_P12_BASE64` + `MACOS_CERT_PASSWORD`. All secrets are optional
+— the release still ships without them. Full setup in
+[docs/distribution.md § Release workflow](docs/distribution.md#release-workflow-github-actions).
+
 ## Usage
 
 - **macOS**: hit `Shift+Space` to open the launcher (default; configurable

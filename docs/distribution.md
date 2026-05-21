@@ -192,3 +192,107 @@ when none are present.
 Not yet wired. `cargo-packager` supports `.deb`, `.AppImage`, `.msi`, and
 `.exe` — adding them is a matter of fleshing out `[package.metadata.packager.linux]`
 / `.windows` blocks. Tracked under the Roadmap in the top-level README.
+
+## Release workflow (GitHub Actions)
+
+`.github/workflows/release.yml` automates the whole "tag → built artifacts
+attached to a GitHub Release with AI-written notes" round trip. Local
+`just bundle` still works the same; the workflow exists so you can stop
+running it by hand once tags start flowing.
+
+### Trigger
+
+Tag push only. Nothing fires on branch push or PR.
+
+```sh
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The workflow matches `v*`, so `v0.1.0`, `v1.0.0-rc1`, `v2.3.4` all
+trigger. Tags containing `-rc`, `-beta`, or `-alpha` are auto-flagged as
+GitHub pre-releases.
+
+### What runs
+
+1. **`build-macos`** (macos-latest) — runs `just bundle`, producing
+   `HighBeam_<ver>_<arch>.dmg` and `HighBeam.app`. If the macOS signing
+   secrets are present (see below), the bundle is codesigned with the
+   imported identity; otherwise it ships ad-hoc-signed and end users
+   still need the `xattr -dr com.apple.quarantine` step.
+2. **`build-linux`** (ubuntu-latest) — installs the cargo-packager system
+   deps (`libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libxdo-dev`,
+   `libayatana-appindicator3-dev`, `librsvg2-dev`, `dpkg`, `rpm`) and
+   runs `just bundle-tarball`, `just bundle-deb`, `just bundle-rpm`,
+   `just bundle-arch` to produce a tarball + `.deb` + `.rpm` +
+   `.pkg.tar.zst`.
+3. **`release`** (ubuntu-latest, `needs:` both) — downloads both
+   artifact sets, computes a commit-range changelog (`git log
+   $PREV_TAG..$GITHUB_REF_NAME`), asks Claude to summarise it, and
+   publishes a GitHub Release with all the artifacts attached.
+
+### Required secrets
+
+Set under **GitHub → Settings → Secrets and variables → Actions → New
+repository secret**:
+
+| Secret | Purpose | Behaviour without it |
+|--------|---------|----------------------|
+| `ANTHROPIC_API_KEY` | AI release-notes summary via the Anthropic API. Create one at <https://console.anthropic.com>. | Release still publishes; body is the raw commit log instead of a summary. |
+| `MACOS_CERT_P12_BASE64` | Base64-encoded `.p12` containing your codesigning cert + private key. | macOS bundle ships ad-hoc-signed; end users need `xattr -dr com.apple.quarantine`. |
+| `MACOS_CERT_PASSWORD` | The PKCS12 passphrase. Defaults to `highbeam-signing` per `scripts/create-signing-cert.sh`. | Same as missing `MACOS_CERT_P12_BASE64`. |
+
+The workflow's only hard dependency on secrets is none of them: every
+secret has a documented fallback. A tagged release will publish even if
+all three are absent.
+
+### Setting `MACOS_CERT_P12_BASE64`
+
+From the machine that has the cert in its keychain:
+
+```sh
+# Export the identity + private key to a .p12 (Keychain Access → File →
+# Export Items, or via the security CLI). `highbeam-signing-cert.p12` is
+# the conventional filename; the passphrase is `highbeam-signing` if you
+# used the default in scripts/create-signing-cert.sh.
+base64 -i highbeam-signing-cert.p12 -o cert.b64
+
+# Paste the contents of cert.b64 into the GitHub secret input box.
+pbcopy < cert.b64   # macOS shortcut
+
+# Don't leave the base64 file lying around.
+rm cert.b64
+```
+
+Pair it with `MACOS_CERT_PASSWORD` set to whatever passphrase you exported
+the .p12 with.
+
+### Swapping the AI summary model
+
+The model is hardcoded near the top of the inline Python block in the
+"Summarise changelog with Claude" step of `release.yml`:
+
+```python
+"model": "claude-sonnet-4-6",
+```
+
+Defaults to Sonnet 4.6 (quality summary at moderate cost). Swap to
+`claude-opus-4-7` for highest-quality output (~5× cost), or
+`claude-haiku-4-5` for cheap drafts (~1/4 the cost; lower polish).
+
+### Fallback behaviour
+
+The summarisation step is wrapped in three layers of belt-and-braces so
+Anthropic uptime never blocks a tag from publishing:
+
+1. **No `ANTHROPIC_API_KEY` secret** → the step logs the absence and
+   writes the raw commit log as the body. Exit 0.
+2. **Curl returns non-2xx** (rate limit, auth failure, API outage) →
+   `--fail-with-body` makes the script log the error body, then fall
+   back to the raw commit log. Exit 0.
+3. **API returns 200 but the JSON shape is unexpected** → the
+   response-parsing Python block catches the exception, logs a warning,
+   and falls back to the raw commit log. Exit 0.
+
+In all three cases the release still publishes; only the body content
+degrades.
