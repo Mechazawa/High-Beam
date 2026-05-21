@@ -393,6 +393,38 @@ cp -r plugins/greetings "$XDG_DATA_HOME/high-beam/plugins/"
 
 Restart High Beam. Type `greet Alice`. Done.
 
+## Step 8 — publish as install-by-URL
+
+Once the plugin is working locally, hand it out via `install <url>`
+instead of asking users to copy directories. The full publishing
+checklist lives in
+[plugin-authoring.md](./plugin-authoring.md#publishing--distribution);
+the short version is:
+
+1. `tar -czf greetings.tar.gz -C plugins/greetings .`
+2. Upload `greetings.tar.gz` and `manifest.json` to any HTTP(S) host
+   (S3, GitHub Releases, your own server).
+3. Add `archiveUrl` + `manifestUrl` to `manifest.json` so the install
+   flow knows where to download from and where to look for updates:
+
+   ```json
+   {
+     "name": "greetings",
+     "version": "1.0.0",
+     "archiveUrl": "https://example.com/greetings/1.0.0/greetings.tar.gz",
+     "manifestUrl": "https://example.com/greetings/manifest.json"
+   }
+   ```
+
+4. Tell your users to type `install https://example.com/greetings/manifest.json`
+   in the launcher. They get a streaming "Installing greetings…" → "Installed
+   greetings v1.0.0" row; the plugin is live immediately, no restart.
+5. When you ship a new version, bump `version` in the hosted manifest +
+   archive. Users run `update` to pick it up.
+
+The installer keeps the previous install at `<name>.backup.<unix_ms>/`
+so a botched ship is recoverable by hand.
+
 ## Where to go next
 
 - [sdk-reference.md](./sdk-reference.md) — complete SDK reference, one section

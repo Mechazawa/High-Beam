@@ -63,6 +63,12 @@ Type `settings` (or press Cmd+, when the launcher is open) to open the
 settings view — toggle plugins on/off and edit per-plugin options. Restart
 to apply.
 
+Type `install <url>` to install a plugin from a hosted manifest, `reload`
+to hot-swap a plugin's code without restarting the daemon, or `update` to
+check every plugin with a `manifestUrl` against its remote counterpart.
+See [docs/plugin-authoring.md](docs/plugin-authoring.md#publishing--distribution)
+for the publish-side guide.
+
 ## What ships
 
 The host binary plus one in-process built-in (Core: shutdown / sleep /
@@ -156,7 +162,6 @@ logging. After v1, in rough priority order:
 - Detail / preview pane (Yosemite Spotlight's right-side preview)
 - Live-reload of plugin options (today: restart-to-apply)
 - Strike-out / auto-disable on repeated plugin failures
-- Plugin store / install-by-URL (Hammerspoon-style)
 - Theme live-reload (watch `theme.toml`)
 - Real macOS vibrancy via `NSVisualEffectView`
 - Logfile rotation

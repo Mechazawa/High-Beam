@@ -1,5 +1,12 @@
 # Distribution
 
+This page covers distributing the High Beam app binary. For shipping a
+**plugin** to other people's running launchers — `install <manifestUrl>`
++ `update` — see
+[plugin-authoring.md § Publishing + distribution](./plugin-authoring.md#publishing--distribution).
+Plugin distribution is HTTP-only and independent of the app bundle: any
+running High Beam, however installed, can `install` a hosted plugin.
+
 `just bundle` produces two artifacts under `target/release/`:
 
 - `HighBeam.app` — the macOS app bundle, self-signed

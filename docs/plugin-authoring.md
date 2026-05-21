@@ -205,6 +205,82 @@ plugin can be tested in plain vitest. See
 full setup, and the [cookbook recipe](./plugin-cookbook.md#mock-sdk-calls-in-vitest)
 for mocking patterns.
 
+## Publishing + distribution
+
+Plugins can ship as install-by-URL packages so users don't have to clone
+or copy directories. The flow is:
+
+1. Build a `.tar.gz` (or `.zip`) of your plugin directory — anything that
+   would land under `<user-plugins-dir>/<name>/` after extraction. The
+   archive may wrap its contents in a single top-level directory or unpack
+   directly; the host accepts either layout.
+
+   ```sh
+   tar -czf my-plugin.tar.gz -C my-plugin .
+   # or, with the wrapping directory:
+   tar -czf my-plugin.tar.gz my-plugin
+   ```
+
+2. Host the archive somewhere your users can `GET` it (S3, GitHub
+   Releases, your own CDN — anything HTTP(S)).
+
+3. Add `archiveUrl` and `manifestUrl` to your `manifest.json`:
+
+   ```json
+   {
+     "name": "my-plugin",
+     "version": "1.0.0",
+     "archiveUrl": "https://example.com/my-plugin/1.0.0/my-plugin.tar.gz",
+     "manifestUrl": "https://example.com/my-plugin/manifest.json"
+   }
+   ```
+
+4. Publish the same `manifest.json` at `manifestUrl`. The host re-fetches
+   it on `update` to discover new versions.
+
+Users install with:
+
+```
+install https://example.com/my-plugin/manifest.json
+```
+
+…and update everything with `update`. Both commands stream progress in
+the launcher result list.
+
+### What the installer enforces
+
+- The fetched manifest must have `name`, `version`, and `archiveUrl`.
+  Any missing field aborts the install.
+- If the archive bundles its own `manifest.json`, the installer
+  cross-checks it against the URL-fetched manifest:
+  - `version` must match exactly (rejected on mismatch).
+  - If the embedded manifest carries `manifestUrl`, it must equal the
+    URL the user installed from (rejected on mismatch).
+- If the archive does not bundle a `manifest.json`, the URL-fetched one
+  is written into the destination dir with `manifestUrl` backfilled to
+  the install URL.
+- Pre-existing directories at `<user-plugins-dir>/<name>/` are renamed
+  to `<name>.backup.<unix_ms>/` rather than overwritten. For v1 this
+  backup is also your rollback mechanism — restore manually if a bad
+  update lands.
+
+### Versioning
+
+`version` strings should be valid semver — the `update` command treats
+them as such. Non-semver strings always compare as "no update due"
+(conservatism: we never replace a working plugin with an unparseable
+version label).
+
+### Archive formats
+
+- `.tar.gz` / `.tgz`
+- `.tar`
+- `.zip` (DEFLATE only — bzip2 / zstd backends were dropped to keep
+  the binary lean)
+
+Format detection looks at the URL extension first, falls back to the
+HTTP `Content-Type` header.
+
 ## Failure handling
 
 - `query()` throws → host logs to `plugin.log`, drops yielded results
