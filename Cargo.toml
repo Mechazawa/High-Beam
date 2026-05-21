@@ -14,7 +14,7 @@ homepage = "https://github.com/Mechazawa/high-beam"
 # `just bundle` produces both artifacts.
 [package.metadata.packager]
 product-name = "HighBeam"
-identifier = "com.high-beam.HighBeam"
+identifier = "at.ioexception.highbeam"
 # `binaries` tells the packager which build outputs to bundle; the path is
 # relative to `out-dir` and resolved against the cargo target dir at runtime.
 binaries = [{ path = "high-beam", main = true }]
@@ -30,28 +30,53 @@ icons = ["bundle/icon.png"]
 # vitest configs, node_modules, *.test.*, lockfiles) stay out of the
 # bundle by simply not being listed.
 resources = [
-    { src = "examples/plugins/calculator/manifest.json",   target = "plugins/calculator/manifest.json" },
-    { src = "examples/plugins/calculator/plugin.js",       target = "plugins/calculator/plugin.js" },
-    { src = "examples/plugins/http-codes/manifest.json",   target = "plugins/http-codes/manifest.json" },
-    { src = "examples/plugins/http-codes/plugin.js",       target = "plugins/http-codes/plugin.js" },
-    { src = "examples/plugins/http-codes/http.json",       target = "plugins/http-codes/http.json" },
-    { src = "examples/plugins/app-launcher/manifest.json", target = "plugins/app-launcher/manifest.json" },
-    { src = "examples/plugins/app-launcher/plugin.js",     target = "plugins/app-launcher/plugin.js" },
-    { src = "examples/plugins/paper-size/manifest.json",   target = "plugins/paper-size/manifest.json" },
-    { src = "examples/plugins/paper-size/plugin.js",       target = "plugins/paper-size/plugin.js" },
-    { src = "examples/plugins/dnd/manifest.json",          target = "plugins/dnd/manifest.json" },
-    { src = "examples/plugins/dnd/plugin.js",              target = "plugins/dnd/plugin.js" },
-    { src = "examples/plugins/dnd/5eSpells.json",          target = "plugins/dnd/5eSpells.json" },
-    { src = "themes/yosemite-spotlight.toml",              target = "themes/yosemite-spotlight.toml" },
+    { src = "examples/plugins/app-launcher/manifest.json",      target = "plugins/app-launcher/manifest.json" },
+    { src = "examples/plugins/app-launcher/plugin.js",          target = "plugins/app-launcher/plugin.js" },
+    { src = "examples/plugins/calculator/manifest.json",        target = "plugins/calculator/manifest.json" },
+    { src = "examples/plugins/calculator/plugin.js",            target = "plugins/calculator/plugin.js" },
+    { src = "examples/plugins/color-converter/manifest.json",   target = "plugins/color-converter/manifest.json" },
+    { src = "examples/plugins/color-converter/plugin.js",       target = "plugins/color-converter/plugin.js" },
+    { src = "examples/plugins/dictionary-linux/manifest.json",  target = "plugins/dictionary-linux/manifest.json" },
+    { src = "examples/plugins/dictionary-linux/plugin.js",      target = "plugins/dictionary-linux/plugin.js" },
+    { src = "examples/plugins/dictionary-macos/manifest.json",  target = "plugins/dictionary-macos/manifest.json" },
+    { src = "examples/plugins/dictionary-macos/plugin.js",      target = "plugins/dictionary-macos/plugin.js" },
+    { src = "examples/plugins/dnd/manifest.json",               target = "plugins/dnd/manifest.json" },
+    { src = "examples/plugins/dnd/plugin.js",                   target = "plugins/dnd/plugin.js" },
+    { src = "examples/plugins/dnd/5eSpells.json",               target = "plugins/dnd/5eSpells.json" },
+    { src = "examples/plugins/file-search/manifest.json",       target = "plugins/file-search/manifest.json" },
+    { src = "examples/plugins/file-search/plugin.js",           target = "plugins/file-search/plugin.js" },
+    { src = "examples/plugins/http-codes/manifest.json",        target = "plugins/http-codes/manifest.json" },
+    { src = "examples/plugins/http-codes/plugin.js",            target = "plugins/http-codes/plugin.js" },
+    { src = "examples/plugins/http-codes/http.json",            target = "plugins/http-codes/http.json" },
+    { src = "examples/plugins/kill-process/manifest.json",      target = "plugins/kill-process/manifest.json" },
+    { src = "examples/plugins/kill-process/plugin.js",          target = "plugins/kill-process/plugin.js" },
+    { src = "examples/plugins/paper-size/manifest.json",        target = "plugins/paper-size/manifest.json" },
+    { src = "examples/plugins/paper-size/plugin.js",            target = "plugins/paper-size/plugin.js" },
+    { src = "examples/plugins/prefpanes/manifest.json",         target = "plugins/prefpanes/manifest.json" },
+    { src = "examples/plugins/prefpanes/plugin.js",             target = "plugins/prefpanes/plugin.js" },
+    { src = "examples/plugins/quick-links/manifest.json",       target = "plugins/quick-links/manifest.json" },
+    { src = "examples/plugins/quick-links/plugin.js",           target = "plugins/quick-links/plugin.js" },
+    { src = "examples/plugins/quick-links/links.json",          target = "plugins/quick-links/links.json" },
+    { src = "examples/plugins/unit-conversions/manifest.json",  target = "plugins/unit-conversions/manifest.json" },
+    { src = "examples/plugins/unit-conversions/plugin.js",      target = "plugins/unit-conversions/plugin.js" },
+    { src = "examples/plugins/web-search/manifest.json",        target = "plugins/web-search/manifest.json" },
+    { src = "examples/plugins/web-search/plugin.js",            target = "plugins/web-search/plugin.js" },
+    { src = "examples/plugins/window-mgmt/manifest.json",       target = "plugins/window-mgmt/manifest.json" },
+    { src = "examples/plugins/window-mgmt/plugin.js",           target = "plugins/window-mgmt/plugin.js" },
+    { src = "examples/plugins/xkcd/manifest.json",              target = "plugins/xkcd/manifest.json" },
+    { src = "examples/plugins/xkcd/plugin.js",                  target = "plugins/xkcd/plugin.js" },
+    { src = "themes/yosemite-spotlight.toml",                   target = "themes/yosemite-spotlight.toml" },
 ]
 # `app` is the .app bundle; `dmg` wraps it in a drag-to-Applications disk
 # image. Both are macOS-only.
 formats = ["app", "dmg"]
 
 [package.metadata.packager.macos]
-# Ad-hoc signing — enough to run locally; real distribution to other Macs
-# needs a Developer ID Application certificate (see docs/distribution.md).
-signing-identity = "-"
+# Self-signed identity. See `docs/distribution.md` for how to create the
+# matching keychain cert via Keychain Access. End users still need to run
+# `xattr -dr com.apple.quarantine /Applications/HighBeam.app` post-install
+# because Gatekeeper only trusts Apple-CA-issued Developer ID certs.
+signing-identity = "High Beam Self-Signed"
 # Hides the daemon from the Dock and Cmd-Tab. Pairs with the runtime
 # `NSApp.setActivationPolicy(.accessory)` fallback for `cargo run`.
 background-app = true
