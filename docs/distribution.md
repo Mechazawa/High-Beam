@@ -73,9 +73,31 @@ array in `Cargo.toml`.
 The bundle config uses `signing-identity = "-"` — Apple's ad-hoc signature
 identity. This is sufficient to RUN the app locally on the machine that
 built it, but every other Mac will see Gatekeeper's "unidentified developer"
-warning. `spctl --assess` deliberately rejects ad-hoc-signed apps.
+warning when first launching it.
 
-For real distribution you need:
+### Ad-hoc path (free) — what users see
+
+After dragging the .app to `/Applications`, the user runs:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/HighBeam.app
+```
+
+This strips the download quarantine bit so macOS launches the app
+without prompting. `spctl --assess --verbose /Applications/HighBeam.app`
+will still report `rejected (the code is valid but does not seem to be
+an app)` for ad-hoc bundles — that's expected; Gatekeeper trust is
+strictly a signed-and-notarized story. The `xattr` workaround sits
+beside that reality: it tells macOS the user vouched for the launch.
+
+### The trade-off
+
+| Path | Cost | Gatekeeper trust | User friction |
+|------|------|------------------|---------------|
+| Ad-hoc (current)       | $0      | No                                | One `xattr -dr` command after install |
+| Developer ID + notarize | $99/yr | Yes — launches cleanly everywhere | None                                  |
+
+For real distribution to other Macs without the `xattr` step, you need:
 
 ### 1. Enroll in the Apple Developer Program
 

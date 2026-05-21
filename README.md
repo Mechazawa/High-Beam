@@ -34,10 +34,24 @@ per-plugin logging — are all in. The pre-v1.0 backlog is in
 
 Stable Rust, edition 2024. Pinned via `rust-toolchain.toml`.
 
+### macOS Gatekeeper bypass (one-time, post-install)
+
+After dragging `HighBeam.app` to `/Applications`, run:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/HighBeam.app
+```
+
+High Beam is ad-hoc signed (the free signing path). The command above
+strips the download quarantine so macOS launches it without the
+"unidentified developer" warning. Notarized builds — which wouldn't need
+this step — require a $99/yr Apple Developer ID; see
+[docs/distribution.md](docs/distribution.md) for the trade-off.
+
 ## Usage
 
-- **macOS**: hit `Shift+Space` to open the launcher (default; not yet
-  user-configurable).
+- **macOS**: hit `Shift+Space` to open the launcher (default; configurable
+  via Settings → Global → Hotkey, restart to apply).
 - **Linux**: bind `highbeam --open` to a hotkey in your WM / DE keyboard
   settings — there's no portable global hotkey API on Wayland, so High Beam
   punts to the WM. See [docs/platform.md](docs/platform.md).
@@ -146,7 +160,6 @@ logging. After v1, in rough priority order:
 - Theme live-reload (watch `theme.toml`)
 - Real macOS vibrancy via `NSVisualEffectView`
 - Logfile rotation
-- User-configurable global hotkey (currently hardcoded)
 - Wayland global hotkey via `xdg-desktop-portal`
 - Windows port
 
