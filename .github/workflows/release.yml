@@ -1,0 +1,350 @@
+# Release pipeline for high-beam. Triggers strictly on `v*` tags, never on
+# branch push / PR — tagging is the explicit "publish a release" intent.
+#
+# Pipeline shape:
+#   build-macos (macos-latest)  → .app + .dmg (signed when secrets present)
+#   build-linux (ubuntu-latest) → tarball + .deb + .rpm + .pkg.tar.zst
+#   release     (ubuntu-latest) → AI-summarised notes + GitHub release
+#
+# The release job tolerates a missing ANTHROPIC_API_KEY or a flaky API by
+# falling back to the raw commit log — Anthropic going down should never
+# block a tag from publishing.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# `softprops/action-gh-release` needs write access to create the release
+# and upload assets. Scoped at workflow level so all jobs share it
+# (the build jobs don't strictly need it, but the cost is zero).
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: build (macos)
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      # fetch-depth: 0 so the release job can `git describe` across the
+      # full history when computing the previous-tag range.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Matches ci.yml: rust-toolchain.toml pins stable + clippy + rustfmt.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+
+      # cargo-packager compiles from source (~2 min on a fresh runner).
+      # Skipped via a separate cache step: the binary is hashed by the
+      # cargo-packager crate version we install, so cache invalidates
+      # automatically when we bump.
+      - name: Install cargo-packager
+        run: cargo install cargo-packager --locked
+
+      # Conditional codesigning: only runs when the maintainer has uploaded
+      # a .p12 + password to repo secrets. Absent secrets → bundle ships
+      # ad-hoc-signed, end users need the `xattr -dr com.apple.quarantine`
+      # one-liner documented in docs/distribution.md.
+      - name: Import macOS signing certificate
+        if: env.MACOS_CERT_P12_BASE64 != ''
+        env:
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          # Decode the .p12 from the secret. The runner's $RUNNER_TEMP is
+          # purged at job end so the cert never persists.
+          CERT_PATH="$RUNNER_TEMP/highbeam-signing.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/highbeam-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+
+          echo "$MACOS_CERT_P12_BASE64" | base64 --decode > "$CERT_PATH"
+
+          # Ephemeral keychain so we don't pollute the runner's login.keychain
+          # (which doesn't exist on GHA macos-latest anyway, but the pattern
+          # is the GitHub-recommended one and works across runner refreshes).
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Import + grant codesign access without an interactive prompt.
+          # -T /usr/bin/codesign whitelists codesign as a partition-list user.
+          security import "$CERT_PATH" \
+              -P "$MACOS_CERT_PASSWORD" \
+              -A \
+              -t cert \
+              -f pkcs12 \
+              -k "$KEYCHAIN_PATH"
+          security set-key-partition-list \
+              -S apple-tool:,apple:,codesign: \
+              -s \
+              -k "$KEYCHAIN_PASSWORD" \
+              "$KEYCHAIN_PATH" > /dev/null
+
+          # Make the ephemeral keychain the default + put it in the search
+          # list so `codesign` and `cargo packager` find the identity.
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+          rm -f "$CERT_PATH"
+
+      - name: Build .app + .dmg
+        run: just bundle
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: |
+            target/release/HighBeam_*.dmg
+            target/release/HighBeam.app
+          if-no-files-found: error
+
+  build-linux:
+    name: build (linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install just
+        uses: taiki-e/install-action@just
+
+      # cargo-packager's Linux formats (deb/rpm/pacman) shell out to dpkg /
+      # rpmbuild / makepkg for the actual archive; we install the build-time
+      # deps for the Slint/winit stack here too. The list mirrors what the
+      # crate's docs flag as required on Ubuntu 22.04+.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+              libwebkit2gtk-4.1-dev \
+              libgtk-3-dev \
+              libxdo-dev \
+              libssl-dev \
+              libayatana-appindicator3-dev \
+              librsvg2-dev \
+              dpkg \
+              rpm
+
+      - name: Install cargo-packager
+        run: cargo install cargo-packager --locked
+
+      # These four recipes are added by the sibling agent wiring Linux
+      # packaging. They wrap `cargo packager --release --formats <fmt>` so
+      # the workflow stays format-agnostic. If a recipe is renamed, update
+      # the matching `just` call below.
+      - name: Build tarball
+        run: just bundle-tarball
+
+      - name: Build .deb
+        run: just bundle-deb
+
+      - name: Build .rpm
+        run: just bundle-rpm
+
+      - name: Build Arch package
+        run: just bundle-arch
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          # cargo-packager writes .deb / .rpm / .pkg.tar.zst into
+          # target/release/; the tarball recipe writes into
+          # target/release/dist/. Glob both so we don't depend on a single
+          # output dir convention.
+          path: |
+            target/release/dist/*
+            target/release/*.deb
+            target/release/*.rpm
+            target/release/*.pkg.tar.zst
+          if-no-files-found: error
+
+  release:
+    name: publish release
+    runs-on: ubuntu-latest
+    needs: [build-macos, build-linux]
+    timeout-minutes: 15
+
+    steps:
+      # fetch-depth: 0 for the `git describe` / `git log` range below.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: macos
+          path: dist/macos
+
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux
+          path: dist/linux
+
+      # Build the raw commit-log changelog between the previous tag and the
+      # current one. `--exclude` keeps the lookup from returning the current
+      # tag itself; the `|| true` fallback covers the first-ever release.
+      - name: Generate raw changelog
+        id: changelog
+        run: |
+          set -euo pipefail
+          PREV_TAG=$(git describe --tags --abbrev=0 --exclude="$GITHUB_REF_NAME" 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+              echo "Previous tag: $PREV_TAG"
+              git log --no-merges --pretty=format:'- %s (%h)' "$PREV_TAG..$GITHUB_REF_NAME" > changelog.txt
+          else
+              echo "No previous tag found; using full history."
+              git log --no-merges --pretty=format:'- %s (%h)' "$GITHUB_REF_NAME" > changelog.txt
+          fi
+          echo "--- changelog.txt ---"
+          cat changelog.txt
+
+      # AI summary via Anthropic. The script is failure-tolerant: any
+      # non-200 / missing key / parse error falls back to the raw commit
+      # log so the release still publishes. We do not gate the release on
+      # Anthropic uptime.
+      - name: Summarise changelog with Claude
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -uo pipefail
+
+          # Header that gets prepended regardless of summary outcome.
+          {
+              echo "# $TAG_NAME"
+              echo
+          } > release-body.md
+
+          fallback() {
+              echo "$1"
+              {
+                  cat changelog.txt
+                  echo
+              } >> release-body.md
+              # No <details> wrapper when we're _only_ printing the raw log
+              # — there's nothing to hide behind a fold.
+          }
+
+          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+              fallback "ANTHROPIC_API_KEY not set; using raw commit log."
+              exit 0
+          fi
+
+          # Build the JSON request body in Python to avoid shell-escaping
+          # pain with multi-line commit messages.
+          python3 - <<'PY' > request.json
+          import json, os, pathlib
+          changelog = pathlib.Path("changelog.txt").read_text()
+          tag = os.environ["TAG_NAME"]
+          payload = {
+              # Sonnet 4.6: quality summary at lower $/token than Opus.
+              # Swap to "claude-opus-4-7" for higher quality, or
+              # "claude-haiku-4-5" for cheap drafts.
+              "model": "claude-sonnet-4-6",
+              "max_tokens": 1024,
+              "system": (
+                  "You're writing release notes for a developer tool. "
+                  "Given a list of git commit messages, produce 2-4 short "
+                  "paragraphs grouping related changes thematically. Focus "
+                  "on what's new for users, not internal refactors. Skip "
+                  "CI / chore / lint commits. Use short headlines like "
+                  "'New plugins' / 'UX' / 'Build & distribution'. Output "
+                  "markdown."
+              ),
+              "messages": [
+                  {
+                      "role": "user",
+                      "content": (
+                          f"Release tag: {tag}\n\n"
+                          f"Commit log:\n{changelog}"
+                      ),
+                  }
+              ],
+          }
+          print(json.dumps(payload))
+          PY
+
+          # `--fail-with-body` makes curl return non-zero on 4xx/5xx while
+          # still writing the body to stdout so we can log it.
+          if ! curl --fail-with-body --silent --show-error \
+                  -o response.json \
+                  -X POST https://api.anthropic.com/v1/messages \
+                  -H "x-api-key: $ANTHROPIC_API_KEY" \
+                  -H "anthropic-version: 2023-06-01" \
+                  -H "content-type: application/json" \
+                  -d @request.json; then
+              echo "::warning::Anthropic API call failed; falling back to raw changelog."
+              if [ -f response.json ]; then
+                  echo "--- response body ---"
+                  cat response.json
+              fi
+              fallback ""
+              exit 0
+          fi
+
+          if ! python3 -c '
+          import json, sys, pathlib
+          data = json.load(open("response.json"))
+          text = data["content"][0]["text"]
+          pathlib.Path("summary.md").write_text(text)
+          ' ; then
+              echo "::warning::Could not parse Anthropic response; falling back to raw changelog."
+              fallback ""
+              exit 0
+          fi
+
+          {
+              cat summary.md
+              echo
+              echo
+              echo "<details><summary>Full commit log</summary>"
+              echo
+              cat changelog.txt
+              echo
+              echo "</details>"
+          } >> release-body.md
+
+          echo "--- release-body.md ---"
+          cat release-body.md
+
+      # softprops/action-gh-release is the de-facto choice for tag-driven
+      # GitHub releases. Pinned to v2 (current major); the `files:` glob
+      # uploads everything the build jobs staged into dist/.
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body_path: release-body.md
+          # Auto-flag `vX.Y.Z-rc1` / `-beta` / `-alpha` tags as pre-releases
+          # so they don't appear under "Latest release" on the repo home.
+          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
+          draft: false
+          fail_on_unmatched_files: true
+          files: |
+            dist/macos/*
+            dist/linux/*
