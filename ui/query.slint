@@ -175,6 +175,10 @@ export component QueryWindow inherits Window {
     // Settings → Global → "Recenter window" — clears any saved position and
     // re-centers the currently visible window. No-op if nothing was saved.
     callback recenter-window();
+    // Settings → Global → "Open config directory" — opens the platform
+    // config dir in Finder / xdg-open. The directory holds settings.toml,
+    // theme.toml, and the per-plugin user-edited files.
+    callback open-config-dir();
 
     // forward-focus makes the input the focus target whenever the window
     // itself is focused. Combined with the explicit `input.focus()` call in
@@ -770,6 +774,42 @@ export component QueryWindow inherits Window {
                                 }
                                 Text {
                                     text: "Forgets the saved drag position and re-centers the launcher. To do this manually, delete [global.launcher_position] from settings.toml.";
+                                    color: root.muted-color;
+                                    font-size: root.font-size-subtitle;
+                                    wrap: word-wrap;
+                                }
+                            }
+
+                            // Config files group — surfaces the on-disk
+                            // location for users who want to hand-edit
+                            // settings.toml / theme.toml / plugin data.
+                            VerticalLayout {
+                                spacing: 4px;
+                                Text {
+                                    text: "Config files";
+                                    color: root.foreground-color;
+                                    font-size: root.font-size-title;
+                                }
+                                TouchArea {
+                                    width: 180px;
+                                    height: 28px;
+                                    clicked => {
+                                        root.open-config-dir();
+                                    }
+                                    Rectangle {
+                                        background: root.selection-color;
+                                        border-radius: 4px;
+                                        Text {
+                                            text: "Open config directory";
+                                            color: root.foreground-color;
+                                            font-size: root.font-size-subtitle;
+                                            vertical-alignment: center;
+                                            horizontal-alignment: center;
+                                        }
+                                    }
+                                }
+                                Text {
+                                    text: "Opens the platform config dir in Finder. Holds settings.toml, theme.toml, and per-plugin overrides.";
                                     color: root.muted-color;
                                     font-size: root.font-size-subtitle;
                                     wrap: word-wrap;

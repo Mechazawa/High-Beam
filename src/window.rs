@@ -52,6 +52,15 @@ pub(crate) fn configure(window: &QueryWindow, settings: SettingsController) {
         }
     });
 
+    window.on_open_config_dir(|| match crate::paths::config_dir() {
+        Ok(path) => {
+            if let Err(err) = open::that(&path) {
+                tracing::warn!(path = %path.display(), %err, "settings: open config dir failed");
+            }
+        }
+        Err(err) => tracing::warn!(%err, "settings: could not resolve config dir"),
+    });
+
     // winit Focused(true) is the earliest tick at which Slint's focus request
     // is guaranteed to land on the input. Calling `invoke_focus_input` from
     // `show()` is too early on macOS — the NSWindow isn't yet the key window
