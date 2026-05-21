@@ -46,8 +46,8 @@ Notes:
 - The `i` flag makes the trigger case-insensitive without a separate
   `.toLowerCase()` call.
 
-Real plugin: `examples/plugins/http-codes` (regex `/^http\s*(\d*)/i`),
-`examples/plugins/paper-size` (regex `/^\s*paper\s+/i`).
+Real plugin: `plugins/http-codes` (regex `/^http\s*(\d*)/i`),
+`plugins/paper-size` (regex `/^\s*paper\s+/i`).
 
 ## Fuzzy-match a bundled list
 
@@ -95,7 +95,7 @@ Notes:
 - `score * 100` maps the normalised score onto the host's `0..100` weight
   range so frecency can combine fuzz score with pick history.
 
-Real plugin: `examples/plugins/dnd`.
+Real plugin: `plugins/dnd`.
 
 ## Load bundled data via `fs.readText`
 
@@ -140,8 +140,8 @@ Manifest:
 }
 ```
 
-Real plugin: `examples/plugins/http-codes` (`http.json`),
-`examples/plugins/dnd` (`5eSpells.json`).
+Real plugin: `plugins/http-codes` (`http.json`),
+`plugins/dnd` (`5eSpells.json`).
 
 ## Cache expensive computations via `fs.cache`
 
@@ -218,7 +218,7 @@ Manifest:
 }
 ```
 
-Real plugin: `examples/plugins/xkcd` builds a title index lazily and
+Real plugin: `plugins/xkcd` builds a title index lazily and
 refreshes on a 24h TTL.
 
 ## HTTP request with timeout and abort
@@ -277,7 +277,7 @@ Notes:
   one's.
 - The plugin must declare the `http` capability.
 
-Real plugin: `examples/plugins/xkcd` (HTTP + abort + cache).
+Real plugin: `plugins/xkcd` (HTTP + abort + cache).
 
 ## Cross-platform behavior
 
@@ -326,7 +326,7 @@ where it can't work at all:
 The host won't even load it on Linux. `platforms` absent loads everywhere;
 empty `[]` shelves the plugin entirely (never loads).
 
-Real plugin: `examples/plugins/app-launcher` (`isMacOS()` / `isLinux()` to
+Real plugin: `plugins/app-launcher` (`isMacOS()` / `isLinux()` to
 branch between `.app` and `.desktop` discovery).
 
 ## Read user-editable options via `highbeam:settings`
@@ -379,7 +379,7 @@ Notes:
   — they return `undefined` on mismatch rather than handing you the wrong
   type.
 
-Real plugin: `examples/plugins/quick-links` (`github_username` +
+Real plugin: `plugins/quick-links` (`github_username` +
 `result_limit` options).
 
 ## Mock SDK calls in vitest
@@ -483,8 +483,8 @@ Notes:
   tests. Without it, a `let cache = null` declared at module scope carries
   over.
 
-Real test suites: `examples/plugins/http-codes/http-codes.test.js`
-(mocking `fs.readText`), `examples/plugins/xkcd/xkcd.test.js`
+Real test suites: `plugins/http-codes/http-codes.test.js`
+(mocking `fs.readText`), `plugins/xkcd/xkcd.test.js`
 (mocking `http.get` + `fs.readCache` + `vi.resetModules`).
 
 ## Stream results vs return all at once
@@ -527,7 +527,7 @@ Notes:
 - Don't `await new Promise(r => setTimeout(r, 0))` between every yield —
   that's superstition. The host iterates as fast as you yield.
 
-Real plugin: `examples/plugins/slow-echo` is the streaming + abort smoke
+Real plugin: `plugins/slow-echo` is the streaming + abort smoke
 test (three rows, 300ms apart).
 
 ## Pinned results vs frecency-ranked
@@ -572,10 +572,10 @@ Notes:
 
 Real plugins:
 
-- `examples/plugins/calculator` — pinned, weight 100.
-- `examples/plugins/http-codes` — pinned, weight scales with prefix length.
-- `examples/plugins/dnd` — non-pinned, weight from `match.fuzzy` score.
-- `examples/plugins/frecency-demo` — three equal-weight rows; pick one and
+- `plugins/calculator` — pinned, weight 100.
+- `plugins/http-codes` — pinned, weight scales with prefix length.
+- `plugins/dnd` — non-pinned, weight from `match.fuzzy` score.
+- `plugins/frecency-demo` — three equal-weight rows; pick one and
   watch it bubble up.
 
 ## Tune `debounceMs` / `timeoutMs` / `memoryMb`
@@ -590,10 +590,10 @@ isn't trivial.
   paper-size).
 - `10–50` for "loads bundled JSON on first hit" — the load is amortised
   but the parse on first match is non-zero
-  (`examples/plugins/http-codes`: 10, `examples/plugins/dnd`: 50).
+  (`plugins/http-codes`: 10, `plugins/dnd`: 50).
 - `100+` for plugins that scan disk or hit the network — gives the user
   time to finish typing before the work starts
-  (`examples/plugins/app-launcher`: 100).
+  (`plugins/app-launcher`: 100).
 
 `timeoutMs` — wall-clock kill switch for `query()`. The rquickjs interrupt
 hook fires after this elapses, killing the context's current async

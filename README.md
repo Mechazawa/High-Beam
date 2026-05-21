@@ -108,7 +108,7 @@ for the publish-side guide.
 
 The host binary plus one in-process built-in (Core: shutdown / sleep /
 restart / lock / exit High Beam / version readout). Plus, in
-`examples/plugins/`, eight reference plugins you can drop into your
+`plugins/`, eight reference plugins you can drop into your
 plugins directory:
 
 | Plugin           | What it does                                                         |
@@ -126,8 +126,8 @@ plugins directory:
 Copy or symlink any of them into your plugin directory:
 
 ```bash
-cp -r examples/plugins/echo ~/Library/Application\ Support/high-beam/plugins/echo  # macOS
-cp -r examples/plugins/echo "$XDG_DATA_HOME/high-beam/plugins/echo"                # Linux
+cp -r plugins/echo ~/Library/Application\ Support/high-beam/plugins/echo  # macOS
+cp -r plugins/echo "$XDG_DATA_HOME/high-beam/plugins/echo"                # Linux
 ```
 
 …then restart High Beam.

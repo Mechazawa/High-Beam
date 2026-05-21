@@ -12,28 +12,28 @@ use tokio_util::sync::CancellationToken;
 
 const SMOKE_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Example plugins under `examples/plugins/` whose code is loadable today.
+/// Plugins under `plugins/` whose code is loadable today.
 const EXAMPLES: &[&str] = &[
-    "examples/plugins/app-launcher",
-    "examples/plugins/calculator",
-    "examples/plugins/color-converter",
-    "examples/plugins/dictionary-linux",
-    "examples/plugins/dictionary-macos",
-    "examples/plugins/dnd",
-    "examples/plugins/echo",
-    "examples/plugins/echo-ts",
-    "examples/plugins/file-search",
-    "examples/plugins/frecency-demo",
-    "examples/plugins/http-codes",
-    "examples/plugins/kill-process",
-    "examples/plugins/paper-size",
-    "examples/plugins/prefpanes",
-    "examples/plugins/quick-links",
-    "examples/plugins/slow-echo",
-    "examples/plugins/unit-conversions",
-    "examples/plugins/web-search",
-    "examples/plugins/window-mgmt",
-    "examples/plugins/xkcd",
+    "plugins/app-launcher",
+    "plugins/calculator",
+    "plugins/color-converter",
+    "plugins/dictionary-linux",
+    "plugins/dictionary-macos",
+    "plugins/dnd",
+    "plugins/echo",
+    "plugins/echo-ts",
+    "plugins/file-search",
+    "plugins/frecency-demo",
+    "plugins/http-codes",
+    "plugins/kill-process",
+    "plugins/paper-size",
+    "plugins/prefpanes",
+    "plugins/quick-links",
+    "plugins/slow-echo",
+    "plugins/unit-conversions",
+    "plugins/web-search",
+    "plugins/window-mgmt",
+    "plugins/xkcd",
 ];
 
 fn rt() -> tokio::runtime::Runtime {
@@ -68,125 +68,120 @@ fn smoke_test(dir: &str) {
 
 #[test]
 fn calculator_loads_in_rquickjs() {
-    smoke_test("examples/plugins/calculator");
+    smoke_test("plugins/calculator");
 }
 
 #[test]
 fn dnd_loads_in_rquickjs() {
-    smoke_test("examples/plugins/dnd");
+    smoke_test("plugins/dnd");
 }
 
 #[test]
 fn echo_loads_in_rquickjs() {
-    smoke_test("examples/plugins/echo");
+    smoke_test("plugins/echo");
 }
 
 #[test]
 fn echo_ts_loads_in_rquickjs() {
-    smoke_test("examples/plugins/echo-ts");
+    smoke_test("plugins/echo-ts");
 }
 
 #[test]
 fn frecency_demo_loads_in_rquickjs() {
-    smoke_test("examples/plugins/frecency-demo");
+    smoke_test("plugins/frecency-demo");
 }
 
 #[test]
 fn http_codes_loads_in_rquickjs() {
-    smoke_test("examples/plugins/http-codes");
+    smoke_test("plugins/http-codes");
 }
 
 #[test]
 fn paper_size_loads_in_rquickjs() {
-    smoke_test("examples/plugins/paper-size");
+    smoke_test("plugins/paper-size");
 }
 
 #[test]
 fn slow_echo_loads_in_rquickjs() {
-    smoke_test("examples/plugins/slow-echo");
+    smoke_test("plugins/slow-echo");
 }
 
 #[test]
 fn app_launcher_loads_in_rquickjs() {
-    smoke_test("examples/plugins/app-launcher");
+    smoke_test("plugins/app-launcher");
 }
 
 #[test]
 fn color_converter_loads_in_rquickjs() {
-    smoke_test("examples/plugins/color-converter");
+    smoke_test("plugins/color-converter");
 }
 
 #[test]
 fn dictionary_linux_loads_in_rquickjs() {
-    smoke_test("examples/plugins/dictionary-linux");
+    smoke_test("plugins/dictionary-linux");
 }
 
 #[test]
 fn dictionary_macos_loads_in_rquickjs() {
-    smoke_test("examples/plugins/dictionary-macos");
+    smoke_test("plugins/dictionary-macos");
 }
 
 #[test]
 fn file_search_loads_in_rquickjs() {
-    smoke_test("examples/plugins/file-search");
+    smoke_test("plugins/file-search");
 }
 
 #[test]
 fn kill_process_loads_in_rquickjs() {
-    smoke_test("examples/plugins/kill-process");
+    smoke_test("plugins/kill-process");
 }
 
 #[test]
 fn prefpanes_loads_in_rquickjs() {
-    smoke_test("examples/plugins/prefpanes");
+    smoke_test("plugins/prefpanes");
 }
 
 #[test]
 fn quick_links_loads_in_rquickjs() {
-    smoke_test("examples/plugins/quick-links");
+    smoke_test("plugins/quick-links");
 }
 
 #[test]
 fn unit_conversions_loads_in_rquickjs() {
-    smoke_test("examples/plugins/unit-conversions");
+    smoke_test("plugins/unit-conversions");
 }
 
 #[test]
 fn web_search_loads_in_rquickjs() {
-    smoke_test("examples/plugins/web-search");
+    smoke_test("plugins/web-search");
 }
 
 #[test]
 fn window_mgmt_loads_in_rquickjs() {
-    smoke_test("examples/plugins/window-mgmt");
+    smoke_test("plugins/window-mgmt");
 }
 
 #[test]
 fn xkcd_loads_in_rquickjs() {
-    smoke_test("examples/plugins/xkcd");
+    smoke_test("plugins/xkcd");
 }
 
 #[test]
 fn examples_list_matches_disk() {
     // Fail loudly when a new example shows up so the smoke runner doesn't
     // silently skip it.
-    let mut found: Vec<String> = std::fs::read_dir("examples/plugins")
-        .expect("read examples/plugins")
+    let mut found: Vec<String> = std::fs::read_dir("plugins")
+        .expect("read plugins")
         .filter_map(Result::ok)
         .filter(|e| e.path().is_dir())
         .filter(|e| e.path().join("manifest.json").exists())
-        .map(|e| {
-            format!(
-                "examples/plugins/{}",
-                e.file_name().to_string_lossy().into_owned()
-            )
-        })
+        .map(|e| format!("plugins/{}", e.file_name().to_string_lossy().into_owned()))
         .collect();
     found.sort();
     let mut expected: Vec<String> = EXAMPLES.iter().map(|s| (*s).to_string()).collect();
     expected.sort();
     assert_eq!(
         found, expected,
-        "examples/plugins/ membership changed — update EXAMPLES (and add a smoke test)"
+        "plugins/ membership changed — update EXAMPLES (and add a smoke test)"
     );
 }

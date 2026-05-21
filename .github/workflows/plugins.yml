@@ -1,11 +1,11 @@
-# vitest for every example plugin that ships a package.json + test script.
+# vitest for every default plugin that ships a package.json + test script.
 # Matrix-per-plugin so a single failing plugin doesn't mask others, and
 # runs go parallel.
 #
-# Plugin list is hardcoded — if a sibling agent adds a new plugin under
-# examples/plugins/ with its own package.json, append it to the matrix
-# below. `frecency-demo` and `slow-echo` are intentionally absent: they
-# have no package.json (pure JS demos, no JS-side tests).
+# Plugin list is hardcoded — if a new plugin lands under `plugins/` with
+# its own package.json, append it to the matrix below. `frecency-demo`
+# and `slow-echo` are intentionally absent: they have no package.json
+# (pure JS demos, no JS-side tests).
 name: Plugins
 
 on:
@@ -47,12 +47,12 @@ jobs:
           # Built-in npm cache, scoped to this plugin's lockfile so cache
           # hits don't span unrelated plugins.
           cache: 'npm'
-          cache-dependency-path: examples/plugins/${{ matrix.plugin }}/package-lock.json
+          cache-dependency-path: plugins/${{ matrix.plugin }}/package-lock.json
 
       - name: npm ci
-        working-directory: examples/plugins/${{ matrix.plugin }}
+        working-directory: plugins/${{ matrix.plugin }}
         run: npm ci
 
       - name: npm test
-        working-directory: examples/plugins/${{ matrix.plugin }}
+        working-directory: plugins/${{ matrix.plugin }}
         run: npm test

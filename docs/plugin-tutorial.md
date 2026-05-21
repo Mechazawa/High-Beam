@@ -303,7 +303,7 @@ export default config;
 
 (Adjust the relative path to wherever `sdk/highbeam/` lives relative to your
 plugin; the example plugins use `../../../sdk/highbeam/` because they live
-under `examples/plugins/<name>/`.)
+under `plugins/<name>/`.)
 
 ```js
 // greetings.test.js
@@ -436,7 +436,7 @@ so a botched ship is recoverable by hand.
 - [plugin-authoring.md](./plugin-authoring.md) — the overview hub if you
   need to re-find any of the above.
 
-Real plugins to read for inspiration (all under `examples/plugins/`):
+Real plugins to read for inspiration (all under `plugins/`):
 
 - `echo` — minimal `copy(input)`.
 - `calculator` — pinned inline results, npm-free expression parser.

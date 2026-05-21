@@ -90,7 +90,7 @@ Notes:
 - `Result.icon` is supported by the host wire shape (a
   `data:image/<type>;base64,...` URI) but is not in the `Result` interface
   exported from `types.d.ts`. Set it as a property anyway — the host reads
-  it. `examples/plugins/app-launcher` does this.
+  it. `plugins/app-launcher` does this.
 - `Action` has two host-only variants (`{ kind: 'quit' }` and
   `{ kind: 'noop' }`) emitted by the Core built-in. Plugins don't construct
   them.
@@ -116,7 +116,7 @@ openUrl('https://example.com')
 Opens with the system handler — `/usr/bin/open` on macOS, `xdg-open` on
 Linux. Works for `https://`, `mailto:`, `file://`, and any
 URL-handler-registered scheme. On macOS, also works for `.app` bundle paths
-(see `examples/plugins/app-launcher`).
+(see `plugins/app-launcher`).
 
 ### `copy(text: string): Action`
 
@@ -140,7 +140,7 @@ this is the right tool for "launch this app" / "kick off this script", not
 for "compute something and use the result". Use `highbeam:system.exec` (cap
 `system.exec`) when you need stdout / exit code.
 
-`examples/plugins/app-launcher` uses `exec('sh', ['-c', command])` on Linux
+`plugins/app-launcher` uses `exec('sh', ['-c', command])` on Linux
 to invoke `.desktop` Exec lines while preserving shell quoting.
 
 ### `reveal(path: string): Action`
@@ -226,7 +226,7 @@ export async function* query(input, signal) {
 }
 ```
 
-See `examples/plugins/xkcd` for a full HTTP-driven plugin with caching.
+See `plugins/xkcd` for a full HTTP-driven plugin with caching.
 
 ## `highbeam:clipboard`
 
@@ -362,7 +362,7 @@ await writeCache('index.json', JSON.stringify({ updated: Date.now() }));
 Writes a blob to the plugin's cache by name. Creates the cache directory if
 missing. Same naming rules as `readCache`. **Capability:** `fs.cache`.
 
-See `examples/plugins/xkcd` for cache-backed iteration (build an index on
+See `plugins/xkcd` for cache-backed iteration (build an index on
 first miss, serve subsequent queries from cache, refresh on TTL).
 
 ## `highbeam:icons`
@@ -399,7 +399,7 @@ Behavior:
   paths from `.desktop` `Icon=` entries; full XDG icon-theme lookup is
   post-v1.
 
-`examples/plugins/app-launcher` resolves icons for matched apps and assigns
+`plugins/app-launcher` resolves icons for matched apps and assigns
 them to `result.icon`.
 
 ## `highbeam:match`
@@ -451,7 +451,7 @@ Notes:
 - `highlights` use byte ranges, not character ranges — fine for ASCII keys,
   matters for multi-byte UTF-8 if you're rendering bold spans yourself.
 
-See `examples/plugins/dnd` and `examples/plugins/app-launcher` for typical
+See `plugins/dnd` and `plugins/app-launcher` for typical
 usage (fuzzy-rank a bundled list and map scores onto `weight`).
 
 ## `highbeam:platform`

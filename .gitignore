@@ -5,15 +5,11 @@
 /target
 *.rs.bk
 
-# User-installed plugins. The repo ships example plugins under
-# `examples/plugins/` that the user can copy here to try them out (Stage 4+
-# will switch to the platform config dir).
-/plugins
-
-# Plugin dev-time dependencies. Example plugins ship `package.json` so
-# `npm install` pulls vitest for their tests, but the install output is
-# never committed. Lockfiles ARE tracked for reproducibility.
-/examples/plugins/*/node_modules
+# Plugin dev-time dependencies. The default plugins under `plugins/`
+# ship `package.json` so `npm install` pulls vitest for their tests, but
+# the install output is never committed. Lockfiles ARE tracked for
+# reproducibility.
+/plugins/*/node_modules
 /sdk/highbeam/node_modules
 
 # Per-plugin logfiles written by the host runtime. Append-only, no rotation;

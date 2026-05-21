@@ -195,7 +195,7 @@ Hand-written `.d.ts` files live in `sdk/highbeam/`. A minimal
 to pull the ambient types in. Compiled `plugin.js` keeps the bare
 `highbeam:*` specifiers — TypeScript only needs the types at compile time.
 
-`examples/plugins/echo-ts` has a full working setup.
+`plugins/echo-ts` has a full working setup.
 
 ## Testing with vitest
 
@@ -295,7 +295,7 @@ HTTP `Content-Type` header.
 
 ## Example plugins
 
-Every plugin in `examples/plugins/` is real and tested. Copy any of them
+Every plugin in `plugins/` is real and tested. Copy any of them
 as a starting point:
 
 - `echo` — minimal `copy(input)`.

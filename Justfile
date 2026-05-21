@@ -6,14 +6,14 @@ run:
 test:
     cargo test
 
-# Run vitest in every example plugin that ships its own test suite.
+# Run vitest in every default plugin that ships its own test suite.
 # Assumes `npm install` has been run once per plugin dir.
 test-plugins:
     #!/usr/bin/env bash
     set -euo pipefail
     shopt -s nullglob
     failed=0
-    for dir in examples/plugins/*/; do
+    for dir in plugins/*/; do
         if [ -f "$dir/package.json" ] && [ -d "$dir/node_modules" ]; then
             echo "--- vitest: $dir ---"
             (cd "$dir" && npm test --silent) || failed=1
@@ -71,10 +71,10 @@ bundle-tarball:
         "$root/lib/systemd/user"
     cp target/release/high-beam "$root/bin/highbeam"
     # Mirror the bundled plugin list in Cargo.toml's `resources` block.
-    # Dev fixtures live alongside the real plugins under examples/, so
-    # we exclude by name rather than enumerating the keepers — it's the
+    # Dev fixtures live alongside the real plugins in `plugins/`, so we
+    # exclude by name rather than enumerating the keepers — it's the
     # smaller list to maintain.
-    for plugin in examples/plugins/*/; do
+    for plugin in plugins/*/; do
         name_only="$(basename "$plugin")"
         case "$name_only" in
             echo|echo-ts|slow-echo|frecency-demo) continue ;;
