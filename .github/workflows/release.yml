@@ -44,12 +44,12 @@ jobs:
       - name: Cache cargo registry + target
         uses: Swatinem/rust-cache@v2
 
-      # cargo-packager compiles from source (~2 min on a fresh runner).
-      # Skipped via a separate cache step: the binary is hashed by the
-      # cargo-packager crate version we install, so cache invalidates
-      # automatically when we bump.
+      # cargo-packager would compile from source (~2 min) on every run
+      # otherwise. taiki-e/install-action pulls a pre-built binary in ~5s.
       - name: Install cargo-packager
-        run: cargo install cargo-packager --locked
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-packager
 
       # Conditional codesigning: only runs when the maintainer has uploaded
       # a .p12 + password to repo secrets. Absent secrets → bundle ships
