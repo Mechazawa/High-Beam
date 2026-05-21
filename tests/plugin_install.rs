@@ -13,9 +13,7 @@ use std::thread;
 
 use flate2::Compression;
 use flate2::write::GzEncoder;
-use high_beam::plugins::install::{
-    self, ArchiveFormat, InstallError, cross_check_embedded, manifest_for_write,
-};
+use high_beam::plugins::install::{self, ArchiveFormat, InstallError, cross_check_embedded, manifest_for_write};
 use high_beam::plugins::manifest::Manifest;
 
 fn fresh_tmp(tag: &str) -> PathBuf {
@@ -37,9 +35,7 @@ fn build_tar_gz(entries: &[(&str, &[u8])]) -> Vec<u8> {
         header.set_size(body.len() as u64);
         header.set_mode(0o644);
         header.set_cksum();
-        tar_builder
-            .append_data(&mut header, path, *body)
-            .expect("tar append");
+        tar_builder.append_data(&mut header, path, *body).expect("tar append");
     }
     let encoder = tar_builder.into_inner().expect("finish tar");
     encoder.finish().expect("finish gz")
@@ -65,10 +61,7 @@ impl Server {
                 thread::spawn(move || handle_conn(stream, &routes));
             }
         });
-        Self {
-            addr,
-            _handle: handle,
-        }
+        Self { addr, _handle: handle }
     }
 
     fn url(&self, path: &str) -> String {
@@ -119,16 +112,8 @@ fn install_pipeline_downloads_extracts_and_lands_in_plugins_dir() {
     let server = Server::start(vec![
         // Manifest body — note `__server__` placeholder is patched after
         // start so it resolves to the actual port.
-        (
-            "/demo/manifest.json".into(),
-            "application/json",
-            manifest_json.to_vec(),
-        ),
-        (
-            "/demo.tar.gz".into(),
-            "application/gzip",
-            archive_for_server,
-        ),
+        ("/demo/manifest.json".into(), "application/json", manifest_json.to_vec()),
+        ("/demo.tar.gz".into(), "application/gzip", archive_for_server),
     ]);
 
     // Re-serve with the actual archive URL injected so the manifest matches
@@ -160,9 +145,7 @@ fn install_pipeline_downloads_extracts_and_lands_in_plugins_dir() {
         .expect("fetch manifest");
     assert_eq!(manifest.name, "demo");
     let archive_url = manifest.archive_url.as_deref().expect("archiveUrl");
-    let (bytes, format) = rt
-        .block_on(install::download_archive(archive_url))
-        .expect("download");
+    let (bytes, format) = rt.block_on(install::download_archive(archive_url)).expect("download");
     assert_eq!(format, ArchiveFormat::TarGz);
 
     let staging = fresh_tmp("install-staging");
@@ -173,18 +156,14 @@ fn install_pipeline_downloads_extracts_and_lands_in_plugins_dir() {
     let writeable = manifest_for_write(&manifest, &manifest_url);
     install::write_manifest_json(&payload, &writeable).expect("write manifest");
 
-    let dest =
-        install::move_into_plugins_dir(&payload, &plugins_dir, &manifest.name).expect("move");
+    let dest = install::move_into_plugins_dir(&payload, &plugins_dir, &manifest.name).expect("move");
     assert!(dest.join("plugin.js").exists());
     assert!(dest.join("manifest.json").exists());
 
     // The manifestUrl was backfilled in the on-disk manifest.
     let final_manifest_bytes = std::fs::read(dest.join("manifest.json")).expect("read");
     let final_manifest = Manifest::parse(&final_manifest_bytes).expect("parse");
-    assert_eq!(
-        final_manifest.manifest_url.as_deref(),
-        Some(manifest_url.as_str())
-    );
+    assert_eq!(final_manifest.manifest_url.as_deref(), Some(manifest_url.as_str()));
 
     let _ = std::fs::remove_dir_all(&plugins_dir);
     let _ = std::fs::remove_dir_all(&staging);
@@ -199,9 +178,7 @@ fn install_rejects_manifest_missing_required_fields() {
     )]);
     let rt = rt();
     let err = rt
-        .block_on(install::fetch_and_validate_manifest(
-            &server.url("/bad/manifest.json"),
-        ))
+        .block_on(install::fetch_and_validate_manifest(&server.url("/bad/manifest.json")))
         .expect_err("should be MissingField");
     match err {
         InstallError::MissingField(name) => assert!(matches!(name, "version" | "archiveUrl")),
@@ -236,8 +213,7 @@ fn install_rejects_embedded_version_mismatch() {
         }"#,
     )
     .expect("parse");
-    let err = install::cross_check_embedded(&payload, &url_fetched, "http://x/m.json")
-        .expect_err("mismatch");
+    let err = install::cross_check_embedded(&payload, &url_fetched, "http://x/m.json").expect_err("mismatch");
     match err {
         InstallError::EmbeddedMismatch { field, .. } => assert_eq!(field, "version"),
         other => panic!("expected EmbeddedMismatch, got {other:?}"),
@@ -261,8 +237,7 @@ fn install_accepts_archive_without_embedded_manifest_and_backfills_manifest_url(
     )
     .expect("parse");
     let install_url = "http://example.com/loose/manifest.json";
-    let found = install::cross_check_embedded(&payload, &url_fetched, install_url)
-        .expect("no embedded is fine");
+    let found = install::cross_check_embedded(&payload, &url_fetched, install_url).expect("no embedded is fine");
     assert!(!found, "no embedded manifest expected");
 
     let writeable = install::manifest_for_write(&url_fetched, install_url);

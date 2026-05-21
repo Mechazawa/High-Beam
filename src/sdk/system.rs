@@ -97,34 +97,32 @@ pub fn install<'js>(ctx: &Ctx<'js>, can_exec: bool, can_applescript: bool) -> Js
 
     let applescript = Function::new(
         ctx.clone(),
-        Async(
-            move |ctx: Ctx<'js>, script: String, opts: Opt<Value<'js>>| async move {
-                if !can_applescript {
-                    return Err::<Value<'js>, _>(throw_cap(&ctx, "system.applescript"));
-                }
-                #[cfg(target_os = "macos")]
-                {
-                    let opts_val = opts.0.unwrap_or_else(|| Value::new_undefined(ctx.clone()));
-                    let (token, timeout, _cwd) = parse_exec_opts(&ctx, &opts_val)?;
-                    let out = run_command(
-                        ctx.clone(),
-                        "/usr/bin/osascript".into(),
-                        vec!["-e".into(), script],
-                        token,
-                        timeout,
-                        None,
-                    )
-                    .await?;
-                    let stdout: String = out.get("stdout")?;
-                    stdout.trim_end_matches('\n').to_owned().into_js(&ctx)
-                }
-                #[cfg(not(target_os = "macos"))]
-                {
-                    let _ = (script, opts);
-                    Ok(Value::new_null(ctx))
-                }
-            },
-        ),
+        Async(move |ctx: Ctx<'js>, script: String, opts: Opt<Value<'js>>| async move {
+            if !can_applescript {
+                return Err::<Value<'js>, _>(throw_cap(&ctx, "system.applescript"));
+            }
+            #[cfg(target_os = "macos")]
+            {
+                let opts_val = opts.0.unwrap_or_else(|| Value::new_undefined(ctx.clone()));
+                let (token, timeout, _cwd) = parse_exec_opts(&ctx, &opts_val)?;
+                let out = run_command(
+                    ctx.clone(),
+                    "/usr/bin/osascript".into(),
+                    vec!["-e".into(), script],
+                    token,
+                    timeout,
+                    None,
+                )
+                .await?;
+                let stdout: String = out.get("stdout")?;
+                stdout.trim_end_matches('\n').to_owned().into_js(&ctx)
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = (script, opts);
+                Ok(Value::new_null(ctx))
+            }
+        }),
     )?;
 
     ctx.globals().set(EXEC_GLOBAL, exec)?;
@@ -219,18 +217,11 @@ async fn run_command(
         r = wait_fut => r,
     };
 
-    let (stdout_bytes, stderr_bytes, status) =
-        result.map_err(|e| throw_io(&ctx, &format!("exec {cmd}: {e}")))?;
+    let (stdout_bytes, stderr_bytes, status) = result.map_err(|e| throw_io(&ctx, &format!("exec {cmd}: {e}")))?;
 
     let obj = Object::new(ctx.clone())?;
-    obj.set(
-        "stdout",
-        String::from_utf8_lossy(&stdout_bytes).into_owned(),
-    )?;
-    obj.set(
-        "stderr",
-        String::from_utf8_lossy(&stderr_bytes).into_owned(),
-    )?;
+    obj.set("stdout", String::from_utf8_lossy(&stdout_bytes).into_owned())?;
+    obj.set("stderr", String::from_utf8_lossy(&stderr_bytes).into_owned())?;
     match status.code() {
         Some(c) => obj.set("code", c)?,
         None => obj.set("code", Value::new_null(ctx))?,
@@ -241,9 +232,7 @@ async fn run_command(
 /// Read `reader` into a capped `Vec<u8>` when present; return an empty
 /// vec otherwise. Lets the join site drop the "is the pipe wired up?"
 /// branch into a single line per stream.
-async fn read_capped_opt<R: AsyncReadExt + Unpin>(
-    reader: Option<&mut R>,
-) -> std::io::Result<Vec<u8>> {
+async fn read_capped_opt<R: AsyncReadExt + Unpin>(reader: Option<&mut R>) -> std::io::Result<Vec<u8>> {
     match reader {
         Some(r) => read_capped(r).await,
         None => Ok(Vec::new()),

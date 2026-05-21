@@ -4,9 +4,7 @@
 use std::path::PathBuf;
 
 use rquickjs::loader::{Loader, Resolver};
-use rquickjs::{
-    AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Error as JsError, Module, async_with,
-};
+use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Error as JsError, Module, async_with};
 
 use high_beam::sdk::fs::{FsModule, install};
 
@@ -196,9 +194,6 @@ fn write_cache_rejects_path_traversal() {
     .to_vec();
     let rt = rt();
     let outcome = rt.block_on(run_script(false, true, cache, src));
-    assert!(
-        outcome.starts_with("FsError"),
-        "expected FsError, got {outcome}"
-    );
+    assert!(outcome.starts_with("FsError"), "expected FsError, got {outcome}");
     let _ = std::fs::remove_dir_all(&dir);
 }

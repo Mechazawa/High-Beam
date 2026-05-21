@@ -21,8 +21,8 @@ use serde_json::Value as JsonValue;
 use rquickjs::function::This;
 use rquickjs::loader::{Loader, Resolver};
 use rquickjs::{
-    AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Error as JsError, Function, IntoJs, Module,
-    Object, Promise, Value, async_with,
+    AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Error as JsError, Function, IntoJs, Module, Object, Promise,
+    Value, async_with,
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -273,11 +273,7 @@ impl LoadedPlugin {
     /// The receiver closes when the plugin's iterator drains, the timeout
     /// fires, the plugin throws, or the caller cancels.
     #[must_use]
-    pub fn run_query_stream(
-        &self,
-        input: &str,
-        cancel: CancellationToken,
-    ) -> mpsc::UnboundedReceiver<PluginResult> {
+    pub fn run_query_stream(&self, input: &str, cancel: CancellationToken) -> mpsc::UnboundedReceiver<PluginResult> {
         let (tx, rx) = mpsc::unbounded_channel();
         self.interrupt_flag.store(false, Ordering::Relaxed);
         let flag_for_timer = Arc::clone(&self.interrupt_flag);
@@ -439,10 +435,7 @@ fn log_query_outcome(
         );
         return;
     }
-    log.write(
-        LogLevel::Error,
-        &format!("query threw: {msg}; input: {input:?}"),
-    );
+    log.write(LogLevel::Error, &format!("query threw: {msg}; input: {input:?}"));
 }
 
 /// Iterate the plugin's async iterator, sending each yielded result through
@@ -531,8 +524,8 @@ async fn stream_query<'js>(
             .call((value,))
             .catch(&ctx)
             .map_err(|err| PluginError::Js(format!("JSON.stringify yielded value: {err}")))?;
-        let parsed: PluginResult = serde_json::from_str(&json_str)
-            .map_err(|err| PluginError::InvalidResult(format!("{err}: {json_str}")))?;
+        let parsed: PluginResult =
+            serde_json::from_str(&json_str).map_err(|err| PluginError::InvalidResult(format!("{err}: {json_str}")))?;
         if tx.send(parsed).is_err() {
             // Receiver dropped — treat as a cancel.
             let _ = abort.cancel(&ctx);
@@ -543,10 +536,7 @@ async fn stream_query<'js>(
 
 /// If the value already has `next`, return it as-is; otherwise call its
 /// `Symbol.asyncIterator`.
-fn normalize_async_iterator<'js>(
-    ctx: &Ctx<'js>,
-    value: Value<'js>,
-) -> Result<Object<'js>, PluginError> {
+fn normalize_async_iterator<'js>(ctx: &Ctx<'js>, value: Value<'js>) -> Result<Object<'js>, PluginError> {
     let obj: Object<'js> = value
         .try_into_object()
         .map_err(|_| PluginError::Js("query() did not return an object".into()))?;
@@ -568,10 +558,7 @@ pub(crate) fn default_cache_dir(plugin_name: &str) -> std::path::PathBuf {
     if let Some(dirs) = directories::ProjectDirs::from("", "", "high-beam") {
         dirs.cache_dir().join("plugins").join(plugin_name)
     } else {
-        std::env::temp_dir()
-            .join("high-beam")
-            .join("plugins")
-            .join(plugin_name)
+        std::env::temp_dir().join("high-beam").join("plugins").join(plugin_name)
     }
 }
 
@@ -635,9 +622,7 @@ impl Loader for HighbeamLoader {
         match name {
             ACTIONS_MODULE => Module::declare_def::<ActionsModule, _>(ctx.clone(), name),
             HTTP_MODULE => Module::declare_def::<HttpModule, _>(ctx.clone(), name),
-            CLIPBOARD_MODULE => {
-                Module::declare_def::<clipboard::ClipboardModule, _>(ctx.clone(), name)
-            }
+            CLIPBOARD_MODULE => Module::declare_def::<clipboard::ClipboardModule, _>(ctx.clone(), name),
             FS_MODULE => Module::declare_def::<fs::FsModule, _>(ctx.clone(), name),
             ICONS_MODULE => Module::declare_def::<icons::IconsModule, _>(ctx.clone(), name),
             SYSTEM_MODULE => Module::declare_def::<system::SystemModule, _>(ctx.clone(), name),

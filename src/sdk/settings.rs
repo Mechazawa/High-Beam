@@ -62,10 +62,7 @@ impl ModuleDef for SettingsModule {
 /// # Errors
 ///
 /// Propagates JS errors from object construction or global assignment.
-pub fn install<S: BuildHasher>(
-    ctx: &Ctx<'_>,
-    merged: &HashMap<String, JsonValue, S>,
-) -> JsResult<()> {
+pub fn install<S: BuildHasher>(ctx: &Ctx<'_>, merged: &HashMap<String, JsonValue, S>) -> JsResult<()> {
     let bag = Object::new(ctx.clone())?;
     for (key, value) in merged {
         bag.set(key.as_str(), json_to_js(ctx, value)?)?;
@@ -163,10 +160,7 @@ pub fn merge_options<S: BuildHasher>(
 ) -> HashMap<String, JsonValue> {
     defs.iter()
         .map(|def| {
-            let value = user_set
-                .get(&def.key)
-                .cloned()
-                .unwrap_or_else(|| def.default_json());
+            let value = user_set.get(&def.key).cloned().unwrap_or_else(|| def.default_json());
             (def.key.clone(), value)
         })
         .collect()
@@ -221,10 +215,7 @@ mod tests {
     fn merge_drops_keys_not_in_manifest() {
         let defs = vec![def_string("user", "alice")];
         let mut user = HashMap::new();
-        user.insert(
-            "stale".into(),
-            JsonValue::String("from-old-manifest".into()),
-        );
+        user.insert("stale".into(), JsonValue::String("from-old-manifest".into()));
         let merged = merge_options(&defs, &user);
         assert!(!merged.contains_key("stale"));
         assert_eq!(merged.len(), 1);

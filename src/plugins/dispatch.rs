@@ -111,9 +111,7 @@ pub(crate) fn merge_into_live(
             .then_with(|| {
                 let a_score = score_for(a, frecency, now);
                 let b_score = score_for(b, frecency, now);
-                b_score
-                    .partial_cmp(&a_score)
-                    .unwrap_or(std::cmp::Ordering::Equal)
+                b_score.partial_cmp(&a_score).unwrap_or(std::cmp::Ordering::Equal)
             })
             .then_with(|| a.order.cmp(&b.order))
     });
@@ -128,9 +126,7 @@ fn score_for(entry: &RankedResult, frecency: Option<&Snapshot>, now: i64) -> f64
     }
     let modifier = frecency
         .and_then(|snap| snap.get(&entry.plugin_name, &entry.result.key))
-        .map_or(1.0, |row| {
-            frecency_modifier(row.picks, now - row.last_picked_at)
-        });
+        .map_or(1.0, |row| frecency_modifier(row.picks, now - row.last_picked_at));
     weight * modifier
 }
 
@@ -174,11 +170,7 @@ mod tests {
         merge_all_with(items, None, 0)
     }
 
-    fn merge_all_with(
-        items: Vec<StreamedResult>,
-        snapshot: Option<&Snapshot>,
-        now: i64,
-    ) -> Vec<String> {
+    fn merge_all_with(items: Vec<StreamedResult>, snapshot: Option<&Snapshot>, now: i64) -> Vec<String> {
         let mut live = Vec::new();
         let mut order = 0usize;
         for it in items {
@@ -191,14 +183,8 @@ mod tests {
     fn clamp_debounce_caps_at_max() {
         assert_eq!(clamp_debounce(0), Duration::from_millis(0));
         assert_eq!(clamp_debounce(500), Duration::from_millis(500));
-        assert_eq!(
-            clamp_debounce(MAX_DEBOUNCE_MS),
-            Duration::from_millis(MAX_DEBOUNCE_MS)
-        );
-        assert_eq!(
-            clamp_debounce(60_000),
-            Duration::from_millis(MAX_DEBOUNCE_MS)
-        );
+        assert_eq!(clamp_debounce(MAX_DEBOUNCE_MS), Duration::from_millis(MAX_DEBOUNCE_MS));
+        assert_eq!(clamp_debounce(60_000), Duration::from_millis(MAX_DEBOUNCE_MS));
     }
 
     #[test]
@@ -213,10 +199,7 @@ mod tests {
 
     #[test]
     fn merge_pinned_sorts_above_unpinned_regardless_of_weight() {
-        let keys = merge_all(vec![
-            streamed("high", 100.0, false),
-            streamed("low-pinned", 0.0, true),
-        ]);
+        let keys = merge_all(vec![streamed("high", 100.0, false), streamed("low-pinned", 0.0, true)]);
         assert_eq!(keys, ["low-pinned", "high"]);
     }
 
@@ -291,10 +274,7 @@ mod tests {
             },
         )]);
         let keys = merge_all_with(
-            vec![
-                streamed("non-pinned", 100.0, false),
-                streamed("pinned", 1.0, true),
-            ],
+            vec![streamed("non-pinned", 100.0, false), streamed("pinned", 1.0, true)],
             Some(&snap),
             1_000,
         );

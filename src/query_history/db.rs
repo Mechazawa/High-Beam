@@ -73,11 +73,9 @@ impl QueryHistoryDb {
     pub(crate) fn push(&self, query: &str, max_entries: usize) -> rusqlite::Result<()> {
         let guard = self.lock()?;
         let last: Option<String> = guard
-            .query_row(
-                "SELECT query FROM query_history ORDER BY id DESC LIMIT 1",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT query FROM query_history ORDER BY id DESC LIMIT 1", [], |row| {
+                row.get(0)
+            })
             .ok();
         if last.as_deref() == Some(query) {
             return Ok(());
@@ -88,8 +86,7 @@ impl QueryHistoryDb {
             params![query, now],
         )?;
         // Trim oldest entries so the table stays at most `max_entries` rows.
-        let count: i64 =
-            guard.query_row("SELECT COUNT(*) FROM query_history", [], |row| row.get(0))?;
+        let count: i64 = guard.query_row("SELECT COUNT(*) FROM query_history", [], |row| row.get(0))?;
         let excess = count - i64::try_from(max_entries).unwrap_or(i64::MAX);
         if excess > 0 {
             guard.execute(

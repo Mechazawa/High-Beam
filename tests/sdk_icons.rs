@@ -2,9 +2,7 @@
 //! in-process cache.
 
 use rquickjs::loader::{Loader, Resolver};
-use rquickjs::{
-    AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Error as JsError, Module, async_with,
-};
+use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Error as JsError, Module, async_with};
 
 use high_beam::sdk::icons::{IconsModule, install};
 
@@ -88,7 +86,8 @@ fn for_path_with_cap_returns_data_uri_even_for_missing_path() {
             eval.into_future::<()>().await.catch(&ctx).expect("await eval");
             let promise: rquickjs::Promise<'_> = ctx.globals().get("__test").expect("read __test");
             promise.into_future::<String>().await.expect("await promise")
-        }).await
+        })
+        .await
     });
     assert_eq!(outcome, "ok");
 }

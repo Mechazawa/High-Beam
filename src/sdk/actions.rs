@@ -33,23 +33,20 @@ impl ModuleDef for ActionsModule {
             obj.set("text", text)?;
             Ok::<_, rquickjs::Error>(obj)
         })?;
-        let exec = rquickjs::Function::new(
-            ctx.clone(),
-            |ctx: Ctx<'js>, cmd: String, args: Value<'js>| {
-                let obj = Object::new(ctx.clone())?;
-                obj.set("kind", "exec")?;
-                obj.set("cmd", cmd)?;
-                // Treat undefined as `[]`; pass arrays through and let serde
-                // reject malformed shapes at deserialize time.
-                if args.is_undefined() || args.is_null() {
-                    let empty = rquickjs::Array::new(ctx)?;
-                    obj.set("args", empty)?;
-                } else {
-                    obj.set("args", args)?;
-                }
-                Ok::<_, rquickjs::Error>(obj)
-            },
-        )?;
+        let exec = rquickjs::Function::new(ctx.clone(), |ctx: Ctx<'js>, cmd: String, args: Value<'js>| {
+            let obj = Object::new(ctx.clone())?;
+            obj.set("kind", "exec")?;
+            obj.set("cmd", cmd)?;
+            // Treat undefined as `[]`; pass arrays through and let serde
+            // reject malformed shapes at deserialize time.
+            if args.is_undefined() || args.is_null() {
+                let empty = rquickjs::Array::new(ctx)?;
+                obj.set("args", empty)?;
+            } else {
+                obj.set("args", args)?;
+            }
+            Ok::<_, rquickjs::Error>(obj)
+        })?;
         let reveal = rquickjs::Function::new(ctx.clone(), |ctx: Ctx<'js>, path: String| {
             let obj = Object::new(ctx)?;
             obj.set("kind", "reveal")?;

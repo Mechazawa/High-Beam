@@ -66,8 +66,7 @@ fn smoke_test(dir: &str) {
             .expect("plugin loads in real rquickjs");
 
         let mut rx = plugin.run_query_stream("smoke", CancellationToken::new());
-        let outcome =
-            tokio::time::timeout(SMOKE_TIMEOUT, async { while rx.recv().await.is_some() {} }).await;
+        let outcome = tokio::time::timeout(SMOKE_TIMEOUT, async { while rx.recv().await.is_some() {} }).await;
         outcome.expect("plugin query finished within smoke budget");
     });
 }

@@ -35,9 +35,9 @@ impl ModuleDef for IconsModule {
         } else {
             Function::new(
                 ctx.clone(),
-                Async(|ctx: Ctx<'js>, _args: Rest<Value<'js>>| async move {
-                    Err::<String, _>(throw_cap(&ctx, "icons"))
-                }),
+                Async(
+                    |ctx: Ctx<'js>, _args: Rest<Value<'js>>| async move { Err::<String, _>(throw_cap(&ctx, "icons")) },
+                ),
             )?
         };
         exports.export("forPath", f)?;
@@ -53,24 +53,22 @@ impl ModuleDef for IconsModule {
 pub fn install<'js>(ctx: &Ctx<'js>, can_icons: bool) -> JsResult<()> {
     let for_path = Function::new(
         ctx.clone(),
-        Async(
-            move |ctx: Ctx<'js>, path: String, opts: Opt<Value<'js>>| async move {
-                if !can_icons {
-                    return Err::<String, _>(throw_cap(&ctx, "icons"));
-                }
-                let opts_val = opts.0.unwrap_or_else(|| Value::new_undefined(ctx.clone()));
-                let size = opts_val
-                    .as_object()
-                    .and_then(|o| o.get::<_, f64>("size").ok())
-                    .filter(|s| s.is_finite() && *s > 0.0)
-                    .map_or(128u32, |s| {
-                        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-                        let n = s as u32;
-                        n
-                    });
-                resolve_icon(&ctx, &path, size).await
-            },
-        ),
+        Async(move |ctx: Ctx<'js>, path: String, opts: Opt<Value<'js>>| async move {
+            if !can_icons {
+                return Err::<String, _>(throw_cap(&ctx, "icons"));
+            }
+            let opts_val = opts.0.unwrap_or_else(|| Value::new_undefined(ctx.clone()));
+            let size = opts_val
+                .as_object()
+                .and_then(|o| o.get::<_, f64>("size").ok())
+                .filter(|s| s.is_finite() && *s > 0.0)
+                .map_or(128u32, |s| {
+                    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+                    let n = s as u32;
+                    n
+                });
+            resolve_icon(&ctx, &path, size).await
+        }),
     )?;
     ctx.globals().set(FOR_PATH_GLOBAL, for_path)?;
     Ok(())
@@ -81,8 +79,7 @@ pub fn install<'js>(ctx: &Ctx<'js>, can_icons: bool) -> JsResult<()> {
 /// lookups borrow as `&str` directly. Inner map is keyed on the size,
 /// which is already a small `Copy` integer.
 fn cache() -> &'static Mutex<HashMap<String, HashMap<u32, String>>> {
-    static CACHE: std::sync::OnceLock<Mutex<HashMap<String, HashMap<u32, String>>>> =
-        std::sync::OnceLock::new();
+    static CACHE: std::sync::OnceLock<Mutex<HashMap<String, HashMap<u32, String>>>> = std::sync::OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -144,14 +141,7 @@ fn extract_icon_bytes(path: &str, size: u32) -> Option<Vec<u8>> {
     let icon_src = resolve_macos_icon_source(target).unwrap_or_else(|| target.to_path_buf());
 
     let out = Command::new("/usr/bin/sips")
-        .args([
-            "-s",
-            "format",
-            "png",
-            "-z",
-            &size.to_string(),
-            &size.to_string(),
-        ])
+        .args(["-s", "format", "png", "-z", &size.to_string(), &size.to_string()])
         .arg(&icon_src)
         .arg("--out")
         .arg(&tmp)
@@ -207,11 +197,10 @@ fn extract_icon_bytes(_path: &str, _size: u32) -> Option<Vec<u8>> {
 /// 1×1 transparent PNG — universal fallback for Linux / missing files.
 fn fallback_icon_bytes() -> &'static [u8] {
     const PNG: &[u8] = &[
-        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
-        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f,
-        0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x00,
-        0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49,
-        0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00,
+        0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00,
+        0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d,
+        0xb4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
     ];
     PNG
 }

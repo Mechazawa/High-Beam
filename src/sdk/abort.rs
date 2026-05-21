@@ -47,13 +47,7 @@ impl Abort {
         let signal: Object<'js> = pair.get("signal")?;
         let token = CancellationToken::new();
 
-        Ok((
-            Self {
-                token,
-                controller_id,
-            },
-            signal,
-        ))
+        Ok((Self { token, controller_id }, signal))
     }
 
     /// The Rust-side token. Host I/O futures race this against their work.
@@ -82,9 +76,7 @@ impl Abort {
         let fire: Function<'_> = ctx.eval(ABORT_FIRE_JS)?;
         fire.call::<_, ()>((self.controller_id,))
             .catch(ctx)
-            .map_err(|err| {
-                JsError::new_loading_message("abort", format!("fire listeners: {err}"))
-            })?;
+            .map_err(|err| JsError::new_loading_message("abort", format!("fire listeners: {err}")))?;
         Ok(())
     }
 }
@@ -106,10 +98,7 @@ pub fn install_global_controller(ctx: &Ctx<'_>) -> Result<(), JsError> {
 /// # Errors
 ///
 /// Propagates JS errors from reading `aborted` or attaching the listener.
-pub fn token_from_js_signal<'js>(
-    ctx: &Ctx<'js>,
-    signal: &Object<'js>,
-) -> Result<CancellationToken, JsError> {
+pub fn token_from_js_signal<'js>(ctx: &Ctx<'js>, signal: &Object<'js>) -> Result<CancellationToken, JsError> {
     let aborted: bool = signal.get::<_, bool>("aborted").unwrap_or(false);
     let token = CancellationToken::new();
     if aborted {

@@ -54,9 +54,7 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
 
     // Pin the winit backend explicitly — we rely on it for monitor enumeration
     // and focus events; a default-backend swap would otherwise fail opaquely.
-    slint::BackendSelector::new()
-        .backend_name("winit".into())
-        .select()?;
+    slint::BackendSelector::new().backend_name("winit".into()).select()?;
 
     let window = QueryWindow::new()?;
     window::apply_theme(&window, &Theme::load_or_default());
@@ -82,21 +80,12 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     window::configure(&window, settings_controller.clone());
 
     // Keep the host alive for the daemon's lifetime; `Drop` sends Shutdown.
-    let _plugin_host = app::start(
-        &window,
-        options.plugins_dir.clone(),
-        settings_controller.clone(),
-    )?;
+    let _plugin_host = app::start(&window, options.plugins_dir.clone(), settings_controller.clone())?;
 
-    spawn_ipc_listener(
-        &options.socket_path,
-        window.as_weak(),
-        settings_controller.clone(),
-    )?;
+    spawn_ipc_listener(&options.socket_path, window.as_weak(), settings_controller.clone())?;
 
     #[cfg(target_os = "macos")]
-    let _hotkey_guard =
-        spawn_hotkey_listener(window.as_weak(), &hotkey_spec, settings_controller.clone());
+    let _hotkey_guard = spawn_hotkey_listener(window.as_weak(), &hotkey_spec, settings_controller.clone());
     // Suppress unused-variable warning on Linux where we don't register a
     // global hotkey (the WM handles it via `highbeam --open`).
     #[cfg(not(target_os = "macos"))]
@@ -119,24 +108,22 @@ fn spawn_ipc_listener(
     settings: SettingsController,
 ) -> io::Result<()> {
     let server = Server::bind(socket_path)?;
-    thread::Builder::new()
-        .name("highbeam-ipc".into())
-        .spawn(move || {
-            let result = server.run(move |cmd| match cmd {
-                Command::Open => {
-                    let weak = weak.clone();
-                    let settings = settings.clone();
-                    let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(w) = weak.upgrade() {
-                            window::show(&w, &settings);
-                        }
-                    });
-                }
-            });
-            if let Err(err) = result {
-                tracing::error!(%err, "ipc server exited");
+    thread::Builder::new().name("highbeam-ipc".into()).spawn(move || {
+        let result = server.run(move |cmd| match cmd {
+            Command::Open => {
+                let weak = weak.clone();
+                let settings = settings.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = weak.upgrade() {
+                        window::show(&w, &settings);
+                    }
+                });
             }
-        })?;
+        });
+        if let Err(err) = result {
+            tracing::error!(%err, "ipc server exited");
+        }
+    })?;
     Ok(())
 }
 
@@ -158,8 +145,7 @@ fn parse_hotkey_or_default(spec: &str) -> global_hotkey::hotkey::HotKey {
                 %err,
                 "settings: hotkey string did not parse; falling back to default",
             );
-            HotKey::from_str(crate::settings::DEFAULT_HOTKEY)
-                .expect("DEFAULT_HOTKEY is a constant the parser knows")
+            HotKey::from_str(crate::settings::DEFAULT_HOTKEY).expect("DEFAULT_HOTKEY is a constant the parser knows")
         }
     }
 }
@@ -190,23 +176,20 @@ fn spawn_hotkey_listener(
     }
     let hotkey_id = hotkey.id();
 
-    if let Err(err) = thread::Builder::new()
-        .name("highbeam-hotkey".into())
-        .spawn(move || {
-            let receiver = GlobalHotKeyEvent::receiver();
-            while let Ok(event) = receiver.recv() {
-                if event.id == hotkey_id && event.state == HotKeyState::Pressed {
-                    let weak = weak.clone();
-                    let settings = settings.clone();
-                    let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(w) = weak.upgrade() {
-                            window::show(&w, &settings);
-                        }
-                    });
-                }
+    if let Err(err) = thread::Builder::new().name("highbeam-hotkey".into()).spawn(move || {
+        let receiver = GlobalHotKeyEvent::receiver();
+        while let Ok(event) = receiver.recv() {
+            if event.id == hotkey_id && event.state == HotKeyState::Pressed {
+                let weak = weak.clone();
+                let settings = settings.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = weak.upgrade() {
+                        window::show(&w, &settings);
+                    }
+                });
             }
-        })
-    {
+        }
+    }) {
         tracing::error!(%err, "failed to spawn hotkey listener thread; hotkey disabled");
         return None;
     }

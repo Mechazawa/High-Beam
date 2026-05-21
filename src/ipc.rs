@@ -138,11 +138,7 @@ mod tests {
 
     fn tmp_socket(name: &str) -> PathBuf {
         let mut path = std::env::temp_dir();
-        path.push(format!(
-            "high-beam-test-{}-{}.sock",
-            name,
-            std::process::id()
-        ));
+        path.push(format!("high-beam-test-{}-{}.sock", name, std::process::id()));
         let _ = std::fs::remove_file(&path);
         path
     }
@@ -171,9 +167,7 @@ mod tests {
         thread::sleep(Duration::from_millis(50));
         send(&path, Command::Open).expect("client send");
 
-        let received = rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("receive command");
+        let received = rx.recv_timeout(Duration::from_secs(1)).expect("receive command");
         assert_eq!(received, Command::Open);
 
         drop(handle);

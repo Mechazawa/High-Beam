@@ -185,11 +185,7 @@ fn readdir_iterator_js() -> &'static str {
     })
 }
 
-fn build_dir_async_iterator<'js>(
-    ctx: &Ctx<'js>,
-    path: &Path,
-    opts: &Value<'js>,
-) -> JsResult<Object<'js>> {
+fn build_dir_async_iterator<'js>(ctx: &Ctx<'js>, path: &Path, opts: &Value<'js>) -> JsResult<Object<'js>> {
     let recursive = opts
         .as_object()
         .and_then(|o| o.get::<_, bool>("recursive").ok())
@@ -200,10 +196,7 @@ fn build_dir_async_iterator<'js>(
         None => CancellationToken::new(),
     };
 
-    let walker = std::sync::Arc::new(std::sync::Mutex::new(DirWalker::new(
-        path.to_path_buf(),
-        recursive,
-    )));
+    let walker = std::sync::Arc::new(std::sync::Mutex::new(DirWalker::new(path.to_path_buf(), recursive)));
 
     let walker_for_next = std::sync::Arc::clone(&walker);
     let next_host = Function::new(
@@ -313,11 +306,7 @@ impl DirEntryOut {
     }
 }
 
-async fn read_file_impl<'js>(
-    ctx: Ctx<'js>,
-    path: PathBuf,
-    opts: Value<'js>,
-) -> JsResult<TypedArray<'js, u8>> {
+async fn read_file_impl<'js>(ctx: Ctx<'js>, path: PathBuf, opts: Value<'js>) -> JsResult<TypedArray<'js, u8>> {
     let token = signal_to_token(&ctx, &opts)?;
     let bytes = tokio::select! {
         biased;
@@ -369,12 +358,7 @@ async fn read_cache_impl(ctx: Ctx<'_>, name: String, cache_dir: PathBuf) -> JsRe
     }
 }
 
-async fn write_cache_impl<'js>(
-    ctx: Ctx<'js>,
-    name: String,
-    data: Value<'js>,
-    cache_dir: PathBuf,
-) -> JsResult<()> {
+async fn write_cache_impl<'js>(ctx: Ctx<'js>, name: String, data: Value<'js>, cache_dir: PathBuf) -> JsResult<()> {
     let path = match resolve_cache_path(&cache_dir, &name) {
         Ok(p) => p,
         Err(err) => return Err(throw_io(&ctx, err)),
@@ -400,10 +384,7 @@ fn coerce_data_to_bytes<'js>(ctx: &Ctx<'js>, data: Value<'js>) -> JsResult<Vec<u
         let bytes: &[u8] = ta.as_ref();
         return Ok(bytes.to_vec());
     }
-    Err(throw_io(
-        ctx,
-        "writeCache: data must be a string or a Uint8Array",
-    ))
+    Err(throw_io(ctx, "writeCache: data must be a string or a Uint8Array"))
 }
 
 fn signal_to_token<'js>(ctx: &Ctx<'js>, opts: &Value<'js>) -> JsResult<CancellationToken> {

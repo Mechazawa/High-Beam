@@ -71,12 +71,8 @@ pub fn execute(action: &Action) -> Result<ActionOutcome, Box<dyn Error>> {
             std::process::exit(0);
         }
         Action::OpenSettings => Ok(ActionOutcome::OpenSettingsView),
-        Action::ReloadPlugin { name } => Ok(ActionOutcome::HostTask(HostTask::Reload {
-            name: name.clone(),
-        })),
-        Action::InstallPlugin { url } => Ok(ActionOutcome::HostTask(HostTask::Install {
-            url: url.clone(),
-        })),
+        Action::ReloadPlugin { name } => Ok(ActionOutcome::HostTask(HostTask::Reload { name: name.clone() })),
+        Action::InstallPlugin { url } => Ok(ActionOutcome::HostTask(HostTask::Install { url: url.clone() })),
         Action::UpdatePlugins => Ok(ActionOutcome::HostTask(HostTask::UpdateAll)),
         // Noop preserved the pre-outcome behaviour of hiding the window —
         // the launcher closes after Enter, even on a `Noop` row like the
@@ -139,10 +135,7 @@ mod tests {
     #[test]
     fn reload_all_action_yields_host_task() {
         let outcome = execute(&Action::ReloadPlugin { name: None }).expect("execute");
-        assert_eq!(
-            outcome,
-            ActionOutcome::HostTask(HostTask::Reload { name: None })
-        );
+        assert_eq!(outcome, ActionOutcome::HostTask(HostTask::Reload { name: None }));
     }
 
     #[test]

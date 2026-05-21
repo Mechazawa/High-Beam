@@ -116,10 +116,7 @@ fn shutdown_action() -> Action {
     {
         Action::Exec {
             cmd: "/usr/bin/osascript".into(),
-            args: vec![
-                "-e".into(),
-                "tell application \"Finder\" to shut down".into(),
-            ],
+            args: vec!["-e".into(), "tell application \"Finder\" to shut down".into()],
         }
     }
     #[cfg(not(target_os = "macos"))]
@@ -190,10 +187,7 @@ fn logout_action() -> Action {
     {
         Action::Exec {
             cmd: "/usr/bin/osascript".into(),
-            args: vec![
-                "-e".into(),
-                "tell application \"System Events\" to log out".into(),
-            ],
+            args: vec!["-e".into(), "tell application \"System Events\" to log out".into()],
         }
     }
     #[cfg(not(target_os = "macos"))]
@@ -261,10 +255,7 @@ fn empty_trash_action() -> Action {
     {
         Action::Exec {
             cmd: "/usr/bin/osascript".into(),
-            args: vec![
-                "-e".into(),
-                "tell application \"Finder\" to empty trash".into(),
-            ],
+            args: vec!["-e".into(), "tell application \"Finder\" to empty trash".into()],
         }
     }
     #[cfg(not(target_os = "macos"))]
@@ -423,13 +414,7 @@ fn verb_only_row(q_lower: &str, verb: &str, subtitle: &str) -> Vec<StreamedResul
     )]
 }
 
-fn row(
-    key: String,
-    title: String,
-    subtitle: Option<&str>,
-    weight: f64,
-    action: Action,
-) -> StreamedResult {
+fn row(key: String, title: String, subtitle: Option<&str>, weight: f64, action: Action) -> StreamedResult {
     StreamedResult {
         plugin_name: NAME.to_owned(),
         result: PluginResult {
@@ -577,10 +562,7 @@ mod tests {
     #[test]
     fn lock_verb_still_matches() {
         let results = query("lock");
-        let r = results
-            .iter()
-            .find(|r| r.result.title == "lock")
-            .expect("lock result");
+        let r = results.iter().find(|r| r.result.title == "lock").expect("lock result");
         assert!(matches!(r.result.action, Action::Exec { .. }));
     }
 
@@ -672,13 +654,7 @@ mod tests {
 
     #[test]
     fn new_verbs_are_unpinned() {
-        for q in [
-            "reboot",
-            "log out",
-            "screensaver",
-            "display sleep",
-            "empty trash",
-        ] {
+        for q in ["reboot", "log out", "screensaver", "display sleep", "empty trash"] {
             let results = query(q);
             assert!(
                 results.iter().any(|r| !r.result.pinned),
@@ -760,10 +736,7 @@ mod tests {
             .iter()
             .find(|r| r.result.title == "Reload all plugins")
             .expect("Reload all row");
-        assert!(matches!(
-            all.result.action,
-            Action::ReloadPlugin { name: None }
-        ));
+        assert!(matches!(all.result.action, Action::ReloadPlugin { name: None }));
     }
 
     #[test]

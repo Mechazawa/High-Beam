@@ -190,9 +190,7 @@ impl Settings {
                 .query_history_max_entries
                 .map_or(DEFAULT_QUERY_HISTORY_MAX_ENTRIES, |v| v.clamp(1, 10_000));
             GlobalSettings {
-                hotkey: raw_global
-                    .hotkey
-                    .unwrap_or_else(|| DEFAULT_HOTKEY.to_owned()),
+                hotkey: raw_global.hotkey.unwrap_or_else(|| DEFAULT_HOTKEY.to_owned()),
                 launcher_position: raw_global.launcher_position,
                 query_history_max_entries: max_entries,
             }
@@ -346,11 +344,7 @@ impl Settings {
     /// to render a deterministic plugin list.
     #[must_use]
     pub fn iter_plugin_slots(&self) -> Vec<(String, PluginSettings)> {
-        let mut out: Vec<_> = self
-            .plugins
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
+        let mut out: Vec<_> = self.plugins.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         out.sort_by(|a, b| a.0.cmp(&b.0));
         out
     }
@@ -418,9 +412,7 @@ struct PluginSlotFile {
 /// resolved (no `$HOME` etc.).
 #[must_use]
 pub fn default_settings_path() -> Option<PathBuf> {
-    paths::config_dir()
-        .ok()
-        .map(|dir| dir.join(SETTINGS_FILENAME))
+    paths::config_dir().ok().map(|dir| dir.join(SETTINGS_FILENAME))
 }
 
 /// Lossy TOML → JSON conversion for the values we round-trip through option
@@ -429,15 +421,11 @@ fn toml_to_json(value: toml::Value) -> JsonValue {
     match value {
         toml::Value::String(s) => JsonValue::String(s),
         toml::Value::Integer(i) => JsonValue::Number(i.into()),
-        toml::Value::Float(f) => {
-            serde_json::Number::from_f64(f).map_or(JsonValue::Null, JsonValue::Number)
-        }
+        toml::Value::Float(f) => serde_json::Number::from_f64(f).map_or(JsonValue::Null, JsonValue::Number),
         toml::Value::Boolean(b) => JsonValue::Bool(b),
         toml::Value::Datetime(dt) => JsonValue::String(dt.to_string()),
         toml::Value::Array(arr) => JsonValue::Array(arr.into_iter().map(toml_to_json).collect()),
-        toml::Value::Table(tbl) => {
-            JsonValue::Object(tbl.into_iter().map(|(k, v)| (k, toml_to_json(v))).collect())
-        }
+        toml::Value::Table(tbl) => JsonValue::Object(tbl.into_iter().map(|(k, v)| (k, toml_to_json(v))).collect()),
     }
 }
 
@@ -459,9 +447,7 @@ fn json_to_toml(value: JsonValue) -> toml::Value {
         }
         JsonValue::String(s) => toml::Value::String(s),
         JsonValue::Array(arr) => toml::Value::Array(arr.into_iter().map(json_to_toml).collect()),
-        JsonValue::Object(obj) => {
-            toml::Value::Table(obj.into_iter().map(|(k, v)| (k, json_to_toml(v))).collect())
-        }
+        JsonValue::Object(obj) => toml::Value::Table(obj.into_iter().map(|(k, v)| (k, json_to_toml(v))).collect()),
     }
 }
 
@@ -510,14 +496,8 @@ mod tests {
             "#;
         let s = Settings::from_toml(text).expect("parse");
         let opts = s.plugin_options("web-search");
-        assert_eq!(
-            opts.get("default_engine"),
-            Some(&JsonValue::String("ddg".into()))
-        );
-        assert_eq!(
-            opts.get("result_limit"),
-            Some(&JsonValue::Number(10.into()))
-        );
+        assert_eq!(opts.get("default_engine"), Some(&JsonValue::String("ddg".into())));
+        assert_eq!(opts.get("result_limit"), Some(&JsonValue::Number(10.into())));
         assert_eq!(opts.get("live"), Some(&JsonValue::Bool(true)));
     }
 
@@ -686,10 +666,7 @@ mod tests {
             y = 180\n\
         ";
         let s = Settings::from_toml(text).expect("parse");
-        assert_eq!(
-            s.global().launcher_position,
-            Some(WindowPosition { x: 320, y: 180 })
-        );
+        assert_eq!(s.global().launcher_position, Some(WindowPosition { x: 320, y: 180 }));
     }
 
     #[test]

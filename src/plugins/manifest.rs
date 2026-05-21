@@ -128,9 +128,7 @@ impl OptionDef {
     #[must_use]
     pub fn default_json(&self) -> JsonValue {
         match &self.kind {
-            OptionKind::String { default } | OptionKind::Enum { default, .. } => {
-                JsonValue::String(default.clone())
-            }
+            OptionKind::String { default } | OptionKind::Enum { default, .. } => JsonValue::String(default.clone()),
             OptionKind::Bool { default } => JsonValue::Bool(*default),
             OptionKind::Int { default, .. } => JsonValue::Number((*default).into()),
         }
@@ -147,9 +145,7 @@ pub struct ParsedOptions {
 }
 
 fn parse_option(raw: &JsonValue) -> Result<OptionDef, String> {
-    let obj = raw
-        .as_object()
-        .ok_or_else(|| "expected an object".to_owned())?;
+    let obj = raw.as_object().ok_or_else(|| "expected an object".to_owned())?;
     let key = obj
         .get("key")
         .and_then(JsonValue::as_str)
@@ -176,10 +172,7 @@ fn parse_option(raw: &JsonValue) -> Result<OptionDef, String> {
                 .unwrap_or_default(),
         },
         "bool" => OptionKind::Bool {
-            default: obj
-                .get("default")
-                .and_then(JsonValue::as_bool)
-                .unwrap_or(false),
+            default: obj.get("default").and_then(JsonValue::as_bool).unwrap_or(false),
         },
         "int" => OptionKind::Int {
             default: obj.get("default").and_then(JsonValue::as_i64).unwrap_or(0),
@@ -207,9 +200,7 @@ fn parse_option(raw: &JsonValue) -> Result<OptionDef, String> {
                 .and_then(JsonValue::as_str)
                 .map_or_else(|| choices[0].clone(), str::to_owned);
             if !choices.contains(&default) {
-                return Err(format!(
-                    "enum default {default:?} not present in choices {choices:?}",
-                ));
+                return Err(format!("enum default {default:?} not present in choices {choices:?}",));
             }
             OptionKind::Enum { default, choices }
         }
@@ -302,9 +293,7 @@ impl Manifest {
         };
         list.iter()
             .filter(|entry| !KNOWN_PLATFORMS.contains(&entry.as_str()))
-            .map(|entry| {
-                format!("ignoring unknown platform {entry:?} (known: {KNOWN_PLATFORMS:?})")
-            })
+            .map(|entry| format!("ignoring unknown platform {entry:?} (known: {KNOWN_PLATFORMS:?})"))
             .collect()
     }
 
@@ -429,10 +418,7 @@ mod tests {
 
     #[test]
     fn platforms_matching_current_os_supports() {
-        let json = format!(
-            r#"{{ "name": "matched", "platforms": ["{}"] }}"#,
-            std::env::consts::OS,
-        );
+        let json = format!(r#"{{ "name": "matched", "platforms": ["{}"] }}"#, std::env::consts::OS,);
         let m = Manifest::parse(json.as_bytes()).unwrap();
         assert!(m.supports_current_platform());
     }
@@ -518,10 +504,7 @@ mod tests {
             OptionKind::String { default } if default == "alice"
         ));
 
-        assert!(matches!(
-            &parsed.defs[1].kind,
-            OptionKind::Bool { default: true },
-        ));
+        assert!(matches!(&parsed.defs[1].kind, OptionKind::Bool { default: true },));
 
         assert!(matches!(
             &parsed.defs[2].kind,
@@ -650,14 +633,8 @@ mod tests {
             "manifestUrl": "https://example.com/x/manifest.json"
         }"#;
         let m = Manifest::parse(json).unwrap();
-        assert_eq!(
-            m.archive_url.as_deref(),
-            Some("https://example.com/x.tar.gz")
-        );
-        assert_eq!(
-            m.manifest_url.as_deref(),
-            Some("https://example.com/x/manifest.json")
-        );
+        assert_eq!(m.archive_url.as_deref(), Some("https://example.com/x.tar.gz"));
+        assert_eq!(m.manifest_url.as_deref(), Some("https://example.com/x/manifest.json"));
         assert!(m.entry_url.is_none());
     }
 
@@ -703,10 +680,7 @@ mod tests {
         )
         .unwrap();
         let parsed = m.parsed_options();
-        assert_eq!(
-            parsed.defs[0].default_json(),
-            JsonValue::String("hi".into())
-        );
+        assert_eq!(parsed.defs[0].default_json(), JsonValue::String("hi".into()));
         assert_eq!(parsed.defs[1].default_json(), JsonValue::Bool(true));
         assert_eq!(parsed.defs[2].default_json(), JsonValue::Number(7.into()));
         assert_eq!(parsed.defs[3].default_json(), JsonValue::String("b".into()));

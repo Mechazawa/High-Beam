@@ -43,9 +43,7 @@ impl LoaderOptions {
             return Self { plugins_dir: dev };
         }
         let platform = platform_plugins_dir().unwrap_or_else(|| PathBuf::from("plugins"));
-        Self {
-            plugins_dir: platform,
-        }
+        Self { plugins_dir: platform }
     }
 }
 
@@ -160,10 +158,7 @@ pub async fn load_all(options: &LoaderOptions, settings: &Settings) -> Vec<Arc<L
 /// caller doesn't get to differentiate — anything other than success means
 /// "this plugin can't be live right now", and the previous instance stays in
 /// the registry.
-pub async fn load_one_for_reload(
-    plugin_dir: &Path,
-    settings: &Settings,
-) -> Result<Arc<LoadedPlugin>, String> {
+pub async fn load_one_for_reload(plugin_dir: &Path, settings: &Settings) -> Result<Arc<LoadedPlugin>, String> {
     match load_one(plugin_dir, settings).await {
         Ok(plugin) => Ok(Arc::new(plugin)),
         Err(LoadError::Skipped { reason, .. }) => Err(reason),
@@ -176,17 +171,13 @@ async fn load_one(plugin_dir: &Path, settings: &Settings) -> Result<LoadedPlugin
     let read_path = manifest_path.clone();
     let bytes = tokio::task::spawn_blocking(move || std::fs::read(&read_path))
         .await
-        .map_err(|join_err| {
-            LoadError::Failed(format!("manifest read task panicked: {join_err}").into())
-        })?
-        .map_err(|err| {
-            LoadError::Failed(format!("read {}: {err}", manifest_path.display()).into())
-        })?;
+        .map_err(|join_err| LoadError::Failed(format!("manifest read task panicked: {join_err}").into()))?
+        .map_err(|err| LoadError::Failed(format!("read {}: {err}", manifest_path.display()).into()))?;
     // Manifest parse failures are reported to stderr rather than plugin.log
     // because the manifest is the source of the plugin's name — writing into
     // a per-plugin file before the parse succeeds would require inventing one.
-    let manifest = Manifest::parse(&bytes)
-        .map_err(|err| LoadError::Failed(format!("parse manifest.json: {err}").into()))?;
+    let manifest =
+        Manifest::parse(&bytes).map_err(|err| LoadError::Failed(format!("parse manifest.json: {err}").into()))?;
 
     let log = PluginLog::for_plugin_dir(plugin_dir);
 
@@ -237,24 +228,16 @@ async fn load_one(plugin_dir: &Path, settings: &Settings) -> Result<LoadedPlugin
     // Fold the user's TOML overrides onto the manifest defaults so the
     // runtime sees one ready-to-export bag — keeps the SDK module path free
     // of branching on "did the user set a value?".
-    let merged_options = crate::sdk::settings::merge_options(
-        &manifest.parsed_options().defs,
-        settings.plugin_options(&manifest.name),
-    );
+    let merged_options =
+        crate::sdk::settings::merge_options(&manifest.parsed_options().defs, settings.plugin_options(&manifest.name));
 
     let cache_dir = crate::plugins::runtime::default_cache_dir(&manifest.name);
-    let loaded = LoadedPlugin::load_with_log(
-        plugin_dir,
-        manifest,
-        cache_dir,
-        Arc::clone(&log),
-        merged_options,
-    )
-    .await
-    .map_err(|err| {
-        log.write(LogLevel::Error, &format!("load failed: {err}"));
-        LoadError::Failed(Box::new(err))
-    })?;
+    let loaded = LoadedPlugin::load_with_log(plugin_dir, manifest, cache_dir, Arc::clone(&log), merged_options)
+        .await
+        .map_err(|err| {
+            log.write(LogLevel::Error, &format!("load failed: {err}"));
+            LoadError::Failed(Box::new(err))
+        })?;
     Ok(loaded)
 }
 
@@ -321,25 +304,14 @@ mod tests {
         } else {
             "macos"
         };
-        let wrong =
-            format!(r#"{{ "name": "wrong-os", "entry": "plugin.js", "platforms": ["{other}"] }}"#);
-        write_plugin(
-            &root,
-            "wrong-os",
-            &wrong,
-            "export async function* query() {}",
-        );
+        let wrong = format!(r#"{{ "name": "wrong-os", "entry": "plugin.js", "platforms": ["{other}"] }}"#);
+        write_plugin(&root, "wrong-os", &wrong, "export async function* query() {}");
         // And a matching plugin so we can assert the loader still found one.
         let right = format!(
             r#"{{ "name": "right-os", "entry": "plugin.js", "platforms": ["{}"] }}"#,
             std::env::consts::OS,
         );
-        write_plugin(
-            &root,
-            "right-os",
-            &right,
-            "export async function* query() {}",
-        );
+        write_plugin(&root, "right-os", &right, "export async function* query() {}");
 
         let opts = LoaderOptions {
             plugins_dir: root.clone(),
@@ -372,12 +344,7 @@ mod tests {
             r#"{{ "name": "mixed", "entry": "plugin.js", "platforms": ["haiku", "{}"] }}"#,
             std::env::consts::OS,
         );
-        write_plugin(
-            &root,
-            "mixed",
-            &manifest,
-            "export async function* query() {}",
-        );
+        write_plugin(&root, "mixed", &manifest, "export async function* query() {}");
 
         let opts = LoaderOptions {
             plugins_dir: root.clone(),
@@ -390,16 +357,13 @@ mod tests {
         assert_eq!(plugins.len(), 1, "matching host OS keeps the plugin loaded");
 
         let log_path = root.join("mixed").join("plugin.log");
-        let body = std::fs::read_to_string(&log_path)
-            .expect("plugin.log should have been created by the warning write");
+        let body =
+            std::fs::read_to_string(&log_path).expect("plugin.log should have been created by the warning write");
         assert!(
             body.contains("[WARN ] ignoring unknown platform"),
             "expected warn line, got: {body}",
         );
-        assert!(
-            body.contains("haiku"),
-            "warning should name the offender: {body}"
-        );
+        assert!(body.contains("haiku"), "warning should name the offender: {body}");
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -437,10 +401,7 @@ mod tests {
             !names.contains(&"echo"),
             "echo should be skipped when disabled, got {names:?}",
         );
-        assert!(
-            names.contains(&"keep"),
-            "keep should still load, got {names:?}",
-        );
+        assert!(names.contains(&"keep"), "keep should still load, got {names:?}",);
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -478,10 +439,7 @@ mod tests {
             !names.contains(&"vault"),
             "vault should be skipped (defaultEnabled: false, no user override), got {names:?}",
         );
-        assert!(
-            names.contains(&"keep"),
-            "keep should still load, got {names:?}",
-        );
+        assert!(names.contains(&"keep"), "keep should still load, got {names:?}",);
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -537,10 +495,7 @@ mod tests {
             .expect("tokio rt")
             .block_on(load_all(&opts, &Settings::default()));
 
-        assert!(
-            plugins.is_empty(),
-            "empty platforms must disable the plugin everywhere",
-        );
+        assert!(plugins.is_empty(), "empty platforms must disable the plugin everywhere",);
 
         let _ = std::fs::remove_dir_all(&root);
     }

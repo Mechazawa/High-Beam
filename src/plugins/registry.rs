@@ -81,11 +81,7 @@ impl PluginRegistry {
     /// Returns an error if no plugin by that name was loaded (the user can
     /// only reload what's currently live — for a brand-new directory the
     /// `install` flow is the right entry point) or if the new load failed.
-    pub async fn reload_one(
-        &self,
-        name: &str,
-        settings: &Settings,
-    ) -> Result<Arc<LoadedPlugin>, ReloadError> {
+    pub async fn reload_one(&self, name: &str, settings: &Settings) -> Result<Arc<LoadedPlugin>, ReloadError> {
         let (idx, plugin_dir) = {
             let guard = self.inner.plugins.read().await;
             let pos = guard

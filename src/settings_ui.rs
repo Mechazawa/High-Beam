@@ -33,10 +33,7 @@ pub struct PluginMetadata {
 #[must_use]
 pub fn plugin_metadata(manifest: &Manifest) -> PluginMetadata {
     PluginMetadata {
-        display_name: manifest
-            .display_name
-            .clone()
-            .unwrap_or_else(|| manifest.name.clone()),
+        display_name: manifest.display_name.clone().unwrap_or_else(|| manifest.name.clone()),
         version: manifest.version.clone(),
         description: manifest.description.clone(),
     }
@@ -137,11 +134,7 @@ impl SettingsController {
 
         let ctrl = self.clone();
         window.on_set_option_int(move |plugin, key, value| {
-            ctrl.set_option(
-                &plugin,
-                key.as_str(),
-                JsonValue::Number(i64::from(value).into()),
-            );
+            ctrl.set_option(&plugin, key.as_str(), JsonValue::Number(i64::from(value).into()));
         });
 
         // Enum cycling is a click, not a keystroke — refreshing the
@@ -282,9 +275,7 @@ impl SettingsController {
                 .unwrap_or_default()
                 .as_str(),
         ));
-        window.set_selected_plugin_description(SharedString::from(
-            meta.description.as_deref().unwrap_or_default(),
-        ));
+        window.set_selected_plugin_description(SharedString::from(meta.description.as_deref().unwrap_or_default()));
 
         let defs = &manifest.parsed_options().defs;
         let settings = self.inner.settings.lock().expect("settings lock");
@@ -351,9 +342,7 @@ impl SettingsController {
             // Bool flows through `set_option_bool` in practice; if Slint
             // ever routes through the string callback we still want the
             // literal raw string preserved (same as the `String` case).
-            OptionKind::String { .. } | OptionKind::Bool { .. } => {
-                JsonValue::String(raw.to_owned())
-            }
+            OptionKind::String { .. } | OptionKind::Bool { .. } => JsonValue::String(raw.to_owned()),
         };
         self.set_option(plugin, key, value);
     }
@@ -369,10 +358,7 @@ fn option_row(
     def: &OptionDef,
     user_opts: &std::collections::HashMap<String, JsonValue>,
 ) -> PluginOption {
-    let value = user_opts
-        .get(&def.key)
-        .cloned()
-        .unwrap_or_else(|| def.default_json());
+    let value = user_opts.get(&def.key).cloned().unwrap_or_else(|| def.default_json());
 
     let base = PluginOption {
         plugin_name: SharedString::from(plugin_name),
@@ -439,10 +425,7 @@ fn clamp_int(v: i64, min: Option<i64>, max: Option<i64>) -> i64 {
 fn next_choice(current: &str, choices: &[String]) -> String {
     let idx = choices.iter().position(|c| c == current).unwrap_or(0);
     let next = (idx + 1) % choices.len().max(1);
-    choices
-        .get(next)
-        .cloned()
-        .unwrap_or_else(|| current.to_owned())
+    choices.get(next).cloned().unwrap_or_else(|| current.to_owned())
 }
 
 #[cfg(test)]
@@ -514,19 +497,14 @@ mod tests {
         std::fs::create_dir_all(&tmp).unwrap();
         let path = tmp.join("settings.toml");
         let settings = Settings::load_from(&path);
-        let manifest =
-            Manifest::parse(br#"{ "name": "vault", "defaultEnabled": false }"#).expect("parse");
+        let manifest = Manifest::parse(br#"{ "name": "vault", "defaultEnabled": false }"#).expect("parse");
         let ctrl = SettingsController::new(vec![manifest], settings);
 
         // Reach into inner to verify the enabled value used for the slot.
         let settings_guard = ctrl.inner.settings.lock().unwrap();
         let manifest_ref = &ctrl.inner.manifests[0];
-        let enabled = settings_guard
-            .is_plugin_enabled_or_default(&manifest_ref.name, manifest_ref.default_enabled);
-        assert!(
-            !enabled,
-            "slot should reflect manifest defaultEnabled: false"
-        );
+        let enabled = settings_guard.is_plugin_enabled_or_default(&manifest_ref.name, manifest_ref.default_enabled);
+        assert!(!enabled, "slot should reflect manifest defaultEnabled: false");
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
@@ -622,10 +600,7 @@ mod tests {
         let ctrl = SettingsController::new(vec![], settings);
 
         ctrl.set_launcher_position(WindowPosition { x: 320, y: 180 });
-        assert_eq!(
-            ctrl.launcher_position(),
-            Some(WindowPosition { x: 320, y: 180 })
-        );
+        assert_eq!(ctrl.launcher_position(), Some(WindowPosition { x: 320, y: 180 }));
 
         // Round-trip through disk so we know the value persisted (not
         // just lived in the in-memory Mutex).

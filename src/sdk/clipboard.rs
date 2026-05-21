@@ -44,9 +44,7 @@ impl ModuleDef for ClipboardModule {
         } else {
             Function::new(
                 ctx.clone(),
-                Async(
-                    |ctx: Ctx<'js>| async move { Err::<(), _>(throw_cap(&ctx, "clipboard.read")) },
-                ),
+                Async(|ctx: Ctx<'js>| async move { Err::<(), _>(throw_cap(&ctx, "clipboard.read")) }),
             )?
         };
         let write_fn = if let Some(f) = write_val.into_function() {
@@ -54,9 +52,7 @@ impl ModuleDef for ClipboardModule {
         } else {
             Function::new(
                 ctx.clone(),
-                Async(|ctx: Ctx<'js>, _text: String| async move {
-                    Err::<(), _>(throw_cap(&ctx, "clipboard.write"))
-                }),
+                Async(|ctx: Ctx<'js>, _text: String| async move { Err::<(), _>(throw_cap(&ctx, "clipboard.write")) }),
             )?
         };
         exports.export("read", read_fn)?;

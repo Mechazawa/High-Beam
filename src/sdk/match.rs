@@ -20,11 +20,9 @@ impl ModuleDef for MatchModule {
     fn evaluate<'js>(ctx: &Ctx<'js>, exports: &rquickjs::module::Exports<'js>) -> JsResult<()> {
         let fuzzy = Function::new(
             ctx.clone(),
-            |ctx: Ctx<'js>,
-             items: Array<'js>,
-             query: String,
-             opts: Value<'js>|
-             -> JsResult<Array<'js>> { fuzzy_impl(&ctx, &items, &query, &opts) },
+            |ctx: Ctx<'js>, items: Array<'js>, query: String, opts: Value<'js>| -> JsResult<Array<'js>> {
+                fuzzy_impl(&ctx, &items, &query, &opts)
+            },
         )?;
         exports.export("fuzzy", fuzzy)?;
         Ok(())
@@ -35,12 +33,7 @@ impl ModuleDef for MatchModule {
 /// ceiling so `opts.threshold` is a meaningful 0..1 bar.
 const SCORE_CEILING: f64 = 256.0;
 
-fn fuzzy_impl<'js>(
-    ctx: &Ctx<'js>,
-    items: &Array<'js>,
-    query: &str,
-    opts: &Value<'js>,
-) -> JsResult<Array<'js>> {
+fn fuzzy_impl<'js>(ctx: &Ctx<'js>, items: &Array<'js>, query: &str, opts: &Value<'js>) -> JsResult<Array<'js>> {
     let opts_obj = opts.as_object();
 
     let key_fn: Option<Function<'js>> = opts_obj.and_then(|o| o.get("key").ok());
@@ -123,11 +116,7 @@ fn fuzzy_impl<'js>(
 /// Collapse a sorted `Vec<u32>` of UTF-32 char positions into contiguous
 /// `[byteStart, byteEnd]` ranges so plugins can `slice()` the haystack
 /// directly.
-fn highlights_from_indices<'js>(
-    ctx: &Ctx<'js>,
-    indices: &[u32],
-    haystack: &str,
-) -> JsResult<Array<'js>> {
+fn highlights_from_indices<'js>(ctx: &Ctx<'js>, indices: &[u32], haystack: &str) -> JsResult<Array<'js>> {
     let out = Array::new(ctx.clone())?;
     if indices.is_empty() {
         return Ok(out);

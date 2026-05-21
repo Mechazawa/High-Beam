@@ -84,9 +84,7 @@ fn assert_module_exports(specifier: &'static str, loader: OneShotLoader) {
         .expect("tokio rt");
     rt.block_on(async {
         let async_rt = AsyncRuntime::new().expect("rt");
-        async_rt
-            .set_loader(OneShotResolver(specifier), loader)
-            .await;
+        async_rt.set_loader(OneShotResolver(specifier), loader).await;
         let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
         async_with!(ctx => |ctx| {
             // Tiny entry module imports the SDK module and stashes its

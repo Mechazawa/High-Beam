@@ -85,10 +85,7 @@ fn reload_one_swaps_the_running_js_context() {
 
     let after = rt.block_on(reg.snapshot()).into_iter().next().unwrap();
     // The Arc changed — reload swapped the underlying plugin.
-    assert!(
-        !Arc::ptr_eq(&before, &after),
-        "reload_one must replace the Arc"
-    );
+    assert!(!Arc::ptr_eq(&before, &after), "reload_one must replace the Arc");
     assert_eq!(rt.block_on(first_title(&after)), Some("AFTER".into()));
 
     let _ = std::fs::remove_dir_all(&root);

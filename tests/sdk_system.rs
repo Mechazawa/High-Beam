@@ -2,9 +2,7 @@
 //! cross-platform `applescript` contract (resolves `null` on non-macOS).
 
 use rquickjs::loader::{Loader, Resolver};
-use rquickjs::{
-    AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Error as JsError, Module, async_with,
-};
+use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Error as JsError, Module, async_with};
 
 use high_beam::sdk::system::{SystemModule, install};
 
@@ -91,7 +89,8 @@ fn applescript_returns_null_on_non_macos() {
                 let promise: rquickjs::Promise<'_> = ctx.globals().get("__test").expect("read __test");
                 let s: String = promise.into_future::<String>().await.expect("await promise");
                 s
-            }).await;
+            })
+            .await;
             assert_eq!(result, "null");
         });
     }

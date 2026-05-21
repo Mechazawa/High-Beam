@@ -67,24 +67,22 @@ pub(crate) fn configure(window: &QueryWindow, settings: SettingsController) {
     // and the request gets dropped, leaving the user clicking into the field.
     let weak_for_focus = window.as_weak();
     let settings_for_focus = settings;
-    window
-        .window()
-        .on_winit_window_event(move |_slint_win, event| {
-            match event {
-                winit::event::WindowEvent::Focused(true) => {
-                    if let Some(w) = weak_for_focus.upgrade() {
-                        w.invoke_focus_input();
-                    }
+    window.window().on_winit_window_event(move |_slint_win, event| {
+        match event {
+            winit::event::WindowEvent::Focused(true) => {
+                if let Some(w) = weak_for_focus.upgrade() {
+                    w.invoke_focus_input();
                 }
-                winit::event::WindowEvent::Focused(false) => {
-                    if let Some(w) = weak_for_focus.upgrade() {
-                        hide_and_persist_position(&w, &settings_for_focus);
-                    }
-                }
-                _ => {}
             }
-            EventResult::Propagate
-        });
+            winit::event::WindowEvent::Focused(false) => {
+                if let Some(w) = weak_for_focus.upgrade() {
+                    hide_and_persist_position(&w, &settings_for_focus);
+                }
+            }
+            _ => {}
+        }
+        EventResult::Propagate
+    });
 
     // TODO: hide macOS Dock/Cmd-Tab presence via
     // `NSApp.setActivationPolicy(NSApplicationActivationPolicyAccessory)`, or
@@ -192,9 +190,7 @@ fn capture_outer_position(window: &QueryWindow) -> Option<WindowPosition> {
     window
         .window()
         .with_winit_window(|w: &winit::window::Window| {
-            w.outer_position()
-                .ok()
-                .map(|p| WindowPosition { x: p.x, y: p.y })
+            w.outer_position().ok().map(|p| WindowPosition { x: p.x, y: p.y })
         })
         .flatten()
 }
@@ -205,11 +201,9 @@ fn capture_outer_position(window: &QueryWindow) -> Option<WindowPosition> {
 /// rect so a restored position lines up byte-identical with where the user
 /// dropped it.
 fn set_outer_position(window: &QueryWindow, pos: WindowPosition) {
-    let _ = window
-        .window()
-        .with_winit_window(|w: &winit::window::Window| {
-            w.set_outer_position(winit::dpi::PhysicalPosition::new(pos.x, pos.y));
-        });
+    let _ = window.window().with_winit_window(|w: &winit::window::Window| {
+        w.set_outer_position(winit::dpi::PhysicalPosition::new(pos.x, pos.y));
+    });
 }
 
 /// Kick off a native OS-driven window drag. winit's `drag_window()` blocks
@@ -217,13 +211,11 @@ fn set_outer_position(window: &QueryWindow, pos: WindowPosition) {
 /// position is updated by the WM, not by us, so there's nothing to do on
 /// the Rust side after this call.
 fn start_native_drag(window: &QueryWindow) {
-    let _ = window
-        .window()
-        .with_winit_window(|w: &winit::window::Window| {
-            if let Err(err) = w.drag_window() {
-                tracing::warn!(%err, "winit drag_window failed");
-            }
-        });
+    let _ = window.window().with_winit_window(|w: &winit::window::Window| {
+        if let Err(err) = w.drag_window() {
+            tracing::warn!(%err, "winit drag_window failed");
+        }
+    });
 }
 
 /// Collect virtual-screen rectangles for every connected monitor. Empty
@@ -287,10 +279,7 @@ pub(crate) fn position_visible_on_any_monitor(
         // Inclusive on the leading edge, exclusive on the trailing — a
         // window at exactly the bottom-right pixel of a monitor has its
         // origin one row past the visible area.
-        pos.x >= m.x
-            && pos.y >= m.y
-            && pos.x < m.x.saturating_add(m.width)
-            && pos.y < m.y.saturating_add(m.height)
+        pos.x >= m.x && pos.y >= m.y && pos.x < m.x.saturating_add(m.width) && pos.y < m.y.saturating_add(m.height)
     })
 }
 
@@ -378,9 +367,7 @@ mod macos {
         ns_window.makeKeyAndOrderFront(None);
     }
 
-    fn ns_window_from_winit(
-        winit_window: &winit::window::Window,
-    ) -> Option<objc2::rc::Retained<NSWindow>> {
+    fn ns_window_from_winit(winit_window: &winit::window::Window) -> Option<objc2::rc::Retained<NSWindow>> {
         // `raw-window-handle` only exposes the content view's `NSView` ptr;
         // walk up via `[NSView window]` per the raw-window-handle docs.
         let handle = winit_window.window_handle().ok()?;
@@ -440,7 +427,8 @@ mod tests {
     use super::*;
 
     // 1×1 green PNG, hand-encoded so the test stays self-contained.
-    const PNG_1X1_B64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
+    const PNG_1X1_B64: &str =
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
 
     // 1×1 JPEG — rare in launcher icons but the decode path needs coverage.
     const TINY_JPEG_B64: &str = "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/2wBDAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/wAARCAABAAEDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD9/KKKKAP/2Q==";
@@ -461,9 +449,7 @@ mod tests {
     fn decode_icon_non_data_uri_returns_default() {
         // Bare filesystem path: plugin was supposed to pre-resolve via
         // `highbeam:icons.forPath(...)`; do NOT touch the disk here.
-        let img = decode_icon(Some(
-            "/Applications/Safari.app/Contents/Resources/AppIcon.icns",
-        ));
+        let img = decode_icon(Some("/Applications/Safari.app/Contents/Resources/AppIcon.icns"));
         assert_eq!(img.size().width, 0);
     }
 
@@ -542,11 +528,7 @@ mod tests {
     #[test]
     fn position_visible_in_primary_display() {
         let pos = WindowPosition { x: 100, y: 200 };
-        assert!(position_visible_on_any_monitor(
-            pos,
-            (760, 80),
-            &primary_only(),
-        ));
+        assert!(position_visible_on_any_monitor(pos, (760, 80), &primary_only(),));
     }
 
     #[test]
@@ -581,11 +563,7 @@ mod tests {
         // The leading edge is inclusive — (0, 0) is the first visible pixel
         // of a monitor whose origin is (0, 0).
         let pos = WindowPosition { x: 0, y: 0 };
-        assert!(position_visible_on_any_monitor(
-            pos,
-            (760, 80),
-            &primary_only(),
-        ));
+        assert!(position_visible_on_any_monitor(pos, (760, 80), &primary_only(),));
     }
 
     #[test]
@@ -595,11 +573,7 @@ mod tests {
         // technically off-screen and we treat it as such to keep the
         // recenter-on-unreachable contract crisp.
         let pos = WindowPosition { x: 1920, y: 1080 };
-        assert!(!position_visible_on_any_monitor(
-            pos,
-            (760, 80),
-            &primary_only(),
-        ));
+        assert!(!position_visible_on_any_monitor(pos, (760, 80), &primary_only(),));
     }
 
     #[test]

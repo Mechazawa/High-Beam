@@ -89,9 +89,7 @@ impl FrecencyDb {
                 return Snapshot::default();
             }
         };
-        let mut stmt = match guard
-            .prepare_cached("SELECT plugin_name, result_key, picks, last_picked_at FROM picks")
-        {
+        let mut stmt = match guard.prepare_cached("SELECT plugin_name, result_key, picks, last_picked_at FROM picks") {
             Ok(s) => s,
             Err(err) => {
                 tracing::error!(%err, "frecency: snapshot prepare failed");
@@ -103,14 +101,7 @@ impl FrecencyDb {
             let result_key: String = row.get(1)?;
             let picks: u32 = row.get(2)?;
             let last_picked_at: i64 = row.get(3)?;
-            Ok((
-                plugin_name,
-                result_key,
-                PickRow {
-                    picks,
-                    last_picked_at,
-                },
-            ))
+            Ok((plugin_name, result_key, PickRow { picks, last_picked_at }))
         });
         let mut map: HashMap<String, HashMap<String, PickRow>> = HashMap::new();
         match rows {
@@ -136,12 +127,7 @@ impl FrecencyDb {
     /// # Errors
     ///
     /// Returns a SQL error if the upsert can't run (locked db, etc.).
-    pub(crate) fn bump_with_now(
-        &self,
-        plugin_name: &str,
-        result_key: &str,
-        now: i64,
-    ) -> rusqlite::Result<()> {
+    pub(crate) fn bump_with_now(&self, plugin_name: &str, result_key: &str, now: i64) -> rusqlite::Result<()> {
         let guard = self.inner.lock().map_err(|err| {
             rusqlite::Error::SqliteFailure(
                 rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_MISUSE),
@@ -269,8 +255,7 @@ mod tests {
         let db = FrecencyDb::open_in_memory().expect("open");
         db.bump_with_now("demo", "alpha", 1_700_000_000).unwrap();
         db.bump_with_now("demo", "beta", 1_700_000_100).unwrap();
-        db.bump_with_now("other-plugin", "alpha", 1_700_000_200)
-            .unwrap();
+        db.bump_with_now("other-plugin", "alpha", 1_700_000_200).unwrap();
         let snap = db.snapshot();
         assert_eq!(snap.get("demo", "alpha").unwrap().picks, 1);
         assert_eq!(snap.get("demo", "beta").unwrap().picks, 1);

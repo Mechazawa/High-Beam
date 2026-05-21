@@ -91,12 +91,7 @@ fn bundled_plugins_dir() -> Option<PathBuf> {
     #[cfg(target_os = "macos")]
     let candidate = exe.parent()?.parent()?.join("Resources").join("plugins");
     #[cfg(not(target_os = "macos"))]
-    let candidate = exe
-        .parent()?
-        .parent()?
-        .join("share")
-        .join("highbeam")
-        .join("plugins");
+    let candidate = exe.parent()?.parent()?.join("share").join("highbeam").join("plugins");
     candidate.is_dir().then_some(candidate)
 }
 
@@ -190,10 +185,7 @@ mod tests {
         fs::create_dir_all(&src).unwrap();
 
         copy_dir_recursive(&src, &dst).expect("copy");
-        assert!(
-            dst.is_dir(),
-            "destination directory should still be created"
-        );
+        assert!(dst.is_dir(), "destination directory should still be created");
         assert!(
             fs::read_dir(&dst).unwrap().next().is_none(),
             "destination should be empty",

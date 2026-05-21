@@ -142,12 +142,7 @@ impl Drop for PluginLog {
         // the queue is drained; the join below blocks until that happens,
         // guaranteeing every buffered line lands on disk before this Arc's
         // resources are released.
-        drop(
-            self.tx
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .take(),
-        );
+        drop(self.tx.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take());
         if let Some(handle) = self
             .writer
             .lock()
@@ -217,10 +212,7 @@ mod tests {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_nanos());
-        let p = std::env::temp_dir().join(format!(
-            "high-beam-pluginlog-{tag}-{}-{nanos}",
-            std::process::id(),
-        ));
+        let p = std::env::temp_dir().join(format!("high-beam-pluginlog-{tag}-{}-{nanos}", std::process::id(),));
         std::fs::create_dir_all(&p).expect("mk tmp");
         p
     }

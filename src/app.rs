@@ -118,10 +118,7 @@ fn spawn_runtime_thread(
     thread::Builder::new()
         .name("highbeam-plugin-runtime".into())
         .spawn(move || {
-            let runtime = match tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-            {
+            let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
                 Ok(rt) => rt,
                 Err(err) => {
                     tracing::error!(%err, "plugins: failed to start tokio runtime");
@@ -178,14 +175,7 @@ fn spawn_runtime_thread(
                                 Arc::clone(&latest),
                                 Arc::clone(&latest_id),
                             );
-                            handle_host_task(
-                                task,
-                                &registry,
-                                progress,
-                                Arc::clone(&confirm_state),
-                                weak.clone(),
-                            )
-                            .await;
+                            handle_host_task(task, &registry, progress, Arc::clone(&confirm_state), weak.clone()).await;
                         }
                         HostMessage::Shutdown => {
                             if let Some(prev) = current_cancel.take() {
@@ -246,13 +236,7 @@ fn wire_window_callbacks(
             w.set_is_history_preview(false);
         }
         let id = latest_id_for_main.fetch_add(1, Ordering::Relaxed) + 1;
-        if tx_for_edit
-            .send(HostMessage::Query {
-                id,
-                input: text.into(),
-            })
-            .is_err()
-        {
+        if tx_for_edit.send(HostMessage::Query { id, input: text.into() }).is_err() {
             tracing::error!("plugins: runtime thread exited; query dropped");
         }
     });
@@ -697,13 +681,7 @@ impl ProgressEmitter {
     }
 
     /// Push (or replace by `key`) one progress row and re-render.
-    fn emit(
-        &self,
-        key: &str,
-        title: String,
-        subtitle: Option<String>,
-        action: plugins::result::Action,
-    ) {
+    fn emit(&self, key: &str, title: String, subtitle: Option<String>, action: plugins::result::Action) {
         // Skip the paint if another query/task has already taken over —
         // late-arriving progress for an abandoned task shouldn't repaint.
         if self.query_id < self.latest_id.load(Ordering::Relaxed) {
@@ -728,10 +706,7 @@ impl ProgressEmitter {
                     existing.result = next.result.clone();
                 } else {
                     let order = slot.len();
-                    slot.push(RankedResult {
-                        order,
-                        ..next.clone()
-                    });
+                    slot.push(RankedResult { order, ..next.clone() });
                 }
                 slot.clone()
             }
@@ -783,16 +758,7 @@ async fn run_install(
         Some("fetching manifest".to_owned()),
         plugins::result::Action::Noop,
     );
-    install_pipeline(
-        url,
-        "install",
-        None,
-        registry,
-        progress,
-        confirm_state,
-        weak,
-    )
-    .await
+    install_pipeline(url, "install", None, registry, progress, confirm_state, weak).await
 }
 
 /// Inner install pipeline, parameterised on the progress-row key so the
@@ -859,8 +825,7 @@ async fn request_confirmation(
     confirm_state: &ConfirmState,
     weak: &slint::Weak<QueryWindow>,
 ) -> bool {
-    let summary =
-        crate::confirm::ConfirmationSummary::from_manifest(manifest, manifest_url, installed_caps);
+    let summary = crate::confirm::ConfirmationSummary::from_manifest(manifest, manifest_url, installed_caps);
 
     let (tx, rx) = oneshot::channel::<bool>();
 
@@ -934,10 +899,7 @@ async fn stage_payload(
         }
     };
 
-    let payload_root = match (
-        manifest.archive_url.as_deref(),
-        manifest.entry_url.as_deref(),
-    ) {
+    let payload_root = match (manifest.archive_url.as_deref(), manifest.entry_url.as_deref()) {
         (Some(archive_url), None) => {
             stage_from_archive(
                 manifest,
@@ -987,10 +949,9 @@ async fn stage_payload(
 
     let writeable = plugins::install::manifest_for_write(manifest, url);
     let payload_root_for_write = payload_root.clone();
-    let write_result = tokio::task::spawn_blocking(move || {
-        plugins::install::write_manifest_json(&payload_root_for_write, &writeable)
-    })
-    .await;
+    let write_result =
+        tokio::task::spawn_blocking(move || plugins::install::write_manifest_json(&payload_root_for_write, &writeable))
+            .await;
     if let Err(err) = unwrap_spawn_blocking(write_result, "write_manifest_json") {
         cleanup_staging(&staging);
         emit_install_failure(progress, progress_key, &plugin_name, &err);
@@ -1025,10 +986,9 @@ async fn stage_from_archive(
         }
     };
     let staging_for_extract = staging.to_path_buf();
-    let extract_result = tokio::task::spawn_blocking(move || {
-        plugins::install::extract_archive(&bytes, format, &staging_for_extract)
-    })
-    .await;
+    let extract_result =
+        tokio::task::spawn_blocking(move || plugins::install::extract_archive(&bytes, format, &staging_for_extract))
+            .await;
     if let Err(err) = unwrap_spawn_blocking(extract_result, "extract") {
         cleanup_staging(staging);
         emit_install_failure(progress, progress_key, plugin_name, &err);
@@ -1174,12 +1134,7 @@ async fn finalize_install(ctx: FinalizeCtx<'_>) -> Option<String> {
     }
 }
 
-fn emit_install_failure(
-    progress: &ProgressEmitter,
-    progress_key: &str,
-    plugin_name: &str,
-    detail: &str,
-) {
+fn emit_install_failure(progress: &ProgressEmitter, progress_key: &str, plugin_name: &str, detail: &str) {
     progress.emit(
         progress_key,
         format!("Install {plugin_name} failed"),
@@ -1260,25 +1215,12 @@ async fn run_update_all(
         );
 
         // Only prompt if the update introduces new capabilities.
-        let needs_prompt =
-            crate::confirm::update_needs_prompt(&remote.capabilities, &installed_caps);
-        let caps_arg: Option<&[String]> = if needs_prompt {
-            Some(&installed_caps)
-        } else {
-            None
-        };
+        let needs_prompt = crate::confirm::update_needs_prompt(&remote.capabilities, &installed_caps);
+        let caps_arg: Option<&[String]> = if needs_prompt { Some(&installed_caps) } else { None };
 
-        if install_pipeline(
-            &manifest_url,
-            &key,
-            caps_arg,
-            registry,
-            progress,
-            confirm_state,
-            weak,
-        )
-        .await
-        .is_some()
+        if install_pipeline(&manifest_url, &key, caps_arg, registry, progress, confirm_state, weak)
+            .await
+            .is_some()
         {
             updated += 1;
         } else {

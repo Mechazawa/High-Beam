@@ -11,10 +11,7 @@ use crate::sdk::capability::KNOWN_CAPABILITIES;
 /// Human-readable explanation for each known capability, shown in the
 /// confirmation view next to the raw capability string.
 static CAP_EXPLANATIONS: &[(&str, &str)] = &[
-    (
-        "actions",
-        "open URLs, copy text, run commands, reveal files",
-    ),
+    ("actions", "open URLs, copy text, run commands, reveal files"),
     ("http", "make outbound HTTP requests"),
     ("clipboard.read", "read the system clipboard"),
     ("clipboard.write", "write to the system clipboard"),
@@ -74,11 +71,7 @@ impl ConfirmationSummary {
     /// `None` for a fresh install and `Some(slice)` for an update; caps not
     /// in `installed_caps` are flagged `is_new = true`.
     #[must_use]
-    pub fn from_manifest(
-        manifest: &Manifest,
-        manifest_url: &str,
-        installed_caps: Option<&[String]>,
-    ) -> Self {
+    pub fn from_manifest(manifest: &Manifest, manifest_url: &str, installed_caps: Option<&[String]>) -> Self {
         let capabilities = manifest
             .capabilities
             .iter()
@@ -89,10 +82,7 @@ impl ConfirmationSummary {
             .collect();
 
         Self {
-            display_name: manifest
-                .display_name
-                .clone()
-                .unwrap_or_else(|| manifest.name.clone()),
+            display_name: manifest.display_name.clone().unwrap_or_else(|| manifest.name.clone()),
             plugin_name: manifest.name.clone(),
             version: manifest.version.clone().unwrap_or_default(),
             description: manifest.description.clone().unwrap_or_default(),
@@ -136,10 +126,7 @@ pub fn update_needs_prompt(remote_caps: &[String], installed_caps: &[String]) ->
 /// the raw capability string when it isn't in the known set.
 #[must_use]
 pub fn explain_cap(cap: &str) -> &str {
-    CAP_EXPLANATIONS
-        .iter()
-        .find(|(k, _)| *k == cap)
-        .map_or(cap, |(_, v)| v)
+    CAP_EXPLANATIONS.iter().find(|(k, _)| *k == cap).map_or(cap, |(_, v)| v)
 }
 
 /// Whether `cap` is in the host's known capability table.  Used to emit a
@@ -231,10 +218,7 @@ mod tests {
         let entry = CapabilityEntry::from_cap("http", false);
         assert_eq!(entry.cap, "http");
         assert!(!entry.explanation.is_empty());
-        assert_ne!(
-            entry.explanation, "http",
-            "should use human text, not raw cap"
-        );
+        assert_ne!(entry.explanation, "http", "should use human text, not raw cap");
     }
 
     #[test]
@@ -265,8 +249,7 @@ mod tests {
             }"#,
         )
         .unwrap();
-        let summary =
-            ConfirmationSummary::from_manifest(&manifest, "https://example.com/m.json", None);
+        let summary = ConfirmationSummary::from_manifest(&manifest, "https://example.com/m.json", None);
         assert!(
             summary.capabilities.iter().all(|c| !c.is_new),
             "fresh install: no caps marked new"
@@ -286,32 +269,18 @@ mod tests {
         )
         .unwrap();
         let installed = strs(&["actions"]);
-        let summary = ConfirmationSummary::from_manifest(
-            &manifest,
-            "https://example.com/m.json",
-            Some(&installed),
-        );
+        let summary = ConfirmationSummary::from_manifest(&manifest, "https://example.com/m.json", Some(&installed));
         let new_count = summary.capabilities.iter().filter(|c| c.is_new).count();
         assert_eq!(new_count, 1, "only `http` is new");
-        let http = summary
-            .capabilities
-            .iter()
-            .find(|c| c.cap == "http")
-            .unwrap();
+        let http = summary.capabilities.iter().find(|c| c.cap == "http").unwrap();
         assert!(http.is_new);
-        let actions = summary
-            .capabilities
-            .iter()
-            .find(|c| c.cap == "actions")
-            .unwrap();
+        let actions = summary.capabilities.iter().find(|c| c.cap == "actions").unwrap();
         assert!(!actions.is_new);
     }
 
     #[test]
     fn confirmation_summary_display_name_falls_back_to_name() {
-        let manifest =
-            Manifest::parse(br#"{ "name": "plain", "archiveUrl": "https://x.com/a.zip" }"#)
-                .unwrap();
+        let manifest = Manifest::parse(br#"{ "name": "plain", "archiveUrl": "https://x.com/a.zip" }"#).unwrap();
         let summary = ConfirmationSummary::from_manifest(&manifest, "https://x.com/m.json", None);
         assert_eq!(summary.display_name, "plain");
     }

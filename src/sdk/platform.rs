@@ -60,9 +60,7 @@ fn detect_os_version() -> String {
 
     #[cfg(target_os = "linux")]
     {
-        if let Ok(out) = std::process::Command::new("/usr/bin/uname")
-            .arg("-r")
-            .output()
+        if let Ok(out) = std::process::Command::new("/usr/bin/uname").arg("-r").output()
             && out.status.success()
         {
             let s = String::from_utf8_lossy(&out.stdout).trim().to_owned();

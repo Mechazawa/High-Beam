@@ -100,9 +100,7 @@ fn echo_plugin_yields_expected_result() {
 
     let runtime = rt();
     runtime.block_on(async {
-        let plugin = LoadedPlugin::load(&dir, manifest)
-            .await
-            .expect("load echo plugin");
+        let plugin = LoadedPlugin::load(&dir, manifest).await.expect("load echo plugin");
         let mut rx = plugin.run_query_stream("hello", CancellationToken::new());
         let results = drain(&mut rx).await;
         assert_eq!(results.len(), 1);
@@ -188,9 +186,7 @@ fn slow_streaming_plugin_yields_progressively() {
 
     let runtime = rt();
     runtime.block_on(async {
-        let plugin = LoadedPlugin::load(&dir, manifest)
-            .await
-            .expect("load slow plugin");
+        let plugin = LoadedPlugin::load(&dir, manifest).await.expect("load slow plugin");
         let mut rx = plugin.run_query_stream("x", CancellationToken::new());
 
         let first = tokio::time::timeout(Duration::from_secs(2), rx.recv())
@@ -224,9 +220,7 @@ fn abort_stops_in_flight_streaming_query() {
 
     let runtime = rt();
     runtime.block_on(async {
-        let plugin = LoadedPlugin::load(&dir, manifest)
-            .await
-            .expect("load slow plugin");
+        let plugin = LoadedPlugin::load(&dir, manifest).await.expect("load slow plugin");
         let cancel = CancellationToken::new();
         let mut rx = plugin.run_query_stream("x", cancel.clone());
 
@@ -239,10 +233,7 @@ fn abort_stops_in_flight_streaming_query() {
 
         cancel.cancel();
 
-        let close = tokio::time::timeout(Duration::from_secs(2), async {
-            while rx.recv().await.is_some() {}
-        })
-        .await;
+        let close = tokio::time::timeout(Duration::from_secs(2), async { while rx.recv().await.is_some() {} }).await;
         close.expect("stream closed after cancel");
     });
 

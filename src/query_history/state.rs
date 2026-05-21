@@ -33,10 +33,7 @@ impl QueryHistoryState {
     /// order (oldest first), matching `QueryHistoryDb::load_recent`.
     #[must_use]
     pub(crate) fn new(entries: Vec<String>) -> Self {
-        Self {
-            entries,
-            cursor: None,
-        }
+        Self { entries, cursor: None }
     }
 
     /// Handle Up. Only enters preview mode when the input is empty — once

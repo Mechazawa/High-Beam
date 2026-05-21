@@ -132,11 +132,7 @@ impl Theme {
         let colors = raw.colors.unwrap_or_default().apply(&defaults.colors)?;
         let font = raw.font.unwrap_or_default().apply(&defaults.font);
         let window = raw.window.unwrap_or_default().apply(&defaults.window);
-        Ok(Self {
-            colors,
-            font,
-            window,
-        })
+        Ok(Self { colors, font, window })
     }
 }
 
@@ -269,30 +265,12 @@ mod tests {
     #[test]
     fn default_theme_matches_yosemite_spotlight_values() {
         let theme = Theme::default();
-        assert_eq!(
-            theme.colors.background,
-            Color::from_argb_u8(0xEA, 0xFF, 0xFF, 0xFF)
-        );
-        assert_eq!(
-            theme.colors.foreground,
-            Color::from_argb_u8(0xFF, 0x1D, 0x1D, 0x1F)
-        );
-        assert_eq!(
-            theme.colors.muted,
-            Color::from_argb_u8(0xFF, 0x86, 0x86, 0x8B)
-        );
-        assert_eq!(
-            theme.colors.highlight,
-            Color::from_argb_u8(0xFF, 0x0A, 0x84, 0xFF)
-        );
-        assert_eq!(
-            theme.colors.selection,
-            Color::from_argb_u8(0x33, 0x0A, 0x84, 0xFF)
-        );
-        assert_eq!(
-            theme.colors.border,
-            Color::from_argb_u8(0x10, 0x00, 0x00, 0x00)
-        );
+        assert_eq!(theme.colors.background, Color::from_argb_u8(0xEA, 0xFF, 0xFF, 0xFF));
+        assert_eq!(theme.colors.foreground, Color::from_argb_u8(0xFF, 0x1D, 0x1D, 0x1F));
+        assert_eq!(theme.colors.muted, Color::from_argb_u8(0xFF, 0x86, 0x86, 0x8B));
+        assert_eq!(theme.colors.highlight, Color::from_argb_u8(0xFF, 0x0A, 0x84, 0xFF));
+        assert_eq!(theme.colors.selection, Color::from_argb_u8(0x33, 0x0A, 0x84, 0xFF));
+        assert_eq!(theme.colors.border, Color::from_argb_u8(0x10, 0x00, 0x00, 0x00));
         assert!((theme.font.size_query - 32.0).abs() < f32::EPSILON);
         assert!((theme.font.size_title - 14.0).abs() < f32::EPSILON);
         assert!((theme.font.size_subtitle - 12.0).abs() < f32::EPSILON);
@@ -314,10 +292,7 @@ mod tests {
             parse_hex_color("#0a84ff33").unwrap(),
             Color::from_argb_u8(0x33, 0x0A, 0x84, 0xFF)
         );
-        assert_eq!(
-            parse_hex_color("#ABCDEF").unwrap(),
-            parse_hex_color("#abcdef").unwrap()
-        );
+        assert_eq!(parse_hex_color("#ABCDEF").unwrap(), parse_hex_color("#abcdef").unwrap());
     }
 
     #[test]
@@ -334,10 +309,7 @@ mod tests {
         let text = "[colors]\nbackground = \"#000000\"\n";
         let theme = Theme::from_toml(text).expect("partial override parses");
         // overridden
-        assert_eq!(
-            theme.colors.background,
-            Color::from_argb_u8(0xFF, 0x00, 0x00, 0x00)
-        );
+        assert_eq!(theme.colors.background, Color::from_argb_u8(0xFF, 0x00, 0x00, 0x00));
         // untouched
         assert_eq!(theme.colors.foreground, Theme::default().colors.foreground);
         assert_eq!(theme.font.family, Theme::default().font.family);

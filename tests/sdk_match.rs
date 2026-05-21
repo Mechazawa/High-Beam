@@ -2,9 +2,7 @@
 //! only callable via JS, so we exercise it via rquickjs.
 
 use rquickjs::loader::{Loader, Resolver};
-use rquickjs::{
-    AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Error as JsError, Module, async_with,
-};
+use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Error as JsError, Module, async_with};
 
 use high_beam::sdk::r#match::MatchModule;
 
@@ -68,10 +66,7 @@ fn fuzzy_returns_matches_sorted_by_score() {
     );
     let arr = out.as_array().expect("array");
     assert!(!arr.is_empty(), "got nothing for 'cal'");
-    let titles: Vec<String> = arr
-        .iter()
-        .map(|m| m["item"].as_str().unwrap().to_owned())
-        .collect();
+    let titles: Vec<String> = arr.iter().map(|m| m["item"].as_str().unwrap().to_owned()).collect();
     assert!(titles.contains(&"Calculator".to_owned()));
     assert!(titles.contains(&"Calendar".to_owned()));
 }
@@ -99,10 +94,7 @@ fn fuzzy_respects_threshold_option() {
         ",
     );
     let arr = out.as_array().expect("array");
-    assert!(
-        arr.is_empty(),
-        "threshold should have filtered everything, got {arr:?}"
-    );
+    assert!(arr.is_empty(), "threshold should have filtered everything, got {arr:?}");
 }
 
 #[test]
@@ -117,10 +109,7 @@ fn fuzzy_produces_highlights_for_matched_chars() {
     let arr = out.as_array().expect("array");
     assert!(!arr.is_empty(), "Safari should match 'sf'");
     let highlights = arr[0]["highlights"].as_array().expect("highlights array");
-    assert!(
-        !highlights.is_empty(),
-        "highlights should reference the matched chars"
-    );
+    assert!(!highlights.is_empty(), "highlights should reference the matched chars");
 }
 
 #[test]

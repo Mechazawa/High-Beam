@@ -68,9 +68,7 @@ impl ArchiveFormat {
         let lower = content_type.to_ascii_lowercase();
         let bare = lower.split(';').next().unwrap_or(&lower).trim();
         match bare {
-            "application/gzip" | "application/x-gzip" | "application/x-tar+gzip" => {
-                Some(Self::TarGz)
-            }
+            "application/gzip" | "application/x-gzip" | "application/x-tar+gzip" => Some(Self::TarGz),
             "application/x-tar" => Some(Self::Tar),
             "application/zip" | "application/x-zip-compressed" => Some(Self::Zip),
             _ => None,
@@ -117,10 +115,9 @@ impl std::fmt::Display for InstallError {
                 write!(f, "manifest declares both `{a}` and `{b}` — pick one")
             }
             Self::Download(msg) => write!(f, "download archive: {msg}"),
-            Self::UnknownFormat { url, content_type } => write!(
-                f,
-                "unknown archive format (url={url}, content-type={content_type})"
-            ),
+            Self::UnknownFormat { url, content_type } => {
+                write!(f, "unknown archive format (url={url}, content-type={content_type})")
+            }
             Self::Extract(msg) => write!(f, "extract archive: {msg}"),
             Self::EmbeddedMismatch { field, detail } => {
                 write!(f, "embedded manifest {field} mismatch: {detail}")
@@ -168,10 +165,7 @@ pub async fn fetch_and_validate_manifest(url: &str) -> Result<Manifest, InstallE
             response.status().canonical_reason().unwrap_or(""),
         )));
     }
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| InstallError::Fetch(e.to_string()))?;
+    let bytes = response.bytes().await.map_err(|e| InstallError::Fetch(e.to_string()))?;
     let manifest = Manifest::parse(&bytes).map_err(|e| InstallError::BadManifest(e.to_string()))?;
     require_installer_fields(&manifest)?;
     Ok(manifest)
@@ -188,10 +182,7 @@ fn require_installer_fields(manifest: &Manifest) -> Result<(), InstallError> {
     }
     // archiveUrl XOR entryUrl: a plugin chooses one distribution shape;
     // setting both is ambiguous, setting neither leaves nothing to install.
-    match (
-        manifest.archive_url.as_deref(),
-        manifest.entry_url.as_deref(),
-    ) {
+    match (manifest.archive_url.as_deref(), manifest.entry_url.as_deref()) {
         (Some(_), Some(_)) => Err(InstallError::ConflictingFields {
             a: "archiveUrl",
             b: "entryUrl",
@@ -276,11 +267,7 @@ pub async fn download_archive(url: &str) -> Result<(Vec<u8>, ArchiveFormat), Ins
 /// # Errors
 ///
 /// Returns [`InstallError::Extract`] on any byte-stream / I/O problem.
-pub fn extract_archive(
-    bytes: &[u8],
-    format: ArchiveFormat,
-    target_dir: &Path,
-) -> Result<(), InstallError> {
+pub fn extract_archive(bytes: &[u8], format: ArchiveFormat, target_dir: &Path) -> Result<(), InstallError> {
     std::fs::create_dir_all(target_dir).map_err(|e| InstallError::Io(e.to_string()))?;
     match format {
         ArchiveFormat::TarGz => extract_tar(flate2::read::GzDecoder::new(bytes), target_dir),
@@ -301,12 +288,9 @@ fn extract_tar<R: std::io::Read>(reader: R, target_dir: &Path) -> Result<(), Ins
 
 fn extract_zip(bytes: &[u8], target_dir: &Path) -> Result<(), InstallError> {
     let reader = std::io::Cursor::new(bytes);
-    let mut archive =
-        zip::ZipArchive::new(reader).map_err(|e| InstallError::Extract(e.to_string()))?;
+    let mut archive = zip::ZipArchive::new(reader).map_err(|e| InstallError::Extract(e.to_string()))?;
     for i in 0..archive.len() {
-        let mut entry = archive
-            .by_index(i)
-            .map_err(|e| InstallError::Extract(e.to_string()))?;
+        let mut entry = archive.by_index(i).map_err(|e| InstallError::Extract(e.to_string()))?;
         // `enclosed_name` rejects `..` traversal and absolute paths.
         let Some(rel) = entry.enclosed_name() else {
             return Err(InstallError::Extract(format!(
@@ -322,8 +306,7 @@ fn extract_zip(bytes: &[u8], target_dir: &Path) -> Result<(), InstallError> {
         if let Some(parent) = outpath.parent() {
             std::fs::create_dir_all(parent).map_err(|e| InstallError::Io(e.to_string()))?;
         }
-        let mut out =
-            std::fs::File::create(&outpath).map_err(|e| InstallError::Io(e.to_string()))?;
+        let mut out = std::fs::File::create(&outpath).map_err(|e| InstallError::Io(e.to_string()))?;
         std::io::copy(&mut entry, &mut out).map_err(|e| InstallError::Extract(e.to_string()))?;
     }
     Ok(())
@@ -424,11 +407,7 @@ pub fn find_payload_root(extracted_dir: &Path) -> PathBuf {
 /// # Errors
 ///
 /// Returns [`InstallError::Io`] on any filesystem step.
-pub fn move_into_plugins_dir(
-    payload_root: &Path,
-    plugins_dir: &Path,
-    name: &str,
-) -> Result<PathBuf, InstallError> {
+pub fn move_into_plugins_dir(payload_root: &Path, plugins_dir: &Path, name: &str) -> Result<PathBuf, InstallError> {
     std::fs::create_dir_all(plugins_dir).map_err(|e| InstallError::Io(e.to_string()))?;
     let destination = plugins_dir.join(name);
     if destination.exists() {
@@ -443,8 +422,7 @@ pub fn move_into_plugins_dir(
     // cross-fs we fall back to copy + remove.
     if let Err(err) = std::fs::rename(payload_root, &destination) {
         if err.raw_os_error() == Some(libc_xdev()) {
-            copy_dir_recursive(payload_root, &destination)
-                .map_err(|e| InstallError::Io(e.to_string()))?;
+            copy_dir_recursive(payload_root, &destination).map_err(|e| InstallError::Io(e.to_string()))?;
             std::fs::remove_dir_all(payload_root).map_err(|e| InstallError::Io(e.to_string()))?;
         } else {
             return Err(InstallError::Io(err.to_string()));
@@ -486,13 +464,9 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
 /// # Errors
 ///
 /// Returns [`InstallError::Io`] on serialisation or write failure.
-pub fn write_manifest_json(
-    dest_dir: &Path,
-    manifest: &ManifestForWrite,
-) -> Result<(), InstallError> {
+pub fn write_manifest_json(dest_dir: &Path, manifest: &ManifestForWrite) -> Result<(), InstallError> {
     let path = dest_dir.join("manifest.json");
-    let body =
-        serde_json::to_string_pretty(manifest).map_err(|e| InstallError::Io(e.to_string()))?;
+    let body = serde_json::to_string_pretty(manifest).map_err(|e| InstallError::Io(e.to_string()))?;
     std::fs::write(&path, body).map_err(|e| InstallError::Io(e.to_string()))
 }
 
@@ -538,10 +512,7 @@ pub fn manifest_for_write(source: &Manifest, install_url: &str) -> ManifestForWr
         platforms: source.platforms.clone(),
         archive_url: source.archive_url.clone(),
         entry_url: source.entry_url.clone(),
-        manifest_url: source
-            .manifest_url
-            .clone()
-            .or_else(|| Some(install_url.to_owned())),
+        manifest_url: source.manifest_url.clone().or_else(|| Some(install_url.to_owned())),
     }
 }
 
@@ -571,9 +542,7 @@ mod tests {
             header.set_size(body.len() as u64);
             header.set_mode(0o644);
             header.set_cksum();
-            tar_builder
-                .append_data(&mut header, path, *body)
-                .expect("tar append");
+            tar_builder.append_data(&mut header, path, *body).expect("tar append");
         }
         let encoder = tar_builder.into_inner().expect("finish tar");
         encoder.finish().expect("finish gz")
@@ -584,8 +553,7 @@ mod tests {
         let buf: Vec<u8> = Vec::new();
         let cursor = std::io::Cursor::new(buf);
         let mut writer = zip::ZipWriter::new(cursor);
-        let opts: SimpleFileOptions =
-            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        let opts: SimpleFileOptions = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
         for (path, body) in entries {
             writer.start_file(*path, opts).expect("start_file");
             writer.write_all(body).expect("write body");
@@ -604,14 +572,8 @@ mod tests {
             ArchiveFormat::from_url("https://x/y.tgz?token=abc"),
             Some(ArchiveFormat::TarGz)
         );
-        assert_eq!(
-            ArchiveFormat::from_url("https://x/y.tar"),
-            Some(ArchiveFormat::Tar)
-        );
-        assert_eq!(
-            ArchiveFormat::from_url("https://x/y.ZIP"),
-            Some(ArchiveFormat::Zip)
-        );
+        assert_eq!(ArchiveFormat::from_url("https://x/y.tar"), Some(ArchiveFormat::Tar));
+        assert_eq!(ArchiveFormat::from_url("https://x/y.ZIP"), Some(ArchiveFormat::Zip));
         assert_eq!(ArchiveFormat::from_url("https://x/opaque"), None);
     }
 
@@ -641,10 +603,8 @@ mod tests {
 
     #[test]
     fn require_installer_fields_accepts_entry_url() {
-        let m = Manifest::parse(
-            br#"{ "name": "x", "version": "1.0.0", "entryUrl": "https://example.com/p.js" }"#,
-        )
-        .unwrap();
+        let m =
+            Manifest::parse(br#"{ "name": "x", "version": "1.0.0", "entryUrl": "https://example.com/p.js" }"#).unwrap();
         require_installer_fields(&m).expect("entryUrl-only manifests are valid");
     }
 
@@ -670,9 +630,7 @@ mod tests {
 
     #[test]
     fn require_installer_fields_rejects_missing_version() {
-        let m =
-            Manifest::parse(br#"{ "name": "x", "archiveUrl": "https://example.com/a.tar.gz" }"#)
-                .unwrap();
+        let m = Manifest::parse(br#"{ "name": "x", "archiveUrl": "https://example.com/a.tar.gz" }"#).unwrap();
         match require_installer_fields(&m) {
             Err(InstallError::MissingField(name)) => assert_eq!(name, "version"),
             other => panic!("expected MissingField, got {other:?}"),
@@ -683,10 +641,7 @@ mod tests {
     fn extract_tar_gz_unpacks_files() {
         let root = fresh_tmp("extract-tgz");
         let bytes = build_tar_gz(&[
-            (
-                "hello/manifest.json",
-                br#"{"name":"hello","version":"1.0.0"}"#,
-            ),
+            ("hello/manifest.json", br#"{"name":"hello","version":"1.0.0"}"#),
             ("hello/plugin.js", b"// js body"),
         ]);
         extract_archive(&bytes, ArchiveFormat::TarGz, &root).expect("extract");
@@ -699,10 +654,7 @@ mod tests {
     fn extract_zip_unpacks_files() {
         let root = fresh_tmp("extract-zip");
         let bytes = build_zip(&[
-            (
-                "hello/manifest.json",
-                br#"{"name":"hello","version":"1.0.0"}"#,
-            ),
+            ("hello/manifest.json", br#"{"name":"hello","version":"1.0.0"}"#),
             ("hello/plugin.js", b"// js body"),
         ]);
         extract_archive(&bytes, ArchiveFormat::Zip, &root).expect("extract");
@@ -732,8 +684,7 @@ mod tests {
             }"#,
         )
         .unwrap();
-        let found = cross_check_embedded(&root, &expected, "https://example.com/h/manifest.json")
-            .expect("cross check");
+        let found = cross_check_embedded(&root, &expected, "https://example.com/h/manifest.json").expect("cross check");
         assert!(found, "embedded manifest should have been found");
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -759,8 +710,7 @@ mod tests {
             }"#,
         )
         .unwrap();
-        let err = cross_check_embedded(&root, &expected, "https://example.com/h/manifest.json")
-            .expect_err("mismatch");
+        let err = cross_check_embedded(&root, &expected, "https://example.com/h/manifest.json").expect_err("mismatch");
         match err {
             InstallError::EmbeddedMismatch { field, .. } => assert_eq!(field, "version"),
             other => panic!("expected EmbeddedMismatch(version), got {other:?}"),
@@ -790,8 +740,7 @@ mod tests {
             }"#,
         )
         .unwrap();
-        let err = cross_check_embedded(&root, &expected, "https://example.com/h/manifest.json")
-            .expect_err("mismatch");
+        let err = cross_check_embedded(&root, &expected, "https://example.com/h/manifest.json").expect_err("mismatch");
         match err {
             InstallError::EmbeddedMismatch { field, .. } => assert_eq!(field, "manifestUrl"),
             other => panic!("expected EmbeddedMismatch(manifestUrl), got {other:?}"),
@@ -810,12 +759,9 @@ mod tests {
             }"#,
         )
         .unwrap();
-        let found = cross_check_embedded(&root, &expected, "https://example.com/h/manifest.json")
-            .expect("absent is fine");
-        assert!(
-            !found,
-            "no embedded manifest means cross-check returns false"
-        );
+        let found =
+            cross_check_embedded(&root, &expected, "https://example.com/h/manifest.json").expect("absent is fine");
+        assert!(!found, "no embedded manifest means cross-check returns false");
         let _ = std::fs::remove_dir_all(&root);
     }
 

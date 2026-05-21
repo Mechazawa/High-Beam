@@ -75,10 +75,7 @@ fn rt() -> tokio::runtime::Runtime {
 fn get_returns_user_value_string() {
     let mut opts = HashMap::new();
     opts.insert("name".into(), json!("alice"));
-    let out = rt().block_on(run_with_options(
-        opts,
-        "globalThis.__out = String(get('name'));",
-    ));
+    let out = rt().block_on(run_with_options(opts, "globalThis.__out = String(get('name'));"));
     assert_eq!(out, "alice");
 }
 
@@ -106,10 +103,7 @@ fn get_string_returns_undefined_for_non_string() {
 fn get_bool_returns_user_value() {
     let mut opts = HashMap::new();
     opts.insert("live".into(), json!(true));
-    let out = rt().block_on(run_with_options(
-        opts,
-        "globalThis.__out = String(getBool('live'));",
-    ));
+    let out = rt().block_on(run_with_options(opts, "globalThis.__out = String(getBool('live'));"));
     assert_eq!(out, "true");
 }
 
@@ -117,10 +111,7 @@ fn get_bool_returns_user_value() {
 fn get_int_returns_user_value() {
     let mut opts = HashMap::new();
     opts.insert("limit".into(), json!(42));
-    let out = rt().block_on(run_with_options(
-        opts,
-        "globalThis.__out = String(getInt('limit'));",
-    ));
+    let out = rt().block_on(run_with_options(opts, "globalThis.__out = String(getInt('limit'));"));
     assert_eq!(out, "42");
 }
 

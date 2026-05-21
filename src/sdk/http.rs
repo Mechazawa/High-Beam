@@ -44,9 +44,9 @@ impl ModuleDef for HttpModule {
     fn evaluate<'js>(ctx: &Ctx<'js>, exports: &rquickjs::module::Exports<'js>) -> JsResult<()> {
         let get_fn = Function::new(
             ctx.clone(),
-            Async(|ctx: Ctx<'js>, url: String, opts: Value<'js>| async move {
-                request(ctx, "GET", url, None, opts).await
-            }),
+            Async(
+                |ctx: Ctx<'js>, url: String, opts: Value<'js>| async move { request(ctx, "GET", url, None, opts).await },
+            ),
         )?;
         let post_fn = Function::new(
             ctx.clone(),
@@ -128,9 +128,8 @@ async fn request<'js>(
         "GET" => client().get(&url),
         "POST" => client().post(&url),
         _ => client().request(
-            reqwest::Method::from_bytes(method.as_bytes()).map_err(|e| {
-                rquickjs::Error::new_loading_message("highbeam:http", e.to_string())
-            })?,
+            reqwest::Method::from_bytes(method.as_bytes())
+                .map_err(|e| rquickjs::Error::new_loading_message("highbeam:http", e.to_string()))?,
             &url,
         ),
     };
@@ -145,9 +144,7 @@ async fn request<'js>(
     if let Some(body_val) = body {
         match coerce_body(&ctx, body_val)? {
             Some(BodyShape::Json(json_str)) => {
-                builder = builder
-                    .header("content-type", "application/json")
-                    .body(json_str);
+                builder = builder.header("content-type", "application/json").body(json_str);
             }
             Some(BodyShape::Text(s)) => {
                 builder = builder.body(s);
@@ -180,11 +177,7 @@ async fn request<'js>(
     let header_map: Vec<(String, String)> = response
         .headers()
         .iter()
-        .filter_map(|(k, v)| {
-            v.to_str()
-                .ok()
-                .map(|s| (k.as_str().to_owned(), s.to_owned()))
-        })
+        .filter_map(|(k, v)| v.to_str().ok().map(|s| (k.as_str().to_owned(), s.to_owned())))
         .collect();
 
     let body_fut = response.text();
