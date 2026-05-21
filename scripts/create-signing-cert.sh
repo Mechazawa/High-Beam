@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Creates a self-signed code-signing certificate in the user's login keychain
-# AND drops a PKCS12 backup file in the current dir for 1Password storage.
+# and writes a PKCS12 backup to the current dir.
 #
 # The cert name must match `[package.metadata.packager.macos]::signing-identity`
 # in Cargo.toml so `cargo packager` finds it automatically.
@@ -106,14 +106,18 @@ cat <<MSG
 PKCS12 backup (private key + cert): $P12_OUT
 PKCS12 passphrase: $PBE_PASS
 
-Recommended next steps:
-  1. In 1Password, create a Document titled "High Beam signing cert" and
-     attach the .p12 file. Note the passphrase above (1Password's
-     "passphrase" field is the right spot).
-  2. Delete the local copy once it's safely in 1Password:
-       rm "$P12_OUT"
-  3. (Now or anytime) verify the signing identity is usable:
-       security find-identity -p codesigning -v | grep "$CERT_NAME"
-  4. Build the bundle — the cert is picked up automatically:
-       just bundle
+Next:
+  - Back up the .p12 + passphrase somewhere safe (a password manager,
+    encrypted vault, hardware-backed keystore). Without them you can't
+    re-create this exact identity on another machine — re-running this
+    script generates a new key, so signed builds would show a different
+    Authority to end users.
+  - Delete the local .p12 once it's backed up:
+      rm "$P12_OUT"
+  - Verify the identity is usable:
+      security find-identity -p codesigning -v | grep "$CERT_NAME"
+    (Expect a "CSSMERR_TP_NOT_TRUSTED" suffix — that's normal for
+    self-signed certs and doesn't stop \`codesign\` from using it.)
+  - Build the bundle — the cert is picked up automatically:
+      just bundle
 MSG
