@@ -199,23 +199,12 @@ async fn run_command(
     let mut stdout = child.stdout.take();
     let mut stderr = child.stderr.take();
 
-    let read_stdout = async {
-        if let Some(s) = stdout.as_mut() {
-            Box::pin(read_capped(s)).await
-        } else {
-            Ok(Vec::new())
-        }
-    };
-    let read_stderr = async {
-        if let Some(s) = stderr.as_mut() {
-            Box::pin(read_capped(s)).await
-        } else {
-            Ok(Vec::new())
-        }
-    };
-
     let wait_fut = async {
-        let (s, e, status) = tokio::join!(read_stdout, read_stderr, child.wait());
+        let (s, e, status) = tokio::join!(
+            read_capped_opt(stdout.as_mut()),
+            read_capped_opt(stderr.as_mut()),
+            child.wait(),
+        );
         Ok::<_, std::io::Error>((s?, e?, status?))
     };
 
@@ -247,6 +236,18 @@ async fn run_command(
         None => obj.set("code", Value::new_null(ctx))?,
     }
     Ok(obj)
+}
+
+/// Read `reader` into a capped `Vec<u8>` when present; return an empty
+/// vec otherwise. Lets the join site drop the "is the pipe wired up?"
+/// branch into a single line per stream.
+async fn read_capped_opt<R: AsyncReadExt + Unpin>(
+    reader: Option<&mut R>,
+) -> std::io::Result<Vec<u8>> {
+    match reader {
+        Some(r) => read_capped(r).await,
+        None => Ok(Vec::new()),
+    }
 }
 
 async fn read_capped<R: AsyncReadExt + Unpin>(reader: &mut R) -> std::io::Result<Vec<u8>> {
