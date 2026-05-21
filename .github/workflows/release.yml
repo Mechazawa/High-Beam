@@ -6,8 +6,8 @@
 #   build-linux (ubuntu-latest) → tarball + .deb + .rpm + .pkg.tar.zst
 #   release     (ubuntu-latest) → AI-summarised notes + GitHub release
 #
-# The release job tolerates a missing ANTHROPIC_API_KEY or a flaky API by
-# falling back to the raw commit log — Anthropic going down should never
+# The release job tolerates a flaky GitHub Models API by falling back to
+# the raw commit log — the inference endpoint going down should never
 # block a tag from publishing.
 name: Release
 
@@ -16,11 +16,12 @@ on:
     tags:
       - 'v*'
 
-# `softprops/action-gh-release` needs write access to create the release
-# and upload assets. Scoped at workflow level so all jobs share it
-# (the build jobs don't strictly need it, but the cost is zero).
+# `softprops/action-gh-release` needs `contents: write` to create the
+# release. `models: read` is what unlocks the GitHub Models inference
+# endpoint via the auto-provisioned GITHUB_TOKEN — no separate API key.
 permissions:
   contents: write
+  models: read
 
 jobs:
   build-macos:
@@ -222,13 +223,14 @@ jobs:
           echo "--- changelog.txt ---"
           cat changelog.txt
 
-      # AI summary via Anthropic. The script is failure-tolerant: any
-      # non-200 / missing key / parse error falls back to the raw commit
-      # log so the release still publishes. We do not gate the release on
-      # Anthropic uptime.
-      - name: Summarise changelog with Claude
+      # AI summary via GitHub Models (free; uses the auto-provisioned
+      # GITHUB_TOKEN — no separate secret to manage). The script is
+      # failure-tolerant: any non-200 / parse error falls back to the raw
+      # commit log so the release still publishes. We do not gate the
+      # release on Models endpoint uptime.
+      - name: Summarise changelog with GitHub Models
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ github.ref_name }}
         run: |
           set -uo pipefail
@@ -249,40 +251,38 @@ jobs:
               # — there's nothing to hide behind a fold.
           }
 
-          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-              fallback "ANTHROPIC_API_KEY not set; using raw commit log."
-              exit 0
-          fi
-
           # Build the JSON request body in Python to avoid shell-escaping
-          # pain with multi-line commit messages.
+          # pain with multi-line commit messages. GitHub Models speaks the
+          # OpenAI-compatible chat-completions schema.
           python3 - <<'PY' > request.json
           import json, os, pathlib
           changelog = pathlib.Path("changelog.txt").read_text()
           tag = os.environ["TAG_NAME"]
+          system = (
+              "You're writing release notes for a developer tool. "
+              "Given a list of git commit messages, produce 2-4 short "
+              "paragraphs grouping related changes thematically. Focus "
+              "on what's new for users, not internal refactors. Skip "
+              "CI / chore / lint commits. Use short headlines like "
+              "'New plugins' / 'UX' / 'Build & distribution'. Output "
+              "markdown."
+          )
           payload = {
-              # Sonnet 4.6: quality summary at lower $/token than Opus.
-              # Swap to "claude-opus-4-7" for higher quality, or
-              # "claude-haiku-4-5" for cheap drafts.
-              "model": "claude-sonnet-4-6",
+              # gpt-4o-mini: fast, capable enough for changelog summaries,
+              # and free under GitHub Models. Swap to "openai/gpt-4o" for
+              # higher quality, or any other catalog id at
+              # https://github.com/marketplace/models.
+              "model": "openai/gpt-4o-mini",
               "max_tokens": 1024,
-              "system": (
-                  "You're writing release notes for a developer tool. "
-                  "Given a list of git commit messages, produce 2-4 short "
-                  "paragraphs grouping related changes thematically. Focus "
-                  "on what's new for users, not internal refactors. Skip "
-                  "CI / chore / lint commits. Use short headlines like "
-                  "'New plugins' / 'UX' / 'Build & distribution'. Output "
-                  "markdown."
-              ),
               "messages": [
+                  {"role": "system", "content": system},
                   {
                       "role": "user",
                       "content": (
                           f"Release tag: {tag}\n\n"
                           f"Commit log:\n{changelog}"
                       ),
-                  }
+                  },
               ],
           }
           print(json.dumps(payload))
@@ -292,12 +292,12 @@ jobs:
           # still writing the body to stdout so we can log it.
           if ! curl --fail-with-body --silent --show-error \
                   -o response.json \
-                  -X POST https://api.anthropic.com/v1/messages \
-                  -H "x-api-key: $ANTHROPIC_API_KEY" \
-                  -H "anthropic-version: 2023-06-01" \
-                  -H "content-type: application/json" \
+                  -X POST https://models.github.ai/inference/chat/completions \
+                  -H "Authorization: Bearer $GITHUB_TOKEN" \
+                  -H "Accept: application/vnd.github+json" \
+                  -H "Content-Type: application/json" \
                   -d @request.json; then
-              echo "::warning::Anthropic API call failed; falling back to raw changelog."
+              echo "::warning::GitHub Models call failed; falling back to raw changelog."
               if [ -f response.json ]; then
                   echo "--- response body ---"
                   cat response.json
@@ -307,12 +307,12 @@ jobs:
           fi
 
           if ! python3 -c '
-          import json, sys, pathlib
+          import json, pathlib
           data = json.load(open("response.json"))
-          text = data["content"][0]["text"]
+          text = data["choices"][0]["message"]["content"]
           pathlib.Path("summary.md").write_text(text)
           ' ; then
-              echo "::warning::Could not parse Anthropic response; falling back to raw changelog."
+              echo "::warning::Could not parse GitHub Models response; falling back to raw changelog."
               fallback ""
               exit 0
           fi

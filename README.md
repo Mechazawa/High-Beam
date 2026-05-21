@@ -76,10 +76,11 @@ wouldn't need this step — require a $99/yr Apple Developer ID; see
 
 `.github/workflows/release.yml` builds macOS + Linux artifacts and
 publishes a GitHub Release whenever a `v*` tag is pushed. The notes are
-AI-summarised via the Anthropic API (set `ANTHROPIC_API_KEY` in repo
-secrets) with a raw-commit-log fallback; codesigned macOS builds need
-`MACOS_CERT_P12_BASE64` + `MACOS_CERT_PASSWORD`. All secrets are optional
-— the release still ships without them. Full setup in
+AI-summarised via [GitHub Models](https://github.com/marketplace/models)
+(free; uses the auto-provisioned `GITHUB_TOKEN`, no extra secret) with
+a raw-commit-log fallback; codesigned macOS builds need
+`MACOS_CERT_P12_BASE64` + `MACOS_CERT_PASSWORD`. Both are optional — the
+release still ships without them. Full setup in
 [docs/distribution.md § Release workflow](docs/distribution.md#release-workflow-github-actions).
 
 ## Usage

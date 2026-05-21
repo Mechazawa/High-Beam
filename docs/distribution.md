@@ -359,8 +359,8 @@ GitHub pre-releases.
    `.pkg.tar.zst`.
 3. **`release`** (ubuntu-latest, `needs:` both) — downloads both
    artifact sets, computes a commit-range changelog (`git log
-   $PREV_TAG..$GITHUB_REF_NAME`), asks Claude to summarise it, and
-   publishes a GitHub Release with all the artifacts attached.
+   $PREV_TAG..$GITHUB_REF_NAME`), asks GitHub Models to summarise it,
+   and publishes a GitHub Release with all the artifacts attached.
 
 ### Required secrets
 
@@ -369,13 +369,17 @@ repository secret**:
 
 | Secret | Purpose | Behaviour without it |
 |--------|---------|----------------------|
-| `ANTHROPIC_API_KEY` | AI release-notes summary via the Anthropic API. Create one at <https://console.anthropic.com>. | Release still publishes; body is the raw commit log instead of a summary. |
 | `MACOS_CERT_P12_BASE64` | Base64-encoded `.p12` containing your codesigning cert + private key. | macOS bundle ships ad-hoc-signed; end users need `xattr -dr com.apple.quarantine`. |
 | `MACOS_CERT_PASSWORD` | The PKCS12 passphrase. Defaults to `highbeam-signing` per `scripts/create-signing-cert.sh`. | Same as missing `MACOS_CERT_P12_BASE64`. |
 
+The AI summary uses [GitHub Models](https://github.com/marketplace/models)
+through the auto-provisioned `GITHUB_TOKEN` — no separate API key. The
+workflow's `permissions:` block grants `models: read`, which is what
+unlocks the inference endpoint.
+
 The workflow's only hard dependency on secrets is none of them: every
 secret has a documented fallback. A tagged release will publish even if
-all three are absent.
+both are absent.
 
 ### Setting `MACOS_CERT_P12_BASE64`
 
@@ -401,29 +405,29 @@ the .p12 with.
 ### Swapping the AI summary model
 
 The model is hardcoded near the top of the inline Python block in the
-"Summarise changelog with Claude" step of `release.yml`:
+"Summarise changelog with GitHub Models" step of `release.yml`:
 
 ```python
-"model": "claude-sonnet-4-6",
+"model": "openai/gpt-4o-mini",
 ```
 
-Defaults to Sonnet 4.6 (quality summary at moderate cost). Swap to
-`claude-opus-4-7` for highest-quality output (~5× cost), or
-`claude-haiku-4-5` for cheap drafts (~1/4 the cost; lower polish).
+Defaults to `openai/gpt-4o-mini` (fast, free, plenty of quality for
+commit-log summaries). Swap to `openai/gpt-4o` for a step up, or any
+other catalog id from <https://github.com/marketplace/models> —
+the endpoint speaks the OpenAI-compatible chat-completions schema, so
+no other code changes are needed.
 
 ### Fallback behaviour
 
-The summarisation step is wrapped in three layers of belt-and-braces so
-Anthropic uptime never blocks a tag from publishing:
+The summarisation step is wrapped in two layers of belt-and-braces so
+GitHub Models uptime never blocks a tag from publishing:
 
-1. **No `ANTHROPIC_API_KEY` secret** → the step logs the absence and
-   writes the raw commit log as the body. Exit 0.
-2. **Curl returns non-2xx** (rate limit, auth failure, API outage) →
-   `--fail-with-body` makes the script log the error body, then fall
+1. **Curl returns non-2xx** (rate limit, auth failure, endpoint outage)
+   → `--fail-with-body` makes the script log the error body, then fall
    back to the raw commit log. Exit 0.
-3. **API returns 200 but the JSON shape is unexpected** → the
+2. **Endpoint returns 200 but the JSON shape is unexpected** → the
    response-parsing Python block catches the exception, logs a warning,
    and falls back to the raw commit log. Exit 0.
 
-In all three cases the release still publishes; only the body content
+In both cases the release still publishes; only the body content
 degrades.
