@@ -5,10 +5,6 @@
 /target
 *.rs.bk
 
-# Legacy sources (kept locally as porting reference, not tracked)
-/legacy
-/legacy-v2
-
 # User-installed plugins. The repo ships example plugins under
 # `examples/plugins/` that the user can copy here to try them out (Stage 4+
 # will switch to the platform config dir).
