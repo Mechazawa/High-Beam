@@ -76,3 +76,35 @@ export type QueryFn = (
     input: string,
     signal: AbortSignal,
 ) => AsyncIterable<Result>;
+
+/**
+ * Shape of `manifest.json`. Required: `name`. Everything else is optional —
+ * the host applies defaults at load time.
+ *
+ * `archiveUrl` + `manifestUrl` opt a plugin in to install-by-URL + update
+ * checks; without them the plugin is local-only. See
+ * docs/plugin-authoring.md for publication guidance.
+ */
+export interface Manifest {
+    name: string;
+    displayName?: string;
+    version?: string;
+    description?: string;
+    entry?: string;
+    debounceMs?: number;
+    timeoutMs?: number;
+    memoryMb?: number;
+    capabilities?: readonly string[];
+    platforms?: readonly ('macos' | 'linux')[];
+    options?: readonly OptionDef[];
+    /** Download URL for the plugin archive (`.tar.gz`, `.tgz`, `.tar`, `.zip`). */
+    archiveUrl?: string;
+    /** Canonical URL hosting *this* manifest. `update` re-fetches it. */
+    manifestUrl?: string;
+}
+
+export type OptionDef =
+    | { key: string; type: 'string'; label?: string; default?: string }
+    | { key: string; type: 'bool'; label?: string; default?: boolean }
+    | { key: string; type: 'int'; label?: string; default?: number; min?: number; max?: number }
+    | { key: string; type: 'enum'; label?: string; default?: string; choices: readonly string[] };

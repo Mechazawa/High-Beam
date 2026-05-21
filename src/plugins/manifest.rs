@@ -56,6 +56,17 @@ pub struct Manifest {
     /// rather than failing to load — see [`Manifest::parsed_options`].
     #[serde(default)]
     pub options: Vec<JsonValue>,
+    /// Archive URL (`.tar.gz`, `.tgz`, `.tar`, or `.zip`) the installer
+    /// downloads when the user runs `install <manifestUrl>`. Absent ⇒ the
+    /// plugin is local-only and can't be reinstalled from this manifest.
+    #[serde(default)]
+    pub archive_url: Option<String>,
+    /// Canonical URL hosting *this* manifest. `update` re-fetches it and
+    /// compares versions to decide whether a new install is due. Absent ⇒
+    /// the plugin opts out of update checks; once `install` succeeds the
+    /// installer backfills this field with the URL the user ran against.
+    #[serde(default)]
+    pub manifest_url: Option<String>,
 }
 
 /// One option a plugin author declared in `manifest.json` and the settings
@@ -280,6 +291,24 @@ impl Manifest {
             std::env::consts::OS,
         ))
     }
+}
+
+/// Whether `remote` is strictly newer than `local` per semver rules.
+///
+/// Both arguments must parse as semver for the answer to be `true`. Anything
+/// else — non-semver strings, equal versions, remote older than local — yields
+/// `false`. The intentional conservatism: when in doubt, do nothing rather
+/// than risk replacing a working plugin with a string-equal but semantically
+/// older one.
+#[must_use]
+pub fn is_newer_version(remote: &str, local: &str) -> bool {
+    let Ok(r) = semver::Version::parse(remote) else {
+        return false;
+    };
+    let Ok(l) = semver::Version::parse(local) else {
+        return false;
+    };
+    r > l
 }
 
 #[cfg(test)]
@@ -557,6 +586,47 @@ mod tests {
         let parsed = m.parsed_options();
         assert_eq!(parsed.defs.len(), 1);
         assert_eq!(parsed.defs[0].label, "username");
+    }
+
+    #[test]
+    fn archive_and_manifest_urls_default_to_none() {
+        let m = Manifest::parse(br#"{ "name": "x" }"#).unwrap();
+        assert!(m.archive_url.is_none());
+        assert!(m.manifest_url.is_none());
+    }
+
+    #[test]
+    fn archive_and_manifest_urls_round_trip_when_present() {
+        let json = br#"{
+            "name": "x",
+            "archiveUrl": "https://example.com/x.tar.gz",
+            "manifestUrl": "https://example.com/x/manifest.json"
+        }"#;
+        let m = Manifest::parse(json).unwrap();
+        assert_eq!(
+            m.archive_url.as_deref(),
+            Some("https://example.com/x.tar.gz")
+        );
+        assert_eq!(
+            m.manifest_url.as_deref(),
+            Some("https://example.com/x/manifest.json")
+        );
+    }
+
+    #[test]
+    fn is_newer_version_compares_semver() {
+        assert!(is_newer_version("1.2.4", "1.2.3"));
+        assert!(is_newer_version("2.0.0", "1.9.9"));
+        assert!(!is_newer_version("1.2.3", "1.2.3"));
+        assert!(!is_newer_version("1.0.0", "1.0.1"));
+    }
+
+    #[test]
+    fn is_newer_version_false_on_non_semver() {
+        // Conservatism: an unparseable version string never triggers an update.
+        assert!(!is_newer_version("v1.2.3", "1.2.3"));
+        assert!(!is_newer_version("1.2.3", "not-a-version"));
+        assert!(!is_newer_version("", "1.0.0"));
     }
 
     #[test]

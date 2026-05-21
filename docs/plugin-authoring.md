@@ -83,7 +83,8 @@ tolerated so new fields can land without breaking older plugins.
 
 - `name` — required; unique; lowercase-kebab; frecency key prefix and
   cache directory name.
-- `displayName`, `version`, `description` — optional metadata.
+- `displayName`, `version`, `description` — optional metadata. `version`
+  should be valid semver if you want `update` to compare it sensibly.
 - `entry` — optional; defaults to `plugin.js`.
 - `debounceMs` — wait this long after the latest keystroke before
   invoking `query()`. `0` = no debounce. Capped at 2000.
@@ -98,6 +99,12 @@ tolerated so new fields can land without breaking older plugins.
   `"int"`, or `"enum"`), `label`, `default`, plus `min`/`max` (int) or
   `choices` (enum). Plugins read their own values via `highbeam:settings`
   — see [the SDK reference](./sdk-reference.md#highbeamsettings).
+- `archiveUrl` — optional; download URL for the plugin archive
+  (`.tar.gz`, `.tgz`, `.tar`, or `.zip`). Required to be installable via
+  `install <url>`. Missing ⇒ plugin is local-only.
+- `manifestUrl` — optional; canonical URL hosting this manifest. The
+  `update` command re-fetches it to learn whether a newer version exists.
+  Missing ⇒ plugin opts out of update checks.
 
 Tuning guidance is in [the cookbook](./plugin-cookbook.md#tune-debouncems--timeoutms--memorymb).
 

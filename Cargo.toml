@@ -147,6 +147,18 @@ toml = { version = "0.8", default-features = false, features = ["parse", "displa
 # the plugin.log writer needs.
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
+# Semver comparison for plugin update checks. Plain string equality bites on
+# leading-zero / metadata variations; the crate is tiny and well-trodden.
+semver = "1"
+
+# Plugin archive extraction. `flate2` decompresses `.tar.gz`; `tar` unwraps
+# the resulting stream; `zip` covers the `.zip` path. Default features are
+# trimmed where it matters — `zip`'s bzip2/zstd backends would balloon the
+# binary for formats we don't accept.
+tar = "0.4"
+flate2 = "1"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
 # Host-side structured logging. `tracing` is the event/macro surface; the
 # `fmt`+`env-filter` subscriber gives us level-routed stderr output with
 # `RUST_LOG`-style filtering. Per-plugin logs still go through `PluginLog`.
