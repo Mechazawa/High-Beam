@@ -69,6 +69,10 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     let loader_opts = LoaderOptions::resolve(options.plugins_dir.clone());
     let manifests = loader::scan_manifests(&loader_opts);
     let settings_for_ui = Settings::load_or_default();
+    // Snapshot the hotkey before handing the settings into the controller —
+    // hot-reload is out of scope for v1, so the daemon-startup value is what
+    // we register with the OS.
+    let hotkey_spec = settings_for_ui.global().hotkey.clone();
     let settings_controller = SettingsController::new(manifests, settings_for_ui);
     settings_controller.wire(&window);
 
@@ -78,7 +82,11 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     spawn_ipc_listener(&options.socket_path, window.as_weak())?;
 
     #[cfg(target_os = "macos")]
-    let _hotkey_guard = spawn_hotkey_listener(window.as_weak());
+    let _hotkey_guard = spawn_hotkey_listener(window.as_weak(), &hotkey_spec);
+    // Suppress unused-variable warning on Linux where we don't register a
+    // global hotkey (the WM handles it via `highbeam --open`).
+    #[cfg(not(target_os = "macos"))]
+    let _ = hotkey_spec;
 
     if options.open_on_start {
         window::show(&window);
@@ -113,11 +121,35 @@ fn spawn_ipc_listener(socket_path: &Path, weak: slint::Weak<QueryWindow>) -> io:
     Ok(())
 }
 
+/// Parse a user-supplied accelerator string, falling back to the schema
+/// default on any error. Daemon startup must never refuse to launch because
+/// the user typo'd `Shftt+Space`.
+#[cfg(target_os = "macos")]
+fn parse_hotkey_or_default(spec: &str) -> global_hotkey::hotkey::HotKey {
+    use std::str::FromStr;
+
+    use global_hotkey::hotkey::HotKey;
+
+    match HotKey::from_str(spec) {
+        Ok(hk) => hk,
+        Err(err) => {
+            tracing::warn!(
+                bad_value = %spec,
+                fallback = crate::settings::DEFAULT_HOTKEY,
+                %err,
+                "settings: hotkey string did not parse; falling back to default",
+            );
+            HotKey::from_str(crate::settings::DEFAULT_HOTKEY)
+                .expect("DEFAULT_HOTKEY is a constant the parser knows")
+        }
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn spawn_hotkey_listener(
     weak: slint::Weak<QueryWindow>,
+    hotkey_spec: &str,
 ) -> Option<global_hotkey::GlobalHotKeyManager> {
-    use global_hotkey::hotkey::{Code, HotKey, Modifiers};
     use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 
     // GlobalHotKeyManager has to be created and kept alive on the same thread
@@ -131,9 +163,9 @@ fn spawn_hotkey_listener(
         }
     };
 
-    let hotkey = HotKey::new(Some(Modifiers::SHIFT), Code::Space);
+    let hotkey = parse_hotkey_or_default(hotkey_spec);
     if let Err(err) = manager.register(hotkey) {
-        tracing::error!(%err, "failed to register Shift+Space hotkey");
+        tracing::error!(%err, spec = %hotkey_spec, "failed to register global hotkey");
         return None;
     }
     let hotkey_id = hotkey.id();
@@ -156,4 +188,45 @@ fn spawn_hotkey_listener(
         .expect("spawn hotkey thread");
 
     Some(manager)
+}
+
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+mod tests {
+    use super::parse_hotkey_or_default;
+    use std::str::FromStr;
+
+    use global_hotkey::hotkey::HotKey;
+
+    use crate::settings::DEFAULT_HOTKEY;
+
+    #[test]
+    fn parses_valid_accelerator() {
+        let hk = parse_hotkey_or_default("Cmd+K");
+        let expected = HotKey::from_str("Cmd+K").expect("crate parses Cmd+K");
+        assert_eq!(hk.id(), expected.id());
+    }
+
+    #[test]
+    fn falls_back_on_garbage() {
+        // Anything the global-hotkey parser refuses must degrade to the
+        // schema default — the daemon must never refuse to start.
+        let hk = parse_hotkey_or_default("Shftt+Space");
+        let expected = HotKey::from_str(DEFAULT_HOTKEY).expect("default parses");
+        assert_eq!(hk.id(), expected.id());
+    }
+
+    #[test]
+    fn falls_back_on_empty_string() {
+        let hk = parse_hotkey_or_default("");
+        let expected = HotKey::from_str(DEFAULT_HOTKEY).expect("default parses");
+        assert_eq!(hk.id(), expected.id());
+    }
+
+    #[test]
+    fn default_hotkey_constant_is_parseable() {
+        // Guard against someone editing DEFAULT_HOTKEY to something the
+        // parser doesn't accept — the fallback path expect()s it.
+        assert!(HotKey::from_str(DEFAULT_HOTKEY).is_ok());
+    }
 }

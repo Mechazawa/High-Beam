@@ -22,6 +22,11 @@ use crate::paths;
 
 const SETTINGS_FILENAME: &str = "settings.toml";
 
+/// Default global hotkey string. Kept here (not at the call site) so the
+/// fallback path on a malformed user value matches the schema default
+/// byte-for-byte.
+pub const DEFAULT_HOTKEY: &str = "Shift+Space";
+
 /// User-edited launcher state.
 ///
 /// The on-disk shape is the [`SettingsFile`] TOML schema; this is the in-memory
@@ -32,8 +37,29 @@ pub struct Settings {
     /// means we couldn't resolve a platform config dir — reads still work
     /// against the in-memory defaults, but [`Self::save`] will fail.
     path: Option<PathBuf>,
+    /// App-wide settings (hotkey today; room for `max_rows`, blur behaviour,
+    /// etc.). Kept as a separate struct so adding new fields is a one-line
+    /// `serde` change without touching call sites.
+    global: GlobalSettings,
     /// Per-plugin slot. Missing entries default to enabled + no overrides.
     plugins: HashMap<String, PluginSettings>,
+}
+
+/// Global launcher settings — anything that isn't per-plugin.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GlobalSettings {
+    /// Accelerator string parsed by `global_hotkey::HotKey::from_str`
+    /// (e.g. `"Shift+Space"`, `"Cmd+K"`). Validated at daemon start; a
+    /// malformed value never blocks launch — see `daemon::parse_or_default`.
+    pub hotkey: String,
+}
+
+impl Default for GlobalSettings {
+    fn default() -> Self {
+        Self {
+            hotkey: DEFAULT_HOTKEY.to_owned(),
+        }
+    }
 }
 
 /// Per-plugin settings as we store them.
@@ -131,8 +157,15 @@ impl Settings {
                 (name, plugin)
             })
             .collect();
+        let global = GlobalSettings {
+            hotkey: raw
+                .global
+                .and_then(|g| g.hotkey)
+                .unwrap_or_else(|| DEFAULT_HOTKEY.to_owned()),
+        };
         Ok(Self {
             path: None,
+            global,
             plugins,
         })
     }
@@ -167,7 +200,16 @@ impl Settings {
                 (name.clone(), raw)
             })
             .collect();
-        let file = SettingsFile { plugins };
+        // Skip the `[global]` section when it matches defaults so a
+        // freshly-installed settings file stays minimal.
+        let global = if self.global == GlobalSettings::default() {
+            None
+        } else {
+            Some(GlobalFile {
+                hotkey: Some(self.global.hotkey.clone()),
+            })
+        };
+        let file = SettingsFile { global, plugins };
         // Unwrap is safe: SettingsFile only contains TOML-serialisable scalar
         // shapes (string/bool/int/float/array/table). serde never fails for
         // these unless a Display impl panics — none do.
@@ -257,14 +299,34 @@ impl Settings {
         out.sort_by(|a, b| a.0.cmp(&b.0));
         out
     }
+
+    /// Read-only view of the global settings block.
+    #[must_use]
+    pub fn global(&self) -> &GlobalSettings {
+        &self.global
+    }
+
+    /// Set the global hotkey accelerator string. Trimmed before storing so
+    /// `"Shift+Space "` from a stray `TextInput` doesn't fail the parser later.
+    pub fn set_hotkey(&mut self, hotkey: &str) {
+        hotkey.trim().clone_into(&mut self.global.hotkey);
+    }
 }
 
 /// The TOML wire shape. Keep optional everywhere so partial files
 /// (`[plugins.foo]\nenabled = false`, nothing else) parse cleanly.
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct SettingsFile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    global: Option<GlobalFile>,
     #[serde(default)]
     plugins: HashMap<String, PluginSlotFile>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct GlobalFile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hotkey: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -464,6 +526,64 @@ mod tests {
     fn empty_string_round_trips_to_default() {
         let s = Settings::from_toml("").expect("empty parses");
         assert_eq!(s, Settings::default());
+    }
+
+    #[test]
+    fn global_hotkey_defaults_when_absent() {
+        // No `[global]` section at all → fallback to "Shift+Space".
+        let s = Settings::from_toml("").expect("empty parses");
+        assert_eq!(s.global().hotkey, DEFAULT_HOTKEY);
+
+        // `[global]` present but `hotkey` missing → still default.
+        let s = Settings::from_toml("[global]\n").expect("parse");
+        assert_eq!(s.global().hotkey, DEFAULT_HOTKEY);
+    }
+
+    #[test]
+    fn global_hotkey_roundtrips_through_toml() {
+        let mut s = Settings::default();
+        s.set_hotkey("Cmd+Space");
+        let text = s.to_toml();
+        assert!(
+            text.contains("hotkey = \"Cmd+Space\""),
+            "expected hotkey in TOML, got: {text}"
+        );
+        let reloaded = Settings::from_toml(&text).expect("reparse");
+        assert_eq!(reloaded.global().hotkey, "Cmd+Space");
+    }
+
+    #[test]
+    fn global_hotkey_roundtrips_through_disk() {
+        let dir = fresh_tmp("global-disk");
+        let path = dir.join("settings.toml");
+
+        let mut s = Settings::load_from(&path);
+        s.set_hotkey("Ctrl+Alt+K");
+        s.save().expect("save");
+
+        let reloaded = Settings::load_from(&path);
+        assert_eq!(reloaded.global().hotkey, "Ctrl+Alt+K");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn default_settings_omit_global_section() {
+        // A pristine settings file shouldn't carry a `[global]` block — it's
+        // implicit and identical to the default.
+        let s = Settings::default();
+        let text = s.to_toml();
+        assert!(
+            !text.contains("[global]"),
+            "default settings should not write [global]: {text}"
+        );
+    }
+
+    #[test]
+    fn set_hotkey_trims_whitespace() {
+        let mut s = Settings::default();
+        s.set_hotkey("  Shift+F1  ");
+        assert_eq!(s.global().hotkey, "Shift+F1");
     }
 
     #[test]
