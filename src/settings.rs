@@ -283,6 +283,17 @@ impl Settings {
         self.plugins.get(name).is_none_or(|s| s.enabled)
     }
 
+    /// Whether a plugin is enabled, falling back to `manifest_default` when
+    /// the user has not set an explicit toggle. An explicit toggle in settings
+    /// always wins, regardless of the manifest default.
+    #[must_use]
+    pub fn is_plugin_enabled_or_default(&self, name: &str, manifest_default: bool) -> bool {
+        match self.plugins.get(name) {
+            Some(slot) => slot.enabled,
+            None => manifest_default,
+        }
+    }
+
     /// All option values the user has set for a plugin. Returns a borrowed
     /// reference to the plugin's options map, or to a shared empty map when
     /// the plugin has no overrides — callers fall back to manifest defaults
@@ -704,6 +715,32 @@ mod tests {
             !text.contains("[global"),
             "default settings should not write [global*]: {text}"
         );
+    }
+
+    #[test]
+    fn is_plugin_enabled_or_default_explicit_on_wins() {
+        let mut s = Settings::default();
+        s.set_plugin_enabled("p", true);
+        assert!(s.is_plugin_enabled_or_default("p", false));
+    }
+
+    #[test]
+    fn is_plugin_enabled_or_default_explicit_off_wins() {
+        let mut s = Settings::default();
+        s.set_plugin_enabled("p", false);
+        assert!(!s.is_plugin_enabled_or_default("p", true));
+    }
+
+    #[test]
+    fn is_plugin_enabled_or_default_absent_uses_manifest_default_true() {
+        let s = Settings::default();
+        assert!(s.is_plugin_enabled_or_default("absent", true));
+    }
+
+    #[test]
+    fn is_plugin_enabled_or_default_absent_uses_manifest_default_false() {
+        let s = Settings::default();
+        assert!(!s.is_plugin_enabled_or_default("absent", false));
     }
 
     #[test]

@@ -17,6 +17,31 @@ use crate::plugins::manifest::{Manifest, OptionDef, OptionKind};
 use crate::settings::{Settings, WindowPosition};
 use crate::ui::{PluginOption, PluginSlot};
 
+/// Display metadata for a plugin, extracted from its manifest and handed to
+/// the settings view so the right pane can show a header.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PluginMetadata {
+    /// Human-readable name — `display_name` when present, otherwise `name`.
+    pub display_name: String,
+    /// Optional semver string, ready to render with a `v` prefix.
+    pub version: Option<String>,
+    /// Optional human-readable description.
+    pub description: Option<String>,
+}
+
+/// Extract display metadata from a manifest for the settings right pane.
+#[must_use]
+pub fn plugin_metadata(manifest: &Manifest) -> PluginMetadata {
+    PluginMetadata {
+        display_name: manifest
+            .display_name
+            .clone()
+            .unwrap_or_else(|| manifest.name.clone()),
+        version: manifest.version.clone(),
+        description: manifest.description.clone(),
+    }
+}
+
 /// Shared state for the settings view. Cloned into every callback closure;
 /// internally `Arc`-wrapped so writes from the UI thread land in one place.
 #[derive(Clone)]
@@ -220,7 +245,7 @@ impl SettingsController {
             .map(|m| PluginSlot {
                 name: SharedString::from(m.name.as_str()),
                 display_name: SharedString::from(m.display_name.as_deref().unwrap_or("")),
-                enabled: settings.is_plugin_enabled(&m.name),
+                enabled: settings.is_plugin_enabled_or_default(&m.name, m.default_enabled),
             })
             .collect();
         window.set_plugin_slots(ModelRc::new(VecModel::from(slots)));
@@ -230,8 +255,23 @@ impl SettingsController {
         let idx = usize::try_from(window.get_selected_plugin_index().max(0)).unwrap_or(0);
         let Some(manifest) = self.inner.manifests.get(idx) else {
             window.set_plugin_options(ModelRc::new(VecModel::from(Vec::<PluginOption>::new())));
+            window.set_selected_plugin_version(SharedString::default());
+            window.set_selected_plugin_description(SharedString::default());
             return;
         };
+
+        let meta = plugin_metadata(manifest);
+        window.set_selected_plugin_version(SharedString::from(
+            meta.version
+                .as_deref()
+                .map(|v| format!("v{v}"))
+                .unwrap_or_default()
+                .as_str(),
+        ));
+        window.set_selected_plugin_description(SharedString::from(
+            meta.description.as_deref().unwrap_or_default(),
+        ));
+
         let defs = &manifest.parsed_options().defs;
         let settings = self.inner.settings.lock().expect("settings lock");
         let user_opts = settings.plugin_options(&manifest.name);
@@ -423,6 +463,58 @@ mod tests {
     fn manifest_with_options(name: &str, options_json: &str) -> Manifest {
         let raw = format!(r#"{{ "name": "{name}", "options": {options_json} }}"#);
         Manifest::parse(raw.as_bytes()).expect("manifest parse")
+    }
+
+    #[test]
+    fn plugin_metadata_uses_display_name_when_present() {
+        let m = Manifest::parse(
+            br#"{ "name": "echo", "displayName": "Echo Plugin", "version": "1.2.3", "description": "Echoes text." }"#,
+        )
+        .expect("parse");
+        let meta = plugin_metadata(&m);
+        assert_eq!(meta.display_name, "Echo Plugin");
+        assert_eq!(meta.version.as_deref(), Some("1.2.3"));
+        assert_eq!(meta.description.as_deref(), Some("Echoes text."));
+    }
+
+    #[test]
+    fn plugin_metadata_falls_back_to_name_when_display_name_absent() {
+        let m = Manifest::parse(br#"{ "name": "echo" }"#).expect("parse");
+        let meta = plugin_metadata(&m);
+        assert_eq!(meta.display_name, "echo");
+        assert!(meta.version.is_none());
+        assert!(meta.description.is_none());
+    }
+
+    #[test]
+    fn refresh_slots_reflects_manifest_default_enabled() {
+        // A plugin with defaultEnabled: false must show disabled in the slot
+        // when the user has no explicit toggle.
+        let tmp = std::env::temp_dir().join(format!(
+            "high-beam-settings-default-enabled-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("settings.toml");
+        let settings = Settings::load_from(&path);
+        let manifest =
+            Manifest::parse(br#"{ "name": "vault", "defaultEnabled": false }"#).expect("parse");
+        let ctrl = SettingsController::new(vec![manifest], settings);
+
+        // Reach into inner to verify the enabled value used for the slot.
+        let settings_guard = ctrl.inner.settings.lock().unwrap();
+        let manifest_ref = &ctrl.inner.manifests[0];
+        let enabled = settings_guard
+            .is_plugin_enabled_or_default(&manifest_ref.name, manifest_ref.default_enabled);
+        assert!(
+            !enabled,
+            "slot should reflect manifest defaultEnabled: false"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

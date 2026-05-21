@@ -227,7 +227,7 @@ async fn load_one(plugin_dir: &Path, settings: &Settings) -> Result<LoadedPlugin
     // User-disabled plugins: same INFO-log shape as the platform gate so the
     // skip path is consistent. Restart-to-apply for v1 — disabling a plugin
     // while the daemon is running has no effect until the next launch.
-    if !settings.is_plugin_enabled(&manifest.name) {
+    if !settings.is_plugin_enabled_or_default(&manifest.name, manifest.default_enabled) {
         return Err(LoadError::Skipped {
             name: manifest.name,
             reason: "disabled in settings".to_owned(),
@@ -440,6 +440,79 @@ mod tests {
         assert!(
             names.contains(&"keep"),
             "keep should still load, got {names:?}",
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn default_disabled_plugin_is_skipped_without_explicit_settings() {
+        // A plugin with `"defaultEnabled": false` must be skipped when the
+        // user has no explicit override — mirrors `disabled_plugin_is_skipped_by_loader`.
+        let root = fresh_tmp("default-disabled");
+        write_plugin(
+            &root,
+            "vault",
+            r#"{ "name": "vault", "entry": "plugin.js", "defaultEnabled": false }"#,
+            "export async function* query() {}",
+        );
+        write_plugin(
+            &root,
+            "keep",
+            r#"{ "name": "keep", "entry": "plugin.js" }"#,
+            "export async function* query() {}",
+        );
+
+        let opts = LoaderOptions {
+            plugins_dir: root.clone(),
+        };
+        // Use default (empty) Settings — no explicit toggle for "vault".
+        let plugins = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio rt")
+            .block_on(load_all(&opts, &Settings::default()));
+
+        let names: Vec<_> = plugins.iter().map(|p| p.manifest.name.as_str()).collect();
+        assert!(
+            !names.contains(&"vault"),
+            "vault should be skipped (defaultEnabled: false, no user override), got {names:?}",
+        );
+        assert!(
+            names.contains(&"keep"),
+            "keep should still load, got {names:?}",
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn default_disabled_plugin_loads_when_user_explicitly_enables() {
+        // An explicit `enabled = true` in settings must override `defaultEnabled: false`.
+        let root = fresh_tmp("default-disabled-override");
+        write_plugin(
+            &root,
+            "vault",
+            r#"{ "name": "vault", "entry": "plugin.js", "defaultEnabled": false }"#,
+            "export async function* query() {}",
+        );
+
+        let mut settings = Settings::default();
+        settings.set_plugin_enabled("vault", true);
+
+        let opts = LoaderOptions {
+            plugins_dir: root.clone(),
+        };
+        let plugins = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio rt")
+            .block_on(load_all(&opts, &settings));
+
+        let names: Vec<_> = plugins.iter().map(|p| p.manifest.name.as_str()).collect();
+        assert!(
+            names.contains(&"vault"),
+            "vault should load when user explicitly enables it, got {names:?}",
         );
 
         let _ = std::fs::remove_dir_all(&root);

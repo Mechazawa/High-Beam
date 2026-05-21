@@ -78,6 +78,10 @@ export component QueryWindow inherits Window {
     in-out property <[PluginSlot]> plugin-slots: [];
     in-out property <int> selected-plugin-index: 0;
     in-out property <[PluginOption]> plugin-options: [];
+    // Metadata for the selected plugin — populated by Rust in refresh-options.
+    // Empty strings mean the field is absent; the pane hides those rows.
+    in-out property <string> selected-plugin-version: "";
+    in-out property <string> selected-plugin-description: "";
     // True when the "Global" rail entry is selected — the right pane then
     // shows the app-wide settings instead of plugin options. Defaulted to
     // true so opening settings lands on Global rather than a random plugin.
@@ -701,13 +705,32 @@ export component QueryWindow inherits Window {
                         VerticalLayout {
                             padding: 16px;
                             spacing: 12px;
-                            // Selected-plugin header.
-                            if plugin-slots.length > 0 && root.selected-plugin-index < plugin-slots.length: Text {
-                                text: plugin-slots[root.selected-plugin-index].display-name == ""
-                                    ? plugin-slots[root.selected-plugin-index].name
-                                    : plugin-slots[root.selected-plugin-index].display-name;
-                                color: root.foreground-color;
-                                font-size: 16px;
+                            // Selected-plugin header: name + optional version.
+                            if plugin-slots.length > 0 && root.selected-plugin-index < plugin-slots.length: HorizontalLayout {
+                                spacing: 8px;
+                                alignment: space-between;
+                                Text {
+                                    text: plugin-slots[root.selected-plugin-index].display-name == ""
+                                        ? plugin-slots[root.selected-plugin-index].name
+                                        : plugin-slots[root.selected-plugin-index].display-name;
+                                    color: root.foreground-color;
+                                    font-size: root.font-size-title;
+                                    vertical-alignment: center;
+                                }
+                                if root.selected-plugin-version != "": Text {
+                                    text: root.selected-plugin-version;
+                                    color: root.muted-color;
+                                    font-size: root.font-size-subtitle;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            // Plugin description — only shown when present.
+                            if root.selected-plugin-description != "": Text {
+                                text: root.selected-plugin-description;
+                                color: root.muted-color;
+                                font-size: root.font-size-subtitle;
+                                wrap: word-wrap;
                             }
 
                             if plugin-options.length == 0: Text {

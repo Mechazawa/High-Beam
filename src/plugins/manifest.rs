@@ -13,6 +13,7 @@ const DEFAULT_ENTRY: &str = "plugin.js";
 const DEFAULT_TIMEOUT_MS: u64 = 500;
 const DEFAULT_MEMORY_MB: u32 = 32;
 const DEFAULT_DEBOUNCE_MS: u64 = 0;
+const DEFAULT_DEFAULT_ENABLED: bool = true;
 
 /// Platforms the host gates on. `&[&str]` (rather than an enum) so unknown
 /// future values like `"windows"` round-trip unchanged and are flagged only
@@ -30,6 +31,11 @@ pub struct Manifest {
     pub version: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
+    /// Whether this plugin loads by default when no explicit user toggle is set.
+    /// Plugins that require external tooling (e.g. a CLI) ship with `false` so
+    /// they don't produce errors for users who haven't installed the dependency.
+    #[serde(default = "default_default_enabled", rename = "defaultEnabled")]
+    pub default_enabled: bool,
     #[serde(default = "default_entry")]
     pub entry: String,
     #[serde(default = "default_timeout_ms")]
@@ -58,10 +64,19 @@ pub struct Manifest {
     #[serde(default)]
     pub options: Vec<JsonValue>,
     /// Archive URL (`.tar.gz`, `.tgz`, `.tar`, or `.zip`) the installer
-    /// downloads when the user runs `install <manifestUrl>`. Absent ⇒ the
-    /// plugin is local-only and can't be reinstalled from this manifest.
+    /// downloads when the user runs `install <manifestUrl>`. Mutually
+    /// exclusive with [`Self::entry_url`] — a published manifest must
+    /// declare exactly one (or neither, for local-only plugins).
     #[serde(default)]
     pub archive_url: Option<String>,
+    /// Single-file install URL pointing at the plugin's entry script.
+    /// For plugins that fit in one JS file with no sibling data — the
+    /// common case — this skips archive packaging: the installer
+    /// downloads just this file and writes it to `<plugin>/<entry>`
+    /// alongside the fetched manifest. Mutually exclusive with
+    /// [`Self::archive_url`].
+    #[serde(default)]
+    pub entry_url: Option<String>,
     /// Canonical URL hosting *this* manifest. `update` re-fetches it and
     /// compares versions to decide whether a new install is due. Absent ⇒
     /// the plugin opts out of update checks; once `install` succeeds the
@@ -202,6 +217,10 @@ fn parse_option(raw: &JsonValue) -> Result<OptionDef, String> {
     };
 
     Ok(OptionDef { key, label, kind })
+}
+
+const fn default_default_enabled() -> bool {
+    DEFAULT_DEFAULT_ENABLED
 }
 
 fn default_entry() -> String {
@@ -597,6 +616,26 @@ mod tests {
     }
 
     #[test]
+    fn default_enabled_defaults_to_true() {
+        let m = Manifest::parse(br#"{ "name": "x" }"#).unwrap();
+        assert!(m.default_enabled);
+    }
+
+    #[test]
+    fn default_enabled_false_round_trips() {
+        let json = br#"{ "name": "x", "defaultEnabled": false }"#;
+        let m = Manifest::parse(json).unwrap();
+        assert!(!m.default_enabled);
+    }
+
+    #[test]
+    fn default_enabled_true_explicit_round_trips() {
+        let json = br#"{ "name": "x", "defaultEnabled": true }"#;
+        let m = Manifest::parse(json).unwrap();
+        assert!(m.default_enabled);
+    }
+
+    #[test]
     fn archive_and_manifest_urls_default_to_none() {
         let m = Manifest::parse(br#"{ "name": "x" }"#).unwrap();
         assert!(m.archive_url.is_none());
@@ -619,6 +658,18 @@ mod tests {
             m.manifest_url.as_deref(),
             Some("https://example.com/x/manifest.json")
         );
+        assert!(m.entry_url.is_none());
+    }
+
+    #[test]
+    fn entry_url_parses_when_present() {
+        let json = br#"{
+            "name": "x",
+            "entryUrl": "https://example.com/x.js"
+        }"#;
+        let m = Manifest::parse(json).unwrap();
+        assert_eq!(m.entry_url.as_deref(), Some("https://example.com/x.js"));
+        assert!(m.archive_url.is_none());
     }
 
     #[test]

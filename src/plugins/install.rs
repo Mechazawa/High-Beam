@@ -88,6 +88,9 @@ pub enum InstallError {
     BadManifest(String),
     /// Manifest parsed but is missing one of the installer-required fields.
     MissingField(&'static str),
+    /// Manifest declared two mutually-exclusive fields (e.g. both
+    /// `archiveUrl` and `entryUrl`).
+    ConflictingFields { a: &'static str, b: &'static str },
     /// Archive download failed.
     Download(String),
     /// Couldn't identify the archive format from URL or content-type.
@@ -109,6 +112,9 @@ impl std::fmt::Display for InstallError {
             Self::BadManifest(msg) => write!(f, "bad manifest: {msg}"),
             Self::MissingField(name) => {
                 write!(f, "manifest missing required field `{name}`")
+            }
+            Self::ConflictingFields { a, b } => {
+                write!(f, "manifest declares both `{a}` and `{b}` — pick one")
             }
             Self::Download(msg) => write!(f, "download archive: {msg}"),
             Self::UnknownFormat { url, content_type } => write!(
@@ -180,10 +186,47 @@ fn require_installer_fields(manifest: &Manifest) -> Result<(), InstallError> {
     if manifest.version.is_none() {
         return Err(InstallError::MissingField("version"));
     }
-    if manifest.archive_url.is_none() {
-        return Err(InstallError::MissingField("archiveUrl"));
+    // archiveUrl XOR entryUrl: a plugin chooses one distribution shape;
+    // setting both is ambiguous, setting neither leaves nothing to install.
+    match (
+        manifest.archive_url.as_deref(),
+        manifest.entry_url.as_deref(),
+    ) {
+        (Some(_), Some(_)) => Err(InstallError::ConflictingFields {
+            a: "archiveUrl",
+            b: "entryUrl",
+        }),
+        (None, None) => Err(InstallError::MissingField("archiveUrl|entryUrl")),
+        _ => Ok(()),
     }
-    Ok(())
+}
+
+/// Download a single JS entry file (for the `entryUrl` install path). Caller
+/// is responsible for writing the bytes to the right path under the staging
+/// dir.
+///
+/// # Errors
+///
+/// Returns [`InstallError::Download`] on HTTP failure.
+pub async fn download_entry(url: &str) -> Result<Vec<u8>, InstallError> {
+    let response = client()
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| InstallError::Download(e.to_string()))?;
+    if !response.status().is_success() {
+        return Err(InstallError::Download(format!(
+            "{} {}",
+            response.status().as_u16(),
+            response.status().canonical_reason().unwrap_or(""),
+        )));
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| InstallError::Download(e.to_string()))?
+        .to_vec();
+    Ok(bytes)
 }
 
 /// Download the archive bytes and pick the format from URL extension or
@@ -476,6 +519,8 @@ pub struct ManifestForWrite {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub archive_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub entry_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub manifest_url: Option<String>,
 }
 
@@ -492,6 +537,7 @@ pub fn manifest_for_write(source: &Manifest, install_url: &str) -> ManifestForWr
         capabilities: source.capabilities.clone(),
         platforms: source.platforms.clone(),
         archive_url: source.archive_url.clone(),
+        entry_url: source.entry_url.clone(),
         manifest_url: source
             .manifest_url
             .clone()
@@ -586,8 +632,39 @@ mod tests {
     fn require_installer_fields_rejects_missing_archive_url() {
         let m = Manifest::parse(br#"{ "name": "x", "version": "1.0.0" }"#).unwrap();
         match require_installer_fields(&m) {
-            Err(InstallError::MissingField(name)) => assert_eq!(name, "archiveUrl"),
+            Err(InstallError::MissingField(name)) => {
+                assert_eq!(name, "archiveUrl|entryUrl");
+            }
             other => panic!("expected MissingField, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn require_installer_fields_accepts_entry_url() {
+        let m = Manifest::parse(
+            br#"{ "name": "x", "version": "1.0.0", "entryUrl": "https://example.com/p.js" }"#,
+        )
+        .unwrap();
+        require_installer_fields(&m).expect("entryUrl-only manifests are valid");
+    }
+
+    #[test]
+    fn require_installer_fields_rejects_both_archive_and_entry_url() {
+        let m = Manifest::parse(
+            br#"{
+                "name": "x",
+                "version": "1.0.0",
+                "archiveUrl": "https://example.com/p.tar.gz",
+                "entryUrl": "https://example.com/p.js"
+            }"#,
+        )
+        .unwrap();
+        match require_installer_fields(&m) {
+            Err(InstallError::ConflictingFields { a, b }) => {
+                assert_eq!(a, "archiveUrl");
+                assert_eq!(b, "entryUrl");
+            }
+            other => panic!("expected ConflictingFields, got {other:?}"),
         }
     }
 
