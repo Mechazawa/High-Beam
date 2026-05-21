@@ -59,7 +59,6 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
         .select()?;
 
     let window = QueryWindow::new()?;
-    window::configure(&window);
     window::apply_theme(&window, &Theme::load_or_default());
 
     // Wire the settings view. We scan manifests synchronously here (cheap —
@@ -76,20 +75,35 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     let settings_controller = SettingsController::new(manifests, settings_for_ui);
     settings_controller.wire(&window);
 
-    // Keep the host alive for the daemon's lifetime; `Drop` sends Shutdown.
-    let _plugin_host = app::start(&window, options.plugins_dir.clone())?;
+    // Configure the window only after the settings controller exists —
+    // `configure` wires the drag/recenter callbacks against the live
+    // controller so dragged positions flow into the same on-disk file the
+    // settings UI is writing.
+    window::configure(&window, settings_controller.clone());
 
-    spawn_ipc_listener(&options.socket_path, window.as_weak())?;
+    // Keep the host alive for the daemon's lifetime; `Drop` sends Shutdown.
+    let _plugin_host = app::start(
+        &window,
+        options.plugins_dir.clone(),
+        settings_controller.clone(),
+    )?;
+
+    spawn_ipc_listener(
+        &options.socket_path,
+        window.as_weak(),
+        settings_controller.clone(),
+    )?;
 
     #[cfg(target_os = "macos")]
-    let _hotkey_guard = spawn_hotkey_listener(window.as_weak(), &hotkey_spec);
+    let _hotkey_guard =
+        spawn_hotkey_listener(window.as_weak(), &hotkey_spec, settings_controller.clone());
     // Suppress unused-variable warning on Linux where we don't register a
     // global hotkey (the WM handles it via `highbeam --open`).
     #[cfg(not(target_os = "macos"))]
     let _ = hotkey_spec;
 
     if options.open_on_start {
-        window::show(&window);
+        window::show(&window, &settings_controller);
     }
 
     // `run_event_loop_until_quit` (not `window.run()`) — the daemon must
@@ -99,7 +113,11 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn spawn_ipc_listener(socket_path: &Path, weak: slint::Weak<QueryWindow>) -> io::Result<()> {
+fn spawn_ipc_listener(
+    socket_path: &Path,
+    weak: slint::Weak<QueryWindow>,
+    settings: SettingsController,
+) -> io::Result<()> {
     let server = Server::bind(socket_path)?;
     thread::Builder::new()
         .name("highbeam-ipc".into())
@@ -107,9 +125,10 @@ fn spawn_ipc_listener(socket_path: &Path, weak: slint::Weak<QueryWindow>) -> io:
             let result = server.run(move |cmd| match cmd {
                 Command::Open => {
                     let weak = weak.clone();
+                    let settings = settings.clone();
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(w) = weak.upgrade() {
-                            window::show(&w);
+                            window::show(&w, &settings);
                         }
                     });
                 }
@@ -149,6 +168,7 @@ fn parse_hotkey_or_default(spec: &str) -> global_hotkey::hotkey::HotKey {
 fn spawn_hotkey_listener(
     weak: slint::Weak<QueryWindow>,
     hotkey_spec: &str,
+    settings: SettingsController,
 ) -> Option<global_hotkey::GlobalHotKeyManager> {
     use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 
@@ -177,9 +197,10 @@ fn spawn_hotkey_listener(
             while let Ok(event) = receiver.recv() {
                 if event.id == hotkey_id && event.state == HotKeyState::Pressed {
                     let weak = weak.clone();
+                    let settings = settings.clone();
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(w) = weak.upgrade() {
-                            window::show(&w);
+                            window::show(&w, &settings);
                         }
                     });
                 }

@@ -24,6 +24,7 @@ use crate::plugins::loader::{self, LoaderOptions};
 use crate::plugins::result::RankedResult;
 use crate::plugins::runtime::LoadedPlugin;
 use crate::settings::Settings;
+use crate::settings_ui::SettingsController;
 use crate::ui::ResultRow;
 use crate::window;
 
@@ -47,6 +48,7 @@ enum HostMessage {
 pub fn start(
     window: &QueryWindow,
     plugins_override: Option<PathBuf>,
+    settings: SettingsController,
 ) -> Result<PluginHost, Box<dyn Error>> {
     let (tx, rx) = mpsc::unbounded_channel::<HostMessage>();
 
@@ -66,7 +68,14 @@ pub fn start(
         frecency_db.clone(),
     )?;
 
-    wire_window_callbacks(window, tx.clone(), latest, &latest_id, frecency_db);
+    wire_window_callbacks(
+        window,
+        tx.clone(),
+        latest,
+        &latest_id,
+        frecency_db,
+        settings,
+    );
 
     Ok(PluginHost { query_tx: tx })
 }
@@ -146,6 +155,7 @@ fn wire_window_callbacks(
     latest: Arc<Mutex<Vec<RankedResult>>>,
     latest_id: &Arc<AtomicU64>,
     frecency_db: Option<FrecencyDb>,
+    settings: SettingsController,
 ) {
     let latest_id_for_main = Arc::clone(latest_id);
     window.on_query_edited(move |text| {
@@ -163,7 +173,7 @@ fn wire_window_callbacks(
 
     let weak_for_invoke = window.as_weak();
     window.on_invoke_selected(move || {
-        invoke_selected(&weak_for_invoke, &latest, frecency_db.as_ref());
+        invoke_selected(&weak_for_invoke, &latest, frecency_db.as_ref(), &settings);
     });
 }
 
@@ -173,6 +183,7 @@ fn invoke_selected(
     weak: &slint::Weak<QueryWindow>,
     latest: &Arc<Mutex<Vec<RankedResult>>>,
     frecency_db: Option<&FrecencyDb>,
+    settings: &SettingsController,
 ) {
     let Some(w) = weak.upgrade() else { return };
     let idx = usize::try_from(w.get_selected_index().max(0)).unwrap_or(0);
@@ -196,7 +207,12 @@ fn invoke_selected(
                 spawn_pick_bump(db, plugin_name, result_key);
             }
             match outcome {
-                actions::ActionOutcome::HideWindow => window::hide(&w),
+                actions::ActionOutcome::HideWindow => {
+                    // Persisting on every hide keeps drag-then-pick paths
+                    // covered too — a user can drag, then run a result
+                    // without the position ever being lost.
+                    window::hide_and_persist_position(&w, settings);
+                }
                 actions::ActionOutcome::OpenSettingsView => {
                     // Clear the input so the window doesn't briefly re-show
                     // a stale `settings` query the next time the launcher
@@ -209,7 +225,7 @@ fn invoke_selected(
         }
         Err(err) => {
             tracing::error!(plugin = %plugin_name, %err, "plugins: action failed");
-            window::hide(&w);
+            window::hide_and_persist_position(&w, settings);
         }
     }
 }

@@ -124,6 +124,14 @@ export component QueryWindow inherits Window {
     // input; `select-global` flips the rail selection to the global entry.
     callback set-hotkey(string);
     callback select-global();
+    // Drag/position callbacks. Slint's frameless-window drag isn't built-in,
+    // so we hand off to winit's `drag_window()` on the Rust side. The
+    // launcher background fires `request-window-drag` on left-button-down;
+    // the OS owns the move loop from that point.
+    callback request-window-drag();
+    // Settings → Global → "Recenter window" — clears any saved position and
+    // re-centers the currently visible window. No-op if nothing was saved.
+    callback recenter-window();
 
     // forward-focus makes the input the focus target whenever the window
     // itself is focused. Combined with the explicit `input.focus()` call in
@@ -197,6 +205,21 @@ export component QueryWindow inherits Window {
         border-radius: root.window-border-radius;
         border-width: 1px;
         border-color: root.border-color;
+
+        // Whole-panel drag handle. Mounted first so it sits at the bottom of
+        // the z-stack — child TouchAreas (result rows, settings rail, etc.)
+        // and the TextInput steal clicks on themselves; the dead space
+        // (input gutter, padding, area between widgets) falls through here
+        // and starts a native window drag. Mouse cursor stays default so
+        // the field still reads as text-editable.
+        TouchArea {
+            mouse-cursor: default;
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
+                    root.request-window-drag();
+                }
+            }
+        }
 
         // ---- Launcher view ----
         // Visible-toggle (rather than `if`) keeps the `input` id in scope for
@@ -630,6 +653,44 @@ export component QueryWindow inherits Window {
                                     text: "Restart to apply.";
                                     color: root.muted-color;
                                     font-size: root.font-size-subtitle;
+                                }
+                            }
+
+                            // Window position group — only meaningful if the
+                            // user has dragged the launcher. We always show
+                            // the button (cheaper than a property round-trip
+                            // for the saved-or-not flag); clearing when
+                            // already-default is a no-op on disk.
+                            VerticalLayout {
+                                spacing: 4px;
+                                Text {
+                                    text: "Window position";
+                                    color: root.foreground-color;
+                                    font-size: root.font-size-title;
+                                }
+                                TouchArea {
+                                    width: 140px;
+                                    height: 28px;
+                                    clicked => {
+                                        root.recenter-window();
+                                    }
+                                    Rectangle {
+                                        background: root.selection-color;
+                                        border-radius: 4px;
+                                        Text {
+                                            text: "Recenter window";
+                                            color: root.foreground-color;
+                                            font-size: root.font-size-subtitle;
+                                            vertical-alignment: center;
+                                            horizontal-alignment: center;
+                                        }
+                                    }
+                                }
+                                Text {
+                                    text: "Forgets the saved drag position and re-centers the launcher. To do this manually, delete [global.launcher_position] from settings.toml.";
+                                    color: root.muted-color;
+                                    font-size: root.font-size-subtitle;
+                                    wrap: word-wrap;
                                 }
                             }
                         }

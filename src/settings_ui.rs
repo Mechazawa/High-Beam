@@ -14,7 +14,7 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::QueryWindow;
 use crate::plugins::manifest::{Manifest, OptionDef, OptionKind};
-use crate::settings::Settings;
+use crate::settings::{Settings, WindowPosition};
 use crate::ui::{PluginOption, PluginSlot};
 
 /// Shared state for the settings view. Cloned into every callback closure;
@@ -158,6 +158,56 @@ impl SettingsController {
         }
         if let Err(err) = self.persist() {
             tracing::warn!(%err, "settings: persist after hotkey-set failed");
+        }
+    }
+
+    /// Last saved launcher window origin, or `None` if the user has never
+    /// dragged the window (or just cleared it via Recenter).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the settings mutex is poisoned — a previous panic while
+    /// holding the lock corrupted the shared state and continuing risks
+    /// writing the corruption to disk.
+    #[must_use]
+    pub fn launcher_position(&self) -> Option<WindowPosition> {
+        let settings = self.inner.settings.lock().expect("settings lock");
+        settings.global().launcher_position
+    }
+
+    /// Record a new launcher window origin and flush to disk. Used by the
+    /// window layer after the user finishes a drag; persistence is best-
+    /// effort because losing the latest position is preferable to a
+    /// blocked hide path.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the settings mutex is poisoned. See
+    /// [`Self::launcher_position`] for the rationale.
+    pub fn set_launcher_position(&self, position: WindowPosition) {
+        {
+            let mut settings = self.inner.settings.lock().expect("settings lock");
+            settings.set_launcher_position(position);
+        }
+        if let Err(err) = self.persist() {
+            tracing::warn!(%err, "settings: persist after launcher-position-set failed");
+        }
+    }
+
+    /// Forget the saved launcher position. The next show recenters via the
+    /// existing focused-display math.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the settings mutex is poisoned. See
+    /// [`Self::launcher_position`] for the rationale.
+    pub fn clear_launcher_position(&self) {
+        {
+            let mut settings = self.inner.settings.lock().expect("settings lock");
+            settings.clear_launcher_position();
+        }
+        if let Err(err) = self.persist() {
+            tracing::warn!(%err, "settings: persist after launcher-position-clear failed");
         }
     }
 
@@ -468,6 +518,45 @@ mod tests {
 
         let reloaded = Settings::load_from(&path);
         assert_eq!(reloaded.global().hotkey, "Cmd+K");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn controller_persists_and_clears_launcher_position() {
+        // The window layer writes the user-dropped origin through the
+        // controller after every hide. A fresh load must observe both the
+        // set and the subsequent clear (Recenter button).
+        let tmp = std::env::temp_dir().join(format!(
+            "high-beam-settings-launcher-pos-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("settings.toml");
+        let settings = Settings::load_from(&path);
+        let ctrl = SettingsController::new(vec![], settings);
+
+        ctrl.set_launcher_position(WindowPosition { x: 320, y: 180 });
+        assert_eq!(
+            ctrl.launcher_position(),
+            Some(WindowPosition { x: 320, y: 180 })
+        );
+
+        // Round-trip through disk so we know the value persisted (not
+        // just lived in the in-memory Mutex).
+        let reloaded = Settings::load_from(&path);
+        assert_eq!(
+            reloaded.global().launcher_position,
+            Some(WindowPosition { x: 320, y: 180 })
+        );
+
+        ctrl.clear_launcher_position();
+        assert!(ctrl.launcher_position().is_none());
+        let reloaded = Settings::load_from(&path);
+        assert!(reloaded.global().launcher_position.is_none());
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

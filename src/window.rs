@@ -4,6 +4,8 @@
 //! the .slint file can't express — sizing, native center positioning,
 //! blur-to-close, macOS app activation — lives here.
 
+use std::thread;
+
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use slint::ComponentHandle;
@@ -11,6 +13,8 @@ use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
 
 use crate::QueryWindow;
+use crate::settings::WindowPosition;
+use crate::settings_ui::SettingsController;
 use crate::theme::Theme;
 
 /// Wire up the `QueryWindow` callbacks and native-window behaviour.
@@ -19,11 +23,32 @@ use crate::theme::Theme;
 /// or IPC events; this only attaches handlers. The plugin-state-dependent
 /// `on_query_edited` and `on_invoke_selected` callbacks are wired by
 /// `crate::app::start`.
-pub(crate) fn configure(window: &QueryWindow) {
+///
+/// `settings` is the shared [`SettingsController`] — used here to read the
+/// last user-chosen window position on show and to persist a new one when
+/// the window hides after a drag.
+pub(crate) fn configure(window: &QueryWindow, settings: SettingsController) {
     let weak_for_esc = window.as_weak();
+    let settings_for_esc = settings.clone();
     window.on_escape_pressed(move || {
         if let Some(w) = weak_for_esc.upgrade() {
-            hide(&w);
+            hide_and_persist_position(&w, &settings_for_esc);
+        }
+    });
+
+    let weak_for_drag = window.as_weak();
+    window.on_request_window_drag(move || {
+        if let Some(w) = weak_for_drag.upgrade() {
+            start_native_drag(&w);
+        }
+    });
+
+    let weak_for_recenter = window.as_weak();
+    let settings_for_recenter = settings.clone();
+    window.on_recenter_window(move || {
+        settings_for_recenter.clear_launcher_position();
+        if let Some(w) = weak_for_recenter.upgrade() {
+            center_on_focused_display(&w);
         }
     });
 
@@ -32,6 +57,7 @@ pub(crate) fn configure(window: &QueryWindow) {
     // `show()` is too early on macOS — the NSWindow isn't yet the key window
     // and the request gets dropped, leaving the user clicking into the field.
     let weak_for_focus = window.as_weak();
+    let settings_for_focus = settings;
     window
         .window()
         .on_winit_window_event(move |_slint_win, event| {
@@ -43,7 +69,7 @@ pub(crate) fn configure(window: &QueryWindow) {
                 }
                 winit::event::WindowEvent::Focused(false) => {
                     if let Some(w) = weak_for_focus.upgrade() {
-                        hide(&w);
+                        hide_and_persist_position(&w, &settings_for_focus);
                     }
                 }
                 _ => {}
@@ -74,21 +100,21 @@ pub(crate) fn apply_theme(window: &QueryWindow, theme: &Theme) {
     window.set_window_border_radius(theme.window.border_radius);
 }
 
-/// Show the window, center it, and focus the input. Idempotent — calling
-/// while already visible just re-centers and re-focuses ("focuses it if
-/// already open").
+/// Show the window, position it (saved or centered), and focus the input.
+/// Idempotent — calling while already visible re-applies position and
+/// re-focuses ("focuses it if already open").
 ///
 /// On macOS, `window.show()` + `invoke_focus_input()` alone isn't enough:
 /// our process isn't necessarily frontmost, the new `NSWindow` isn't yet
 /// the key window, and Slint's focus request gets dropped. We replicate
 /// the Spotlight/Alfred/Raycast pattern: activate the app process and make
 /// the `NSWindow` key + frontmost ourselves before asking Slint for focus.
-pub(crate) fn show(window: &QueryWindow) {
+pub(crate) fn show(window: &QueryWindow, settings: &SettingsController) {
     if let Err(err) = window.show() {
         tracing::error!(%err, "failed to show window");
         return;
     }
-    center_on_focused_display(window);
+    apply_saved_or_centered_position(window, settings);
     #[cfg(target_os = "macos")]
     macos::activate_and_make_key(window);
     window.invoke_focus_input();
@@ -96,11 +122,165 @@ pub(crate) fn show(window: &QueryWindow) {
 
 /// Hide the window. Clears the input text so the next open starts fresh —
 /// every close path (Esc, blur, programmatic) funnels through here.
+/// Does *not* persist position; use [`hide_and_persist_position`] for the
+/// user-driven close paths.
 pub(crate) fn hide(window: &QueryWindow) {
     window.invoke_clear_input();
     if let Err(err) = window.hide() {
         tracing::error!(%err, "failed to hide window");
     }
+}
+
+/// Snapshot the current window position, hand it to a background thread
+/// for fire-and-forget persistence, then hide. The disk write must not
+/// block the UI thread — same pattern the frecency picks use — so the
+/// hide is observably instant regardless of disk latency.
+pub(crate) fn hide_and_persist_position(window: &QueryWindow, settings: &SettingsController) {
+    if let Some(pos) = capture_outer_position(window) {
+        let settings = settings.clone();
+        // Spawn-and-forget. The thread name + `.ok()` mirror the frecency
+        // bump in `app::spawn_pick_bump` — a failed spawn is logged
+        // implicitly via the `Result` and not surfaced because the user's
+        // close action can't reasonably wait for our settings I/O.
+        thread::Builder::new()
+            .name("highbeam-settings-position".into())
+            .spawn(move || {
+                settings.set_launcher_position(pos);
+            })
+            .ok();
+    }
+    hide(window);
+}
+
+/// Apply the persisted launcher position, falling back to the centered
+/// default when no position is saved or the saved one is no longer on any
+/// connected display. The off-screen check matters when the user unplugs
+/// the monitor the window was last positioned on — without it, the next
+/// show would put the window in the void.
+fn apply_saved_or_centered_position(window: &QueryWindow, settings: &SettingsController) {
+    let Some(saved) = settings.launcher_position() else {
+        center_on_focused_display(window);
+        return;
+    };
+    let rects = monitor_rects(window);
+    if !position_visible_on_any_monitor(saved, window_size(window), &rects) {
+        tracing::info!(
+            x = saved.x,
+            y = saved.y,
+            "settings: saved launcher position is off-screen, recentering",
+        );
+        center_on_focused_display(window);
+        return;
+    }
+    set_outer_position(window, saved);
+}
+
+/// Read the OS-reported outer position. Returns `None` on platforms or
+/// states where winit can't tell us (e.g. headless tests).
+fn capture_outer_position(window: &QueryWindow) -> Option<WindowPosition> {
+    window
+        .window()
+        .with_winit_window(|w: &winit::window::Window| {
+            w.outer_position()
+                .ok()
+                .map(|p| WindowPosition { x: p.x, y: p.y })
+        })
+        .flatten()
+}
+
+/// Push the window's outer position via winit directly — `slint::Window::
+/// set_position` writes the inner/content position which on macOS differs
+/// from the outer `NSWindow` frame by the title bar height. We use the outer
+/// rect so a restored position lines up byte-identical with where the user
+/// dropped it.
+fn set_outer_position(window: &QueryWindow, pos: WindowPosition) {
+    let _ = window
+        .window()
+        .with_winit_window(|w: &winit::window::Window| {
+            w.set_outer_position(winit::dpi::PhysicalPosition::new(pos.x, pos.y));
+        });
+}
+
+/// Kick off a native OS-driven window drag. winit's `drag_window()` blocks
+/// inside the OS-level move loop until the user releases the mouse —
+/// position is updated by the WM, not by us, so there's nothing to do on
+/// the Rust side after this call.
+fn start_native_drag(window: &QueryWindow) {
+    let _ = window
+        .window()
+        .with_winit_window(|w: &winit::window::Window| {
+            if let Err(err) = w.drag_window() {
+                tracing::warn!(%err, "winit drag_window failed");
+            }
+        });
+}
+
+/// Collect virtual-screen rectangles for every connected monitor. Empty
+/// when winit can't introspect (headless test, missing backend) — callers
+/// then treat any saved position as off-screen and recenter.
+fn monitor_rects(window: &QueryWindow) -> Vec<MonitorRect> {
+    window
+        .window()
+        .with_winit_window(|w: &winit::window::Window| {
+            w.available_monitors()
+                .map(|m| {
+                    let pos = m.position();
+                    let size = m.size();
+                    MonitorRect {
+                        x: pos.x,
+                        y: pos.y,
+                        width: i32::try_from(size.width).unwrap_or(i32::MAX),
+                        height: i32::try_from(size.height).unwrap_or(i32::MAX),
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn window_size(window: &QueryWindow) -> (i32, i32) {
+    let size = window.window().size();
+    (
+        i32::try_from(size.width).unwrap_or(i32::MAX),
+        i32::try_from(size.height).unwrap_or(i32::MAX),
+    )
+}
+
+/// Virtual-desktop rectangle, in physical pixels, used by
+/// [`position_visible_on_any_monitor`]. Kept as a plain struct (rather than
+/// re-using winit's `MonitorHandle`) so the visibility check is unit-
+/// testable without a backend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MonitorRect {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// Whether a candidate window origin would land somewhere a user could
+/// actually grab it. A position counts as visible if at least one monitor
+/// shows a non-trivial overlap with the window's would-be rect — using
+/// "any pixel overlap" was too permissive (a 1px sliver on a remembered
+/// monitor that's now disconnected leaves the window unreachable), so we
+/// require the top-left corner itself to land inside some monitor.
+pub(crate) fn position_visible_on_any_monitor(
+    pos: WindowPosition,
+    _window_size: (i32, i32),
+    monitors: &[MonitorRect],
+) -> bool {
+    if monitors.is_empty() {
+        return false;
+    }
+    monitors.iter().any(|m| {
+        // Inclusive on the leading edge, exclusive on the trailing — a
+        // window at exactly the bottom-right pixel of a monitor has its
+        // origin one row past the visible area.
+        pos.x >= m.x
+            && pos.y >= m.y
+            && pos.x < m.x.saturating_add(m.width)
+            && pos.y < m.y.saturating_add(m.height)
+    })
 }
 
 /// Center horizontally and place vertically at ~1/3 from the top, Spotlight-style.
@@ -315,5 +495,108 @@ mod tests {
         // No `;base64` suffix — we only support base64 payloads.
         let img = decode_icon(Some("data:image/png,abc"));
         assert_eq!(img.size().width, 0);
+    }
+
+    /// Single primary display at (0, 0) of size 1920x1080 — the common
+    /// laptop-only case. Used as the baseline rect set for the visibility
+    /// tests below.
+    fn primary_only() -> Vec<MonitorRect> {
+        vec![MonitorRect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        }]
+    }
+
+    /// Primary + a secondary display placed to the right of the primary —
+    /// origin at (1920, 0). Mirrors a common dual-monitor desktop layout.
+    fn primary_and_secondary_right() -> Vec<MonitorRect> {
+        vec![
+            MonitorRect {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1080,
+            },
+            MonitorRect {
+                x: 1920,
+                y: 0,
+                width: 2560,
+                height: 1440,
+            },
+        ]
+    }
+
+    #[test]
+    fn position_visible_in_primary_display() {
+        let pos = WindowPosition { x: 100, y: 200 };
+        assert!(position_visible_on_any_monitor(
+            pos,
+            (760, 80),
+            &primary_only(),
+        ));
+    }
+
+    #[test]
+    fn position_visible_in_secondary_display() {
+        // 2000 > primary's right edge but inside the secondary that starts
+        // at x = 1920. Without secondary-aware logic this would be reported
+        // as off-screen and recenter unnecessarily.
+        let pos = WindowPosition { x: 2000, y: 100 };
+        assert!(position_visible_on_any_monitor(
+            pos,
+            (760, 80),
+            &primary_and_secondary_right(),
+        ));
+    }
+
+    #[test]
+    fn position_off_all_displays_is_rejected() {
+        // y = 5000 is past the bottom of every monitor. This is the
+        // "user moved the launcher to a display they later disconnected"
+        // case — the host should recenter rather than place the window in
+        // the void.
+        let pos = WindowPosition { x: 100, y: 5000 };
+        assert!(!position_visible_on_any_monitor(
+            pos,
+            (760, 80),
+            &primary_and_secondary_right(),
+        ));
+    }
+
+    #[test]
+    fn position_at_top_left_boundary_is_visible() {
+        // The leading edge is inclusive — (0, 0) is the first visible pixel
+        // of a monitor whose origin is (0, 0).
+        let pos = WindowPosition { x: 0, y: 0 };
+        assert!(position_visible_on_any_monitor(
+            pos,
+            (760, 80),
+            &primary_only(),
+        ));
+    }
+
+    #[test]
+    fn position_at_bottom_right_boundary_is_off_screen() {
+        // The trailing edge is exclusive — a window whose origin lands
+        // exactly at the pixel past the last visible column/row is
+        // technically off-screen and we treat it as such to keep the
+        // recenter-on-unreachable contract crisp.
+        let pos = WindowPosition { x: 1920, y: 1080 };
+        assert!(!position_visible_on_any_monitor(
+            pos,
+            (760, 80),
+            &primary_only(),
+        ));
+    }
+
+    #[test]
+    fn position_visible_requires_at_least_one_monitor() {
+        // No monitors known to winit (headless tests, backend not
+        // initialised) means we can't validate; the safe default is "treat
+        // as off-screen" so the host falls back to the centered path.
+        let pos = WindowPosition { x: 100, y: 100 };
+        assert!(!position_visible_on_any_monitor(pos, (760, 80), &[]));
     }
 }
