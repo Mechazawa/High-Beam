@@ -130,6 +130,33 @@ pub async fn load_all(options: &LoaderOptions, settings: &Settings) -> Vec<Arc<L
     plugins
 }
 
+/// Reload one plugin directory in isolation.
+///
+/// Used by [`crate::plugins::registry::PluginRegistry::reload_one`] when the
+/// user invokes the `reload` verb. Returns the loaded plugin wrapped in an
+/// `Arc` (matching what the dispatcher consumes) or a flattened reason
+/// string — the registry surfaces it to the user via the result row, so a
+/// stringly-typed error keeps the call site free of `Box<dyn Error>`
+/// formatting glue.
+///
+/// # Errors
+///
+/// Returns the same set of failures as the bulk loader, plus the platform-
+/// gate / user-disabled cases that the bulk loader handles silently. The
+/// caller doesn't get to differentiate — anything other than success means
+/// "this plugin can't be live right now", and the previous instance stays in
+/// the registry.
+pub async fn load_one_for_reload(
+    plugin_dir: &Path,
+    settings: &Settings,
+) -> Result<Arc<LoadedPlugin>, String> {
+    match load_one(plugin_dir, settings).await {
+        Ok(plugin) => Ok(Arc::new(plugin)),
+        Err(LoadError::Skipped { reason, .. }) => Err(reason),
+        Err(LoadError::Failed(err)) => Err(err.to_string()),
+    }
+}
+
 async fn load_one(plugin_dir: &Path, settings: &Settings) -> Result<LoadedPlugin, LoadError> {
     let manifest_path = plugin_dir.join("manifest.json");
     let bytes = std::fs::read(&manifest_path).map_err(|err| {

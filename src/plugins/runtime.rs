@@ -70,6 +70,10 @@ const QUERY_GLOBAL: &str = "__highbeam_query";
 /// internal `Arc`.
 pub struct LoadedPlugin {
     pub manifest: Manifest,
+    /// Directory the plugin was loaded from — preserved so the registry's
+    /// reload path can re-read the manifest without reconstructing the
+    /// search.
+    pub plugin_dir: std::path::PathBuf,
     context: AsyncContext,
     timeout: Duration,
     // Mirrors what the interrupt hook captures; we keep the Arc alive here.
@@ -241,6 +245,7 @@ impl LoadedPlugin {
         let timeout = Duration::from_millis(manifest.timeout_ms);
         Ok(Self {
             manifest,
+            plugin_dir: plugin_dir.to_path_buf(),
             context,
             timeout,
             interrupt_flag,

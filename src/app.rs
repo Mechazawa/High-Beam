@@ -21,6 +21,7 @@ use crate::frecency::{self, FrecencyDb};
 use crate::plugins::actions;
 use crate::plugins::dispatch::{self, StreamedResult};
 use crate::plugins::loader::{self, LoaderOptions};
+use crate::plugins::registry::PluginRegistry;
 use crate::plugins::result::RankedResult;
 use crate::plugins::runtime::LoadedPlugin;
 use crate::settings::Settings;
@@ -112,7 +113,7 @@ fn spawn_runtime_thread(
                         "plugins: no plugins loaded",
                     );
                 }
-                let plugins: Vec<Arc<LoadedPlugin>> = plugins;
+                let registry = PluginRegistry::new(opts, plugins);
                 let mut current_cancel: Option<CancellationToken> = None;
 
                 while let Some(msg) = rx.recv().await {
@@ -125,6 +126,7 @@ fn spawn_runtime_thread(
                                 prev.cancel();
                             }
                             let snapshot = frecency_db.as_ref().map(FrecencyDb::snapshot);
+                            let plugins = registry.snapshot().await;
                             let cancel = handle_query(
                                 id,
                                 &input,

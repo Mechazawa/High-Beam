@@ -8,5 +8,6 @@ pub mod dispatch;
 pub mod loader;
 pub mod log;
 pub mod manifest;
+pub mod registry;
 pub mod result;
 pub mod runtime;
