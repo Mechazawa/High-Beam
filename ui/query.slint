@@ -78,6 +78,11 @@ export component QueryWindow inherits Window {
     in-out property <[PluginSlot]> plugin-slots: [];
     in-out property <int> selected-plugin-index: 0;
     in-out property <[PluginOption]> plugin-options: [];
+    // True when the "Global" rail entry is selected — the right pane then
+    // shows the app-wide settings instead of plugin options. Defaulted to
+    // true so opening settings lands on Global rather than a random plugin.
+    in-out property <bool> showing-global: true;
+    in-out property <string> hotkey-value: "Shift+Space";
 
     // Theme tokens. Defaults reproduce the bundled yosemite-spotlight theme so
     // a missing theme.toml is byte-identical to the pre-theming build.
@@ -111,6 +116,10 @@ export component QueryWindow inherits Window {
     callback set-option-string(string, string, string);
     callback set-option-bool(string, string, bool);
     callback set-option-int(string, string, int);
+    // Global-pane callbacks. `set-hotkey` fires on blur/commit of the hotkey
+    // input; `select-global` flips the rail selection to the global entry.
+    callback set-hotkey(string);
+    callback select-global();
 
     // forward-focus makes the input the focus target whenever the window
     // itself is focused. Combined with the explicit `input.focus()` call in
@@ -372,7 +381,7 @@ export component QueryWindow inherits Window {
             HorizontalLayout {
                 spacing: 0px;
 
-                // Left rail — plugin list with enable toggles.
+                // Left rail — "Global" entry followed by the plugin list.
                 Rectangle {
                     width: 260px;
                     background: transparent;
@@ -380,14 +389,48 @@ export component QueryWindow inherits Window {
                     ScrollView {
                         VerticalLayout {
                             spacing: 0px;
+                            // "Global" entry pinned at the top of the rail.
+                            TouchArea {
+                                height: 44px;
+                                clicked => {
+                                    root.showing-global = true;
+                                    root.select-global();
+                                }
+                                Rectangle {
+                                    background: root.showing-global ? root.selection-color : transparent;
+                                    HorizontalLayout {
+                                        padding-left: 16px;
+                                        padding-right: 12px;
+                                        padding-top: 6px;
+                                        padding-bottom: 6px;
+                                        spacing: 8px;
+                                        alignment: start;
+                                        VerticalLayout {
+                                            alignment: center;
+                                            Text {
+                                                text: "Global";
+                                                color: root.foreground-color;
+                                                font-size: root.font-size-title;
+                                                overflow: elide;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            // Faint separator between Global and the plugin list.
+                            Rectangle {
+                                height: 1px;
+                                background: root.border-color;
+                            }
                             for slot[i] in plugin-slots: TouchArea {
                                 height: 44px;
                                 clicked => {
+                                    root.showing-global = false;
                                     root.selected-plugin-index = i;
                                     root.select-plugin(i);
                                 }
                                 Rectangle {
-                                    background: i == root.selected-plugin-index ? root.selection-color : transparent;
+                                    background: !root.showing-global && i == root.selected-plugin-index ? root.selection-color : transparent;
                                     HorizontalLayout {
                                         padding-left: 16px;
                                         padding-right: 12px;
@@ -437,10 +480,71 @@ export component QueryWindow inherits Window {
                     background: root.border-color;
                 }
 
-                // Right pane — options for the selected plugin.
+                // Right pane — either global settings or options for the
+                // selected plugin, depending on the rail selection.
                 Rectangle {
                     background: transparent;
-                    ScrollView {
+                    // Global pane: hotkey input + restart-to-apply caption.
+                    // Hot-reload of the hotkey is out of scope for v1, so the
+                    // caption is the contract with the user.
+                    if root.showing-global: ScrollView {
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 12px;
+
+                            Text {
+                                text: "Global";
+                                color: root.foreground-color;
+                                font-size: 16px;
+                            }
+
+                            VerticalLayout {
+                                spacing: 4px;
+                                Text {
+                                    text: "Hotkey";
+                                    color: root.foreground-color;
+                                    font-size: root.font-size-title;
+                                }
+                                Rectangle {
+                                    height: 28px;
+                                    background: root.muted-color.with-alpha(0.08);
+                                    border-radius: 4px;
+                                    border-width: 1px;
+                                    border-color: root.border-color;
+                                    hotkey-input := TextInput {
+                                        x: 8px;
+                                        y: 0;
+                                        width: parent.width - 16px;
+                                        height: parent.height;
+                                        font-size: root.font-size-title;
+                                        color: root.foreground-color;
+                                        single-line: true;
+                                        vertical-alignment: center;
+                                        text: root.hotkey-value;
+                                        // Commit on edit so the value persists without a
+                                        // blur/enter dance; the daemon snapshots at startup.
+                                        edited => {
+                                            root.set-hotkey(self.text);
+                                        }
+                                        // Enter commits-and-blurs by giving up focus —
+                                        // the parent settings-focus catcher takes it back.
+                                        accepted => {
+                                            root.set-hotkey(self.text);
+                                            settings-focus.focus();
+                                        }
+                                    }
+                                }
+                                Text {
+                                    text: "Restart to apply.";
+                                    color: root.muted-color;
+                                    font-size: root.font-size-subtitle;
+                                }
+                            }
+                        }
+                    }
+
+                    // Plugin-options pane.
+                    if !root.showing-global: ScrollView {
                         VerticalLayout {
                             padding: 16px;
                             spacing: 12px;

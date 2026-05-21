@@ -54,6 +54,7 @@ impl SettingsController {
         // Initial render so the user sees populated UI the first time they
         // open settings rather than empty placeholders.
         self.refresh_slots(window);
+        self.refresh_global(window);
 
         let ctrl = self.clone();
         let weak = window.as_weak();
@@ -61,6 +62,7 @@ impl SettingsController {
             if let Some(w) = weak.upgrade() {
                 ctrl.refresh_slots(&w);
                 ctrl.refresh_options(&w);
+                ctrl.refresh_global(&w);
             }
         });
 
@@ -123,6 +125,40 @@ impl SettingsController {
                 ctrl.refresh_options(&w);
             }
         });
+
+        let ctrl = self.clone();
+        let weak = window.as_weak();
+        window.on_set_hotkey(move |value| {
+            ctrl.set_hotkey(value.as_str());
+            if let Some(w) = weak.upgrade() {
+                ctrl.refresh_global(&w);
+            }
+        });
+
+        let weak = window.as_weak();
+        window.on_select_global(move || {
+            // The Slint side already flipped `showing-global` to true; this
+            // callback exists so future work (analytics, lazy reads) has a
+            // hook without us having to add a property-changed watcher.
+            if let Some(w) = weak.upgrade() {
+                w.set_showing_global(true);
+            }
+        });
+    }
+
+    fn refresh_global(&self, window: &QueryWindow) {
+        let settings = self.inner.settings.lock().expect("settings lock");
+        window.set_hotkey_value(SharedString::from(settings.global().hotkey.as_str()));
+    }
+
+    fn set_hotkey(&self, value: &str) {
+        {
+            let mut settings = self.inner.settings.lock().expect("settings lock");
+            settings.set_hotkey(value);
+        }
+        if let Err(err) = self.persist() {
+            tracing::warn!(%err, "settings: persist after hotkey-set failed");
+        }
     }
 
     fn refresh_slots(&self, window: &QueryWindow) {
@@ -382,6 +418,29 @@ mod tests {
 
         let reloaded = Settings::load_from(&path);
         assert!(!reloaded.is_plugin_enabled("echo"));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn controller_persists_hotkey() {
+        let tmp = std::env::temp_dir().join(format!(
+            "high-beam-settings-hotkey-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("settings.toml");
+        let settings = Settings::load_from(&path);
+        let manifests: Vec<Manifest> = vec![];
+        let ctrl = SettingsController::new(manifests, settings);
+
+        ctrl.set_hotkey("Cmd+K");
+
+        let reloaded = Settings::load_from(&path);
+        assert_eq!(reloaded.global().hotkey, "Cmd+K");
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
