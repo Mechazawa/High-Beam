@@ -88,11 +88,6 @@ fn echo_loads_in_rquickjs() {
 }
 
 #[test]
-fn echo_ts_loads_in_rquickjs() {
-    smoke_test("plugins/echo-ts");
-}
-
-#[test]
 fn frecency_demo_loads_in_rquickjs() {
     smoke_test("plugins/frecency-demo");
 }

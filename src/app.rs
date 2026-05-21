@@ -12,11 +12,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use slint::{ComponentHandle, ModelRc, VecModel};
-use tokio::sync::mpsc;
+use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use crate::QueryWindow;
+use crate::confirm::{ConfirmationSummary, PendingConfirmation};
 use crate::frecency::{self, FrecencyDb};
 use crate::plugins;
 use crate::plugins::actions;
@@ -27,13 +28,18 @@ use crate::plugins::result::RankedResult;
 use crate::plugins::runtime::LoadedPlugin;
 use crate::settings::Settings;
 use crate::settings_ui::SettingsController;
-use crate::ui::ResultRow;
+use crate::ui::{ConfirmCapRow, ResultRow};
 use crate::window;
 
 /// Handle to the running plugin host. Drop to shut it down.
 pub struct PluginHost {
     query_tx: mpsc::UnboundedSender<HostMessage>,
 }
+
+/// Shared state for the install-confirmation gate. Held behind a `Mutex` so
+/// the Slint-thread callbacks and the runtime-thread install task can
+/// co-ordinate without data races.
+type ConfirmState = Arc<Mutex<Option<PendingConfirmation>>>;
 
 enum HostMessage {
     Query { id: u64, input: String },
@@ -62,6 +68,8 @@ pub fn start(
 
     let frecency_db = open_frecency_db();
 
+    let confirm_state: ConfirmState = Arc::new(Mutex::new(None));
+
     spawn_runtime_thread(
         rx,
         plugins_override,
@@ -69,6 +77,7 @@ pub fn start(
         Arc::clone(&latest),
         Arc::clone(&latest_id),
         frecency_db.clone(),
+        Arc::clone(&confirm_state),
     )?;
 
     wire_window_callbacks(
@@ -78,6 +87,7 @@ pub fn start(
         &latest_id,
         frecency_db,
         settings,
+        confirm_state,
     );
 
     Ok(PluginHost { query_tx: tx })
@@ -90,6 +100,7 @@ fn spawn_runtime_thread(
     latest: Arc<Mutex<Vec<RankedResult>>>,
     latest_id: Arc<AtomicU64>,
     frecency_db: Option<FrecencyDb>,
+    confirm_state: ConfirmState,
 ) -> Result<(), Box<dyn Error>> {
     thread::Builder::new()
         .name("highbeam-plugin-runtime".into())
@@ -154,7 +165,14 @@ fn spawn_runtime_thread(
                                 Arc::clone(&latest),
                                 Arc::clone(&latest_id),
                             );
-                            handle_host_task(task, &registry, progress).await;
+                            handle_host_task(
+                                task,
+                                &registry,
+                                progress,
+                                Arc::clone(&confirm_state),
+                                weak.clone(),
+                            )
+                            .await;
                         }
                         HostMessage::Shutdown => {
                             if let Some(prev) = current_cancel.take() {
@@ -176,6 +194,7 @@ fn wire_window_callbacks(
     latest_id: &Arc<AtomicU64>,
     frecency_db: Option<FrecencyDb>,
     settings: SettingsController,
+    confirm_state: ConfirmState,
 ) {
     let latest_id_for_main = Arc::clone(latest_id);
     let tx_for_edit = tx.clone();
@@ -202,6 +221,41 @@ fn wire_window_callbacks(
             &settings,
             &tx_for_invoke,
         );
+    });
+
+    // Install — confirmed.
+    let confirm_state_install = Arc::clone(&confirm_state);
+    let weak_confirm_install = window.as_weak();
+    window.on_confirm_install(move || {
+        send_confirm_decision(&confirm_state_install, true, &weak_confirm_install);
+    });
+
+    // Install — cancelled.
+    let confirm_state_cancel = confirm_state;
+    let weak_confirm_cancel = window.as_weak();
+    window.on_confirm_cancel(move || {
+        send_confirm_decision(&confirm_state_cancel, false, &weak_confirm_cancel);
+    });
+}
+
+/// Pull the pending oneshot sender out of `confirm_state` and send `decision`.
+/// Then restore the launcher view so the UI isn't left on the confirm screen.
+fn send_confirm_decision(state: &ConfirmState, decision: bool, weak: &slint::Weak<QueryWindow>) {
+    let maybe_tx = match state.lock() {
+        Ok(mut guard) => guard.take().map(|p| p.tx),
+        Err(err) => {
+            tracing::error!(%err, "confirm: state lock poisoned");
+            return;
+        }
+    };
+    if let Some(tx) = maybe_tx {
+        let _ = tx.send(decision);
+    }
+    let weak = weak.clone();
+    let _ = slint::invoke_from_event_loop(move || {
+        if let Some(w) = weak.upgrade() {
+            w.invoke_show_query();
+        }
     });
 }
 
@@ -511,16 +565,18 @@ async fn handle_host_task(
     task: actions::HostTask,
     registry: &PluginRegistry,
     progress: ProgressEmitter,
+    confirm_state: ConfirmState,
+    weak: slint::Weak<QueryWindow>,
 ) {
     match task {
         actions::HostTask::Reload { name } => {
             run_reload(name, registry, &progress).await;
         }
         actions::HostTask::Install { url } => {
-            run_install(&url, registry, &progress).await;
+            run_install(&url, registry, &progress, &confirm_state, &weak).await;
         }
         actions::HostTask::UpdateAll => {
-            run_update_all(registry, &progress).await;
+            run_update_all(registry, &progress, &confirm_state, &weak).await;
         }
     }
 }
@@ -533,6 +589,8 @@ async fn run_install(
     url: &str,
     registry: &PluginRegistry,
     progress: &ProgressEmitter,
+    confirm_state: &ConfirmState,
+    weak: &slint::Weak<QueryWindow>,
 ) -> Option<String> {
     progress.emit(
         "install",
@@ -540,17 +598,33 @@ async fn run_install(
         Some("fetching manifest".to_owned()),
         plugins::result::Action::Noop,
     );
-    install_pipeline(url, "install", registry, progress).await
+    install_pipeline(
+        url,
+        "install",
+        None,
+        registry,
+        progress,
+        confirm_state,
+        weak,
+    )
+    .await
 }
 
 /// Inner install pipeline, parameterised on the progress-row key so the
 /// caller can decide between a single `install` row and per-plugin
 /// `update-<name>` rows.
+///
+/// `installed_caps` is `Some` during an update and drives the capability diff
+/// shown in the confirmation view.
+#[allow(clippy::too_many_arguments)]
 async fn install_pipeline(
     url: &str,
     progress_key: &str,
+    installed_caps: Option<&[String]>,
     registry: &PluginRegistry,
     progress: &ProgressEmitter,
+    confirm_state: &ConfirmState,
+    weak: &slint::Weak<QueryWindow>,
 ) -> Option<String> {
     let manifest = match plugins::install::fetch_and_validate_manifest(url).await {
         Ok(m) => m,
@@ -564,6 +638,19 @@ async fn install_pipeline(
             return None;
         }
     };
+
+    // Gate on user confirmation before downloading anything.
+    let confirmed = request_confirmation(&manifest, url, installed_caps, confirm_state, weak).await;
+    if !confirmed {
+        progress.emit(
+            progress_key,
+            format!("Install {} cancelled", manifest.name),
+            None,
+            plugins::result::Action::Noop,
+        );
+        return None;
+    }
+
     let plugin_name = manifest.name.clone();
     let plugin_version = manifest.version.clone().unwrap_or_default();
     let staging = stage_payload(&manifest, url, progress_key, progress).await?;
@@ -576,6 +663,64 @@ async fn install_pipeline(
         progress,
     })
     .await
+}
+
+/// Show the confirmation view and await the user's decision.
+/// Returns `true` when the user pressed Install, `false` for Cancel.
+async fn request_confirmation(
+    manifest: &plugins::manifest::Manifest,
+    manifest_url: &str,
+    installed_caps: Option<&[String]>,
+    confirm_state: &ConfirmState,
+    weak: &slint::Weak<QueryWindow>,
+) -> bool {
+    let summary =
+        crate::confirm::ConfirmationSummary::from_manifest(manifest, manifest_url, installed_caps);
+
+    let (tx, rx) = oneshot::channel::<bool>();
+
+    // Stash the sender so the Slint callbacks can resolve it.
+    match confirm_state.lock() {
+        Ok(mut guard) => {
+            *guard = Some(PendingConfirmation {
+                tx,
+                summary: summary.clone(),
+            });
+        }
+        Err(err) => {
+            tracing::error!(%err, "confirm: state lock poisoned; aborting install");
+            return false;
+        }
+    }
+
+    // Push the summary into Slint properties and flip to the confirm view.
+    let weak = weak.clone();
+    let _ = slint::invoke_from_event_loop(move || {
+        let Some(w) = weak.upgrade() else { return };
+        populate_confirm_view(&w, &summary);
+        w.invoke_show_confirm();
+    });
+
+    rx.await.unwrap_or(false)
+}
+
+/// Populate the `confirm-*` Slint properties from a [`ConfirmationSummary`].
+fn populate_confirm_view(window: &QueryWindow, summary: &ConfirmationSummary) {
+    window.set_confirm_plugin_name(SharedString::from(summary.plugin_name.as_str()));
+    window.set_confirm_display_name(SharedString::from(summary.display_name.as_str()));
+    window.set_confirm_version(SharedString::from(summary.version.as_str()));
+    window.set_confirm_description(SharedString::from(summary.description.as_str()));
+    window.set_confirm_manifest_url(SharedString::from(summary.manifest_url.as_str()));
+    let rows: Vec<ConfirmCapRow> = summary
+        .capabilities
+        .iter()
+        .map(|c| ConfirmCapRow {
+            cap: SharedString::from(c.cap.as_str()),
+            explanation: SharedString::from(c.explanation.as_str()),
+            is_new: c.is_new,
+        })
+        .collect();
+    window.set_confirm_capabilities(ModelRc::new(VecModel::from(rows)));
 }
 
 /// Download + (extract or write) into a fresh staging dir. Returns the
@@ -858,7 +1003,12 @@ fn emit_install_failure(
     );
 }
 
-async fn run_update_all(registry: &PluginRegistry, progress: &ProgressEmitter) {
+async fn run_update_all(
+    registry: &PluginRegistry,
+    progress: &ProgressEmitter,
+    confirm_state: &ConfirmState,
+    weak: &slint::Weak<QueryWindow>,
+) {
     let plugins = registry.snapshot().await;
     if plugins.is_empty() {
         progress.emit(
@@ -874,6 +1024,7 @@ async fn run_update_all(registry: &PluginRegistry, progress: &ProgressEmitter) {
     let mut failed = 0usize;
     for plugin in plugins {
         let local_version = plugin.manifest.version.clone().unwrap_or_default();
+        let installed_caps = plugin.manifest.capabilities.clone();
         let Some(manifest_url) = plugin.manifest.manifest_url.clone() else {
             let key = format!("update-{}", plugin.manifest.name);
             progress.emit(
@@ -922,9 +1073,27 @@ async fn run_update_all(registry: &PluginRegistry, progress: &ProgressEmitter) {
             None,
             plugins::result::Action::Noop,
         );
-        if install_pipeline(&manifest_url, &key, registry, progress)
-            .await
-            .is_some()
+
+        // Only prompt if the update introduces new capabilities.
+        let needs_prompt =
+            crate::confirm::update_needs_prompt(&remote.capabilities, &installed_caps);
+        let caps_arg: Option<&[String]> = if needs_prompt {
+            Some(&installed_caps)
+        } else {
+            None
+        };
+
+        if install_pipeline(
+            &manifest_url,
+            &key,
+            caps_arg,
+            registry,
+            progress,
+            confirm_state,
+            weak,
+        )
+        .await
+        .is_some()
         {
             updated += 1;
         } else {

@@ -3,6 +3,7 @@
 pub mod app;
 pub mod bundle_install;
 pub mod cli;
+pub mod confirm;
 pub mod daemon;
 pub mod frecency;
 pub mod ipc;
