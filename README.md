@@ -42,10 +42,10 @@ After dragging `HighBeam.app` to `/Applications`, run:
 xattr -dr com.apple.quarantine /Applications/HighBeam.app
 ```
 
-High Beam is ad-hoc signed (the free signing path). The command above
-strips the download quarantine so macOS launches it without the
-"unidentified developer" warning. Notarized builds — which wouldn't need
-this step — require a $99/yr Apple Developer ID; see
+High Beam is self-signed (free path — see `scripts/create-signing-cert.sh`).
+The command above strips the download quarantine so macOS launches it
+without the "unidentified developer" warning. Notarized builds — which
+wouldn't need this step — require a $99/yr Apple Developer ID; see
 [docs/distribution.md](docs/distribution.md) for the trade-off.
 
 ## Usage

@@ -2,7 +2,7 @@
 
 `just bundle` produces two artifacts under `target/release/`:
 
-- `HighBeam.app` — the macOS app bundle, ad-hoc signed
+- `HighBeam.app` — the macOS app bundle, self-signed
 - `HighBeam_<version>_<arch>.dmg` — drag-to-Applications disk image
   containing the .app
 
@@ -22,7 +22,7 @@ HighBeam.app/
     Info.plist                    # generated; merged with bundle/Info.plist
     _CodeSignature/
     MacOS/
-      high-beam                   # the release binary, ad-hoc signed
+      high-beam                   # the release binary, self-signed
     Resources/
       HighBeam.icns               # converted from bundle/icon.png
       plugins/                    # bundled defaults (see below)
@@ -70,12 +70,38 @@ array in `Cargo.toml`.
 
 ## Signing & distribution
 
-The bundle config uses `signing-identity = "-"` — Apple's ad-hoc signature
-identity. This is sufficient to RUN the app locally on the machine that
-built it, but every other Mac will see Gatekeeper's "unidentified developer"
-warning when first launching it.
+The bundle config uses `signing-identity = "High Beam Self-Signed"` — a
+self-signed identity that lives in your keychain. It identifies the build
+as "yours" (same dev across versions) without Apple's $99/yr program.
+Gatekeeper still doesn't trust self-signed certs by default, so end users
+need a one-time `xattr` step (below) — but that's an artifact of Apple's
+trust model, not of the cert flow.
 
-### Ad-hoc path (free) — what users see
+### Creating the signing cert (one-time)
+
+```sh
+./scripts/create-signing-cert.sh
+```
+
+This generates an RSA key + self-signed cert with the `codeSigning`
+extended key usage via `openssl`, bundles into pkcs12, and imports into
+your login keychain with `codesign` access granted. The CN is
+`High Beam Self-Signed` to match `Cargo.toml`'s `signing-identity`. Pass
+a name as `$1` to override.
+
+Verify with `security find-identity -p codesigning -v` — you should see
+the new identity listed. From there `just bundle` picks it up
+automatically.
+
+To re-issue (e.g. cert expired after the 10-year window, or you want a
+different CN), delete the old one first:
+
+```sh
+security delete-identity -c "High Beam Self-Signed"
+./scripts/create-signing-cert.sh
+```
+
+### What end users still need
 
 After dragging the .app to `/Applications`, the user runs:
 
@@ -85,17 +111,17 @@ xattr -dr com.apple.quarantine /Applications/HighBeam.app
 
 This strips the download quarantine bit so macOS launches the app
 without prompting. `spctl --assess --verbose /Applications/HighBeam.app`
-will still report `rejected (the code is valid but does not seem to be
-an app)` for ad-hoc bundles — that's expected; Gatekeeper trust is
-strictly a signed-and-notarized story. The `xattr` workaround sits
-beside that reality: it tells macOS the user vouched for the launch.
+will still report `rejected` for self-signed bundles — that's expected;
+Gatekeeper trust is strictly a signed-by-Apple-CA-and-notarized story.
+The `xattr` workaround sits beside that reality: it tells macOS the user
+vouched for the launch.
 
 ### The trade-off
 
 | Path | Cost | Gatekeeper trust | User friction |
 |------|------|------------------|---------------|
-| Ad-hoc (current)       | $0      | No                                | One `xattr -dr` command after install |
-| Developer ID + notarize | $99/yr | Yes — launches cleanly everywhere | None                                  |
+| Self-signed (current)   | $0      | No                                | One `xattr -dr` command after install |
+| Developer ID + notarize | $99/yr  | Yes — launches cleanly everywhere | None                                  |
 
 For real distribution to other Macs without the `xattr` step, you need:
 
