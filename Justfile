@@ -119,12 +119,23 @@ bundle-rpm:
         exit 0
     fi
 
-# Re-render bundle/icon.svg -> bundle/icon.png at 1024x1024. cargo-packager
-# reads the PNG and auto-generates the multi-resolution .icns at bundle
-# time. Uses macOS's built-in qlmanage so no extra tooling is needed.
+# Re-render bundle/icon.svg into bundle/icon.png (1024x1024) and
+# bundle/icon.icns (multi-resolution). cargo-packager 0.11 needs the
+# .icns explicitly — a bare PNG triggers "No matching IconType". Uses
+# macOS-built-in qlmanage / sips / iconutil so no extra tooling.
 icon:
     #!/usr/bin/env bash
     set -euo pipefail
     qlmanage -t -s 1024 -o /tmp bundle/icon.svg >/dev/null
     mv /tmp/icon.svg.png bundle/icon.png
-    echo "bundle/icon.png regenerated from bundle/icon.svg (1024x1024)"
+    iconset="$(mktemp -d)/icon.iconset"
+    mkdir -p "$iconset"
+    for sz in 16 32 128 256 512; do
+        sips -z $sz $sz bundle/icon.png --out "$iconset/icon_${sz}x${sz}.png" >/dev/null
+        d=$((sz * 2))
+        sips -z $d $d bundle/icon.png --out "$iconset/icon_${sz}x${sz}@2x.png" >/dev/null
+    done
+    cp bundle/icon.png "$iconset/icon_512x512@2x.png"
+    iconutil -c icns "$iconset" -o bundle/icon.icns
+    rm -rf "$(dirname "$iconset")"
+    echo "bundle/icon.{png,icns} regenerated from bundle/icon.svg"

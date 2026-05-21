@@ -18,7 +18,7 @@ identifier = "at.ioexception.highbeam"
 # `binaries` tells the packager which build outputs to bundle; the path is
 # relative to `out-dir` and resolved against the cargo target dir at runtime.
 binaries = [{ path = "high-beam", main = true }]
-icons = ["bundle/icon.png"]
+icons = ["bundle/icon.icns", "bundle/icon.png"]
 # The plugins land in `Contents/Resources/plugins/<name>/...` at bundle
 # time; `src/daemon.rs::install_default_plugins_if_needed` copies them to
 # the user's plugin dir on first launch. Dev-only fixtures
