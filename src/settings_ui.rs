@@ -423,6 +423,33 @@ mod tests {
     }
 
     #[test]
+    fn controller_refresh_global_reads_back_hotkey() {
+        // Whatever value is persisted on disk must round-trip through the
+        // controller's view-side state — the Slint hotkey-value property is
+        // populated from this read.
+        let tmp = std::env::temp_dir().join(format!(
+            "high-beam-settings-refresh-global-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("settings.toml");
+
+        let mut s = Settings::load_from(&path);
+        s.set_hotkey("Shift+F2");
+        s.save().expect("save");
+
+        let reloaded = Settings::load_from(&path);
+        let ctrl = SettingsController::new(vec![], reloaded);
+        let observed = ctrl.inner.settings.lock().unwrap().global().hotkey.clone();
+        assert_eq!(observed, "Shift+F2");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
     fn controller_persists_hotkey() {
         let tmp = std::env::temp_dir().join(format!(
             "high-beam-settings-hotkey-{}",
