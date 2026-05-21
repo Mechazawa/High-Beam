@@ -6,10 +6,10 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, params};
 
+use crate::frecency::now_seconds;
 use crate::paths::ensure_parent_dir;
 
 const SCHEMA_SQL: &str = "\
@@ -137,17 +137,10 @@ impl QueryHistoryDb {
 }
 
 /// Resolve the on-disk path for the query-history DB. Returns `None` if
-/// `ProjectDirs` won't resolve.
+/// the platform data directory can't be resolved.
 #[must_use]
 pub(crate) fn default_db_path() -> Option<PathBuf> {
-    let dirs = directories::ProjectDirs::from("", "", "high-beam")?;
-    Some(dirs.data_dir().join("query_history.sqlite"))
-}
-
-fn now_seconds() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
+    crate::paths::data_dir().map(|d| d.join("query_history.sqlite"))
 }
 
 #[cfg(test)]

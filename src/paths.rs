@@ -81,6 +81,15 @@ pub fn config_dir() -> io::Result<PathBuf> {
     Ok(project_dirs()?.config_dir().to_path_buf())
 }
 
+/// Platform-specific data directory used for the frecency + query-history
+/// `SQLite` files.
+///
+/// - macOS: `~/Library/Application Support/high-beam/`
+/// - Linux: `$XDG_DATA_HOME/high-beam/` (default `~/.local/share/high-beam/`)
+pub(crate) fn data_dir() -> Option<PathBuf> {
+    project_dirs().ok().map(|d| d.data_dir().to_path_buf())
+}
+
 /// Best-effort parent-directory creation for paths we own. Returns `Ok` if the
 /// directory already exists or was created.
 pub(crate) fn ensure_parent_dir(path: &std::path::Path) -> io::Result<()> {

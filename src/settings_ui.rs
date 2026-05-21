@@ -200,6 +200,19 @@ impl SettingsController {
         settings.global().launcher_position
     }
 
+    /// Current `query_history.max_entries` setting. Read on every history
+    /// push so the cap takes effect without a daemon restart.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the settings mutex is poisoned. See
+    /// [`Self::launcher_position`] for the rationale.
+    #[must_use]
+    pub fn query_history_max_entries(&self) -> usize {
+        let settings = self.inner.settings.lock().expect("settings lock");
+        settings.query_history_max_entries()
+    }
+
     /// Record a new launcher window origin and flush to disk. Used by the
     /// window layer after the user finishes a drag; persistence is best-
     /// effort because losing the latest position is preferable to a

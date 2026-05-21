@@ -3,12 +3,11 @@
 //! No I/O, no Slint types — everything here can be unit-tested without a
 //! running window.
 //!
-//! The cycle model:
-//! ```text
-//! oldest ← entries[0] … entries[n-1] ← (draft slot)  ← newest
-//! ```
-//! `cursor = None`  means the user is on the draft slot (the live input).
-//! `cursor = Some(i)` means they've cycled back to `entries[i]`.
+//! Up enters preview mode only when the live input is empty; once in
+//! preview, Up walks older and Down walks newer. Down past the newest
+//! entry exits preview to an empty input (no draft to restore because the
+//! empty-input precondition was what let us enter preview in the first
+//! place). Any edit or submit also exits preview.
 
 /// In-session history cycling state. Kept on the Slint event-loop thread;
 /// no `Send` requirement.
@@ -16,10 +15,7 @@
 pub(crate) struct QueryHistoryState {
     /// Loaded from the DB at startup / after each submit. Oldest first.
     entries: Vec<String>,
-    /// The input text that was live when the user first pressed up. Restored
-    /// when down is pressed past the newest entry.
-    draft: Option<String>,
-    /// Index into `entries` while cycling; `None` means "on the draft slot".
+    /// Index into `entries` while previewing; `None` means "not previewing".
     cursor: Option<usize>,
 }
 
@@ -39,7 +35,6 @@ impl QueryHistoryState {
     pub(crate) fn new(entries: Vec<String>) -> Self {
         Self {
             entries,
-            draft: None,
             cursor: None,
         }
     }
@@ -59,7 +54,6 @@ impl QueryHistoryState {
                 if self.entries.is_empty() || !current_input.is_empty() {
                     return InputAction::NoChange;
                 }
-                self.draft = Some(String::new());
                 let idx = self.entries.len() - 1;
                 self.cursor = Some(idx);
                 InputAction::SetTo(self.entries[idx].clone())
@@ -88,7 +82,6 @@ impl QueryHistoryState {
                 InputAction::SetTo(self.entries[new_idx].clone())
             }
             Some(_) => {
-                self.draft = None;
                 self.cursor = None;
                 InputAction::SetTo(String::new())
             }
@@ -104,31 +97,28 @@ impl QueryHistoryState {
     }
 
     /// Notify the state machine that the user has edited the input text.
-    /// If cycling, this abandons the cycle and makes the edited text the new
-    /// draft (cursor cleared). The original history entries are never mutated.
+    /// If previewing, this commits — the cycle ends and the input becomes
+    /// the new live text. The original history entries are never mutated.
     pub(crate) fn mark_edited(&mut self) {
-        if self.cursor.is_some() {
-            self.cursor = None;
-            self.draft = None;
-        }
+        self.cursor = None;
     }
 
-    /// Record a submitted query. Updates the in-memory entries list so that
-    /// subsequent cycling includes the new entry. Deduplication against the
-    /// last entry is handled in the DB layer; here we just append (the DB
-    /// push is the authority).
-    ///
-    /// Resets cursor and draft — the user is back on a fresh input.
-    pub(crate) fn on_submit(&mut self, query: &str, new_entries: Vec<String>) {
-        self.entries = new_entries;
-        // If the submitted text happens to equal the last entry (DB dedup
-        // fired), don't double-append in memory — the reload covers it.
-        let last = self.entries.last().map(String::as_str);
-        if last != Some(query) && !query.is_empty() {
+    /// Record a submitted query. Mirrors what the DB just did: dedup
+    /// against the last entry, append, trim to `max_entries`. Resets the
+    /// preview cursor.
+    pub(crate) fn on_submit(&mut self, query: &str, max_entries: usize) {
+        self.cursor = None;
+        if query.is_empty() {
+            return;
+        }
+        let last_matches = self.entries.last().map(String::as_str) == Some(query);
+        if !last_matches {
             self.entries.push(query.to_owned());
         }
-        self.cursor = None;
-        self.draft = None;
+        let excess = self.entries.len().saturating_sub(max_entries);
+        if excess > 0 {
+            self.entries.drain(..excess);
+        }
     }
 }
 
@@ -244,37 +234,40 @@ mod tests {
     // ---- on_submit ---------------------------------------------------------
 
     #[test]
-    fn submit_resets_cursor_and_draft() {
+    fn submit_resets_cursor() {
         let mut s = state_with(&["old"]);
         s.history_up("");
         assert!(s.is_preview());
-        s.on_submit("new query", vec!["old".into(), "new query".into()]);
+        s.on_submit("new query", 100);
         assert!(!s.is_preview());
-        assert_eq!(s.draft, None);
     }
 
     #[test]
-    fn submit_appends_to_entries_when_not_already_last() {
+    fn submit_appends_to_entries() {
         let mut s = state_with(&["a"]);
-        s.on_submit("b", vec!["a".into()]);
-        // "b" wasn't in the reload slice (simulating what DB returns before
-        // the flush lands), so on_submit appends it in-memory.
+        s.on_submit("b", 100);
         let action = s.history_up("");
         assert_eq!(action, InputAction::SetTo("b".into()));
     }
 
     #[test]
-    fn submit_does_not_double_append_when_reload_already_includes_entry() {
-        let mut s = QueryHistoryState::default();
-        // DB already returned the entry in the reload slice.
-        s.on_submit("same", vec!["same".into()]);
+    fn submit_dedups_against_last_entry() {
+        let mut s = state_with(&["same"]);
+        s.on_submit("same", 100);
         assert_eq!(s.entries, vec!["same"]);
     }
 
     #[test]
     fn submit_skips_empty_query() {
         let mut s = QueryHistoryState::default();
-        s.on_submit("", vec![]);
+        s.on_submit("", 100);
         assert!(s.entries.is_empty());
+    }
+
+    #[test]
+    fn submit_trims_to_max_entries() {
+        let mut s = state_with(&["a", "b", "c"]);
+        s.on_submit("d", 3);
+        assert_eq!(s.entries, vec!["b", "c", "d"]);
     }
 }

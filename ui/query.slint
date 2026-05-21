@@ -326,9 +326,9 @@ export component QueryWindow inherits Window {
                             root.escape-pressed();
                             return accept;
                         }
-                        // Up: history-up always fires; the Rust state machine
-                        // gates on input emptiness + preview state. When that
-                        // returns NoChange, fall through to result-list nav.
+                        // Up cycles history when input is empty or already
+                        // previewing; otherwise it moves the selection up
+                        // the result list.
                         if (event.text == Key.UpArrow) {
                             if (self.text == "" || root.is-history-preview) {
                                 root.history-up();
@@ -339,8 +339,8 @@ export component QueryWindow inherits Window {
                             }
                             return accept;
                         }
-                        // Down: walk newer through history while previewing;
-                        // otherwise navigate results.
+                        // Down walks newer through history while previewing;
+                        // otherwise navigates results.
                         if (event.text == Key.DownArrow) {
                             if (root.is-history-preview) {
                                 root.history-down();

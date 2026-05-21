@@ -229,17 +229,20 @@ fn wire_window_callbacks(
 
     let latest_id_for_main = Arc::clone(latest_id);
     let tx_for_edit = tx.clone();
-    // Any edit commits a history preview: clear the muted-render flag and
-    // exit the cycle on the Rust side too. The plugin pipeline runs against
-    // the post-edit text regardless of how we got here (typing or pressing
-    // Enter on a preview, which the UI synthesises as an `edited` event).
+    // Any edit while previewing commits: drop the muted-render flag and
+    // exit the cycle on the Rust side. The check on `is-history-preview`
+    // is a cheap Slint property read; the lock + state mutation only run
+    // when we were actually in a preview, keeping the per-keystroke hot
+    // path lock-free in the common case.
     let history_state_for_edit = Arc::clone(&history_state);
     let weak_for_edit = window.as_weak();
     window.on_query_edited(move |text| {
-        if let Ok(mut hs) = history_state_for_edit.lock() {
-            hs.mark_edited();
-        }
-        if let Some(w) = weak_for_edit.upgrade() {
+        if let Some(w) = weak_for_edit.upgrade()
+            && w.get_is_history_preview()
+        {
+            if let Ok(mut hs) = history_state_for_edit.lock() {
+                hs.mark_edited();
+            }
             w.set_is_history_preview(false);
         }
         let id = latest_id_for_main.fetch_add(1, Ordering::Relaxed) + 1;
@@ -258,19 +261,20 @@ fn wire_window_callbacks(
     let tx_for_invoke = tx.clone();
     let history_db_for_invoke = history_db.clone();
     let history_state_for_invoke = Arc::clone(&history_state);
+    let settings_for_invoke = settings.clone();
     window.on_invoke_selected(move || {
         invoke_selected(
             &weak_for_invoke,
             &latest,
             frecency_db.as_ref(),
-            &settings,
+            &settings_for_invoke,
             &tx_for_invoke,
             history_db_for_invoke.as_ref(),
             &history_state_for_invoke,
         );
     });
 
-    wire_history_callbacks(window, &history_state, history_db.as_ref());
+    wire_history_callbacks(window, &history_state, history_db.as_ref(), &settings);
 
     // Install — confirmed.
     let confirm_state_install = Arc::clone(&confirm_state);
@@ -294,6 +298,7 @@ fn wire_history_callbacks(
     window: &QueryWindow,
     history_state: &Arc<Mutex<QueryHistoryState>>,
     history_db: Option<&QueryHistoryDb>,
+    settings: &SettingsController,
 ) {
     let weak_for_up = window.as_weak();
     let history_state_for_up = Arc::clone(history_state);
@@ -301,7 +306,7 @@ fn wire_history_callbacks(
         let Some(w) = weak_for_up.upgrade() else {
             return;
         };
-        let current = w.get_query_text().to_string();
+        let current = w.get_query_text();
         if let Ok(mut hs) = history_state_for_up.lock()
             && let InputAction::SetTo(text) = hs.history_up(&current)
         {
@@ -324,40 +329,40 @@ fn wire_history_callbacks(
         }
     });
 
-    // Persist on dismiss (Esc / blur / action-induced hide). Skips empty
-    // input and history previews — `invoke_selected` already pushed any
-    // submitted query, and the DB dedups against the last entry so the
-    // action-then-hide path can't double-write.
+    // Persist on dismiss (Esc / blur / action-induced hide). The empty-
+    // string check on `SharedString` is allocation-free; only commit the
+    // payload to a `String` if we're actually going to push. Previews are
+    // skipped — the text is already in the DB. `invoke_selected` already
+    // pushed any submitted query, and the DB dedups against the last
+    // entry, so the action-then-hide path can't double-write.
     let history_db_for_dismiss = history_db.cloned();
     let history_state_for_dismiss = Arc::clone(history_state);
-    let weak_for_dismiss = window.as_weak();
+    let settings_for_dismiss = settings.clone();
     window.on_persist_dismiss(move |text| {
-        let text = text.to_string();
         if text.is_empty() {
             return;
         }
-        if let Some(w) = weak_for_dismiss.upgrade()
-            && w.get_is_history_preview()
+        if let Ok(hs) = history_state_for_dismiss.lock()
+            && hs.is_preview()
         {
             return;
         }
         push_history(
             history_db_for_dismiss.as_ref(),
             &history_state_for_dismiss,
-            &text,
+            text.as_str(),
+            settings_for_dismiss.query_history_max_entries(),
         );
     });
 }
 
 /// Write `text` into the window's query input without firing `query_edited`.
 ///
-/// Direct assignment via Slint's `set-input-text` bypasses the `edited`
-/// callback on purpose — the history-cycle path doesn't want to fire the
-/// plugin pipeline while the user is just previewing entries (the cycled
-/// text renders muted; Enter or any edit commits and triggers the query
-/// via the regular `on_query_edited` path).
+/// `set-input-text` writes both `input.text` and `root.query-text` itself,
+/// so a separate `set_query_text` would just be a redundant property
+/// write. The whole point is to skip `edited` so the cycle cursor
+/// survives — Enter or an edit commits and re-enters the regular pipeline.
 fn apply_history_text(window: &QueryWindow, text: &str) {
-    window.set_query_text(text.into());
     window.invoke_set_input_text(text.into());
 }
 
@@ -413,7 +418,12 @@ fn invoke_selected(
 
     // Push the query to history before the action runs — if the action hides
     // the window we still want the entry recorded.
-    push_history(history_db, history_state, &query_text);
+    push_history(
+        history_db,
+        history_state,
+        &query_text,
+        settings.query_history_max_entries(),
+    );
 
     match actions::execute(&action) {
         Ok(outcome) => {
@@ -456,27 +466,26 @@ fn invoke_selected(
 }
 
 /// Append `query` to the persistent history and update the in-memory state
-/// machine entries. Runs on the UI thread — the DB write is fast enough for
-/// a one-off per Enter press.
+/// machine. Runs on the UI thread — DB write is fast enough for a one-off
+/// per Enter / dismiss. Both layers dedup against the last entry and trim
+/// to `max_entries`, so the in-memory mirror stays in sync without a
+/// follow-up `load_recent`.
 fn push_history(
     history_db: Option<&QueryHistoryDb>,
     history_state: &Arc<Mutex<QueryHistoryState>>,
     query: &str,
+    max_entries: usize,
 ) {
     if query.is_empty() {
         return;
     }
-    let max_entries = Settings::load_or_default().query_history_max_entries();
-    let new_entries = if let Some(db) = history_db {
-        if let Err(err) = db.push(query, max_entries) {
-            tracing::warn!(%err, "query_history: push failed");
-        }
-        db.load_recent(max_entries)
-    } else {
-        Vec::new()
-    };
+    if let Some(db) = history_db
+        && let Err(err) = db.push(query, max_entries)
+    {
+        tracing::warn!(%err, "query_history: push failed");
+    }
     if let Ok(mut hs) = history_state.lock() {
-        hs.on_submit(query, new_entries);
+        hs.on_submit(query, max_entries);
     }
 }
 
