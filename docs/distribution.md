@@ -187,8 +187,139 @@ xcrun stapler staple target/release/HighBeam_*.dmg
 environment variables are set; it currently logs `Skipping app notarization`
 when none are present.
 
-## Linux / Windows
+## Linux
 
-Not yet wired. `cargo-packager` supports `.deb`, `.AppImage`, `.msi`, and
-`.exe` — adding them is a matter of fleshing out `[package.metadata.packager.linux]`
-/ `.windows` blocks. Tracked under the Roadmap in the top-level README.
+Four shipped package formats, in the user-stated priority order. The
+portable tarball + Arch (`.pkg.tar.zst` / AUR) are the must-haves;
+`.deb` covers Ubuntu / Debian; `.rpm` covers Fedora / RHEL / SUSE.
+
+| Format               | Tool                  | Recipe                |
+|----------------------|-----------------------|-----------------------|
+| Portable tarball     | `tar` (built-in)      | `just bundle-tarball` |
+| Arch `.pkg.tar.zst`  | `cargo-packager`      | `just bundle-arch`    |
+| `.deb`               | `cargo-packager`      | `just bundle-deb`     |
+| `.rpm`               | `cargo-generate-rpm`  | `just bundle-rpm`     |
+
+`just bundle-linux` runs all four in sequence. Each artifact ships
+the same payload:
+
+```
+/usr/bin/highbeam                            # release binary
+/usr/share/highbeam/plugins/<name>/...       # bundled defaults
+/usr/share/highbeam/themes/yosemite-spotlight.toml
+/usr/share/applications/highbeam.desktop     # app-menu entry
+/usr/lib/systemd/user/highbeam.service       # user daemon
+```
+
+The bundled plugin set matches the macOS `.app`'s
+`[package.metadata.packager].resources` list — the 16 "real" plugins,
+with the dev fixtures (`echo`, `echo-ts`, `slow-echo`, `frecency-demo`)
+excluded by name in the tarball recipe.
+
+### First-launch install on Linux
+
+`src/bundle_install.rs::install_default_plugins_if_needed` copies the
+bundled defaults into `$XDG_DATA_HOME/high-beam/plugins/` on first
+launch. The current resolver computes the bundled source as
+`current_exe().parent().parent().join("Resources/plugins")` — that's a
+macOS-`.app`-shaped path (`HighBeam.app/Contents/MacOS/high-beam` →
+`Contents/Resources/plugins`). The Linux equivalent lives at
+`/usr/share/highbeam/plugins/`, which `current_exe()` from
+`/usr/bin/highbeam` does NOT reach with the same two-parent walk.
+
+Until the resolver learns about the Linux layout, first-launch
+seeding on Linux is a no-op and users have to copy plugins out of
+`/usr/share/highbeam/plugins/` manually (or symlink). Tracked as a
+follow-up — the fix is a small `#[cfg(target_os = "linux")]` branch
+in `bundle_install.rs::bundled_plugins_dir`.
+
+### Tarball
+
+```sh
+just bundle-tarball
+# -> target/release/dist/highbeam-<ver>-linux-x86_64.tar.gz
+```
+
+The user untars somewhere, then either runs the embedded `install.sh`
+(defaults to `/usr/local`, override with `PREFIX=$HOME/.local`) or
+copies the tree by hand. `install.sh` registers the systemd unit and
+prints the `systemctl --user enable --now` + WM-keybind next steps.
+
+### Arch — pacman + AUR
+
+`cargo-packager`'s `pacman` format produces a `.tar.gz` + `PKGBUILD`
+pair under `target/release/`. `makepkg` against that pair produces the
+actual `.pkg.tar.zst` you install with `pacman -U`. (cargo-packager
+deliberately doesn't shell out to `makepkg` itself, so we can build
+the source materials on any host — no Arch machine required.)
+
+For AUR distribution we ship a separate, hand-maintained `PKGBUILD`
+under `packaging/aur/` — the `-bin` variant that pulls a prebuilt
+release tarball from GitHub Releases rather than rebuilding from
+source. The full submission workflow lives at
+[`packaging/aur/README.md`](../packaging/aur/README.md): per-release
+sha256 bump, `makepkg --printsrcinfo > .SRCINFO`, push to
+`ssh://aur@aur.archlinux.org/high-beam-bin.git`.
+
+### .deb (Debian / Ubuntu)
+
+```sh
+just bundle-deb
+# -> target/release/high-beam_<ver>_amd64.deb
+```
+
+Runtime deps declared in `[package.metadata.packager.deb].depends`:
+`libxkbcommon0` (winit's Wayland/X11 keymap backend) and `libssl3`
+(rustls' system-roots fallback). These names resolve on Debian 12 /
+Ubuntu 22.04 and newer.
+
+Inspect the produced `.deb` with `dpkg --info <file>.deb` and
+`dpkg --contents <file>.deb`. Install with `sudo apt install
+./<file>.deb` (apt's local-file mode pulls runtime deps from the
+distro repo).
+
+### .rpm (Fedora / RHEL / SUSE)
+
+`cargo-packager` 0.11.x has no rpm backend — the fallback is
+[`cargo-generate-rpm`](https://github.com/cat-in-136/cargo-generate-rpm).
+The `bundle-rpm` recipe defers to it; install via:
+
+```sh
+cargo install cargo-generate-rpm
+```
+
+Then add a `[package.metadata.generate-rpm]` block to `Cargo.toml`
+mirroring the `.deb`'s payload shape and deps (`libxkbcommon`,
+`openssl-libs` are the Fedora names). The recipe is wired but the
+metadata block is the open work; runs `bundle-rpm` print an install
+hint and exit cleanly when `cargo-generate-rpm` isn't present so
+`bundle-linux` stays green.
+
+### Why not Flatpak
+
+Flatpak is a poor fit for High Beam. Every launcher feature we care
+about wants host-OS access that the sandbox blocks:
+
+- The `app-launcher` plugin reads `/usr/share/applications/*.desktop`
+  to enumerate installed apps. Flatpak hides the host filesystem;
+  exposing it via `--filesystem=host` defeats the sandbox.
+- The `kill-process` plugin walks `/proc` and sends signals. Flatpak's
+  PID namespace makes this either impossible (default) or pointless
+  (`--share=process` removes the isolation).
+- The `window-mgmt` plugin shells out to `wmctrl`, `xdotool`, or the
+  KWin/Hyprland IPC sockets. None of these are reliably available
+  inside the sandbox.
+- Global hotkeys rely on the desktop-portal `GlobalShortcuts`
+  interface, which is uneven across compositors and adds permission
+  prompts that defeat the "press one key, launcher appears" UX
+  Spotlight-class tools sell.
+
+Launchers are inherently host-OS integration tools; sandboxing fights
+the value proposition. The four formats above land in the
+`/usr/{bin,share,lib}` namespace that those features expect.
+
+## Windows
+
+Not wired. `cargo-packager` supports `wix` (`.msi`) and `nsis`
+(`.exe`); the Linux precedent above is the template once a Windows
+port lands.

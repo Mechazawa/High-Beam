@@ -34,6 +34,30 @@ per-plugin logging — are all in. The pre-v1.0 backlog is in
 
 Stable Rust, edition 2024. Pinned via `rust-toolchain.toml`.
 
+### Linux
+
+Four package formats out of `just bundle-linux` (run on a Linux host):
+
+- **Portable tarball** — `highbeam-<ver>-linux-x86_64.tar.gz`. Untar
+  anywhere, run `install.sh` (defaults to `/usr/local`,
+  `PREFIX=$HOME/.local` for sudo-less installs).
+- **Arch** — `.pkg.tar.zst` via `cargo packager --formats pacman`.
+  Also published to the AUR as `high-beam-bin` (see
+  [packaging/aur/README.md](packaging/aur/README.md)).
+- **.deb** — `cargo packager --formats deb` for Debian / Ubuntu.
+- **.rpm** — via [`cargo-generate-rpm`](https://github.com/cat-in-136/cargo-generate-rpm)
+  for Fedora / RHEL / SUSE.
+
+After install, enable the user daemon and bind a WM hotkey:
+
+```bash
+systemctl --user enable --now highbeam.service
+# Then bind `highbeam --open` to a key in your WM / DE — examples for
+# GNOME / KDE / sway / Hyprland in docs/platform.md.
+```
+
+Full details in [docs/distribution.md](docs/distribution.md).
+
 ### macOS Gatekeeper bypass (one-time, post-install)
 
 After dragging `HighBeam.app` to `/Applications`, run:

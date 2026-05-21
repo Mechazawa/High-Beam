@@ -25,14 +25,44 @@ one; the GlobalShortcuts portal's coverage varies by compositor). High Beam
 punts: bind `highbeam --open` in your WM / DE keyboard settings. The same
 mechanism works on X11, so we don't have to maintain a separate X path.
 
-Example (GNOME Settings → Keyboard → View and Customize Shortcuts → Custom):
-
-| Name        | Command            | Shortcut       |
-|-------------|--------------------|----------------|
-| High Beam   | `highbeam --open`  | `Super+Space`  |
-
 `highbeam --open` returns immediately if a daemon is running; otherwise it
-starts one and opens the window.
+starts one and opens the window. So the moving parts are:
+
+1. A long-lived `highbeam` process — installed packages register a
+   user-level systemd unit (`/usr/lib/systemd/user/highbeam.service`)
+   for this. `systemctl --user enable --now highbeam.service` after
+   install.
+2. A WM keybind that invokes `highbeam --open` to summon the window.
+
+#### Per-WM keybind setup
+
+**GNOME** — Settings → Keyboard → View and Customize Shortcuts → Custom
+Shortcuts → `+`:
+
+| Name      | Command            | Shortcut       |
+|-----------|--------------------|----------------|
+| High Beam | `highbeam --open`  | `Super+Space`  |
+
+**KDE Plasma** — System Settings → Shortcuts → Custom Shortcuts → Edit →
+New → Global Shortcut → Command/URL. Trigger = `Super+Space`,
+Command = `highbeam --open`.
+
+**sway** — add to `~/.config/sway/config`:
+
+```
+bindsym $mod+space exec highbeam --open
+```
+
+…then reload (`swaymsg reload` or `$mod+Shift+c`).
+
+**Hyprland** — add to `~/.config/hypr/hyprland.conf`:
+
+```
+bind = SUPER, SPACE, exec, highbeam --open
+```
+
+For anything else, check the WM's own keybind docs — the pattern is always
+"bind a key to run the `highbeam --open` shell command".
 
 ## Single-instance lock
 
@@ -98,8 +128,11 @@ No special permissions. Plugins that run subprocesses via
 
 ## Distribution
 
-- macOS: `just bundle` produces an ad-hoc-signed `.app` + drag-to-Applications
+- macOS: `just bundle` produces a self-signed `.app` + drag-to-Applications
   `.dmg`. Real distribution to other Macs needs a Developer ID certificate +
   notarization — see [docs/distribution.md](distribution.md).
-- Linux: plain binary; Flatpak / AUR packaging later.
+- Linux: four package formats out of `just bundle-linux` — a portable
+  tarball, `.deb` (Ubuntu / Debian), `.pkg.tar.zst` via the Arch
+  `pacman`/PKGBUILD pair, plus an `-bin` AUR template. See
+  [docs/distribution.md](distribution.md).
 - Auto-updater: deferred. v1 is `cargo install` / manual.

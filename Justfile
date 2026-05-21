@@ -44,6 +44,91 @@ bundle:
     cargo build --release
     cargo packager --release
 
+# Build every Linux artifact. Run this on a Linux host — cargo-packager
+# silently skips deb/pacman when the host is macOS.
+bundle-linux: bundle-tarball bundle-deb bundle-arch bundle-rpm
+
+# Portable tarball: a single highbeam-<ver>-linux-x86_64.tar.gz that
+# unpacks into a tree mirroring an installed package, with install.sh
+# ready to copy everything to /usr/local. The dev-only fixtures
+# (echo / echo-ts / slow-echo / frecency-demo) are excluded so the
+# tarball matches the .deb / pacman / AUR payloads.
+bundle-tarball:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build --release
+    stage="$(mktemp -d)"
+    # `grep '^version'` picks the [package] version, not the various
+    # transitive `version = "..."` lines further down Cargo.toml.
+    version="$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)"
+    name="highbeam-${version}-linux-x86_64"
+    root="$stage/$name"
+    mkdir -p \
+        "$root/bin" \
+        "$root/share/highbeam/plugins" \
+        "$root/share/highbeam/themes" \
+        "$root/share/applications" \
+        "$root/lib/systemd/user"
+    cp target/release/high-beam "$root/bin/highbeam"
+    # Mirror the bundled plugin list in Cargo.toml's `resources` block.
+    # Dev fixtures live alongside the real plugins under examples/, so
+    # we exclude by name rather than enumerating the keepers — it's the
+    # smaller list to maintain.
+    for plugin in examples/plugins/*/; do
+        name_only="$(basename "$plugin")"
+        case "$name_only" in
+            echo|echo-ts|slow-echo|frecency-demo) continue ;;
+        esac
+        dest="$root/share/highbeam/plugins/$name_only"
+        mkdir -p "$dest"
+        # Copy manifest + plugin.js + any sibling .json data files; skip
+        # node_modules, tsconfig, vitest config, *.test.*, lockfiles.
+        for f in "$plugin"manifest.json "$plugin"plugin.js "$plugin"*.json; do
+            [ -f "$f" ] || continue
+            case "$(basename "$f")" in
+                package.json|package-lock.json|tsconfig.json) continue ;;
+                vitest.config.json) continue ;;
+            esac
+            cp "$f" "$dest/"
+        done
+    done
+    cp themes/*.toml "$root/share/highbeam/themes/"
+    cp packaging/linux/highbeam.desktop "$root/share/applications/"
+    cp packaging/linux/highbeam.service "$root/lib/systemd/user/"
+    cp packaging/linux/install.sh "$root/install.sh"
+    cp README.md "$root/" 2>/dev/null || true
+    chmod +x "$root/install.sh" "$root/bin/highbeam"
+    mkdir -p target/release/dist
+    tar -C "$stage" -czf "target/release/dist/${name}.tar.gz" "$name"
+    rm -rf "$stage"
+    echo "-> target/release/dist/${name}.tar.gz"
+
+bundle-arch:
+    cargo packager --release --formats pacman
+
+bundle-deb:
+    cargo packager --release --formats deb
+
+# .rpm is the gap in cargo-packager's coverage (no rpm backend in
+# 0.11.x). The fallback is `cargo-generate-rpm` — install it once
+# (`cargo install cargo-generate-rpm`) and run this recipe. Config
+# lives under [package.metadata.generate-rpm] when we're ready to wire
+# it up; for now this recipe prints the install hint and exits 0 so
+# `bundle-linux` doesn't fail on the missing backend.
+bundle-rpm:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v cargo-generate-rpm >/dev/null 2>&1; then
+        cargo build --release
+        cargo generate-rpm
+    else
+        echo "bundle-rpm: cargo-generate-rpm not installed."
+        echo "  cargo install cargo-generate-rpm"
+        echo "  (then add [package.metadata.generate-rpm] to Cargo.toml"
+        echo "  — see docs/distribution.md)"
+        exit 0
+    fi
+
 # Re-render bundle/icon.svg -> bundle/icon.png at 1024x1024. cargo-packager
 # reads the PNG and auto-generates the multi-resolution .icns at bundle
 # time. Uses macOS's built-in qlmanage so no extra tooling is needed.
