@@ -4,6 +4,8 @@
 //! Keyword prefix-match, case-insensitive. Score scales by how much of the
 //! keyword has been typed (`query_len / keyword_len`), capped to 100.
 
+use std::sync::LazyLock;
+
 use crate::plugins::dispatch::StreamedResult;
 use crate::plugins::result::{Action, PluginResult};
 
@@ -25,7 +27,7 @@ struct Keyword {
     make_action: fn() -> Action,
 }
 
-fn keywords() -> Vec<Keyword> {
+static KEYWORDS: LazyLock<Vec<Keyword>> = LazyLock::new(|| {
     let mut kws = vec![
         Keyword {
             label: "exit High Beam",
@@ -107,7 +109,7 @@ fn keywords() -> Vec<Keyword> {
         make_action: eject_action,
     });
     kws
-}
+});
 
 fn shutdown_action() -> Action {
     #[cfg(target_os = "macos")]
@@ -275,7 +277,7 @@ fn empty_trash_action() -> Action {
 }
 
 #[must_use]
-pub(crate) fn query(input: &str, plugin_names: &[String]) -> Vec<StreamedResult> {
+pub(crate) fn query(input: &str, plugin_names: &[&str]) -> Vec<StreamedResult> {
     let q = input.trim();
     if q.is_empty() {
         return Vec::new();
@@ -284,7 +286,7 @@ pub(crate) fn query(input: &str, plugin_names: &[String]) -> Vec<StreamedResult>
 
     let mut out = Vec::new();
     let version_label = format!("version v{VERSION}");
-    for kw in keywords() {
+    for kw in KEYWORDS.iter() {
         let (label, action, subtitle) = if kw.label == "__version_placeholder__" {
             (version_label.as_str(), Action::Noop, Some("running build"))
         } else {
@@ -338,7 +340,7 @@ fn install_rows(q_lower: &str, q: &str) -> Vec<StreamedResult> {
 /// loaded plugin whose name starts with the prefix. `reload` with an empty
 /// list of plugins still shows the "all plugins" affordance so the user can
 /// reload at any time.
-fn reload_rows(q_lower: &str, q: &str, plugin_names: &[String]) -> Vec<StreamedResult> {
+fn reload_rows(q_lower: &str, q: &str, plugin_names: &[&str]) -> Vec<StreamedResult> {
     let Some(rest) = strip_verb(q, RELOAD_VERB) else {
         return verb_only_row(
             q_lower,
@@ -365,7 +367,7 @@ fn reload_rows(q_lower: &str, q: &str, plugin_names: &[String]) -> Vec<StreamedR
             Some("re-evaluate this plugin in place"),
             90.0,
             Action::ReloadPlugin {
-                name: Some(name.clone()),
+                name: Some((*name).to_owned()),
             },
         ));
     }
@@ -720,8 +722,7 @@ mod tests {
 
     #[test]
     fn reload_with_no_arg_offers_all_plugins() {
-        let names = vec!["alpha".to_owned(), "beta".to_owned()];
-        let results = super::query("reload", &names);
+        let results = super::query("reload", &["alpha", "beta"]);
         let titles: Vec<_> = results.iter().map(|r| r.result.title.clone()).collect();
         assert!(titles.contains(&"Reload all plugins".to_owned()));
         assert!(titles.contains(&"Reload alpha".to_owned()));
@@ -730,8 +731,7 @@ mod tests {
 
     #[test]
     fn reload_with_prefix_filters_plugin_list() {
-        let names = vec!["alpha".to_owned(), "beta".to_owned()];
-        let results = super::query("reload al", &names);
+        let results = super::query("reload al", &["alpha", "beta"]);
         let titles: Vec<_> = results.iter().map(|r| r.result.title.clone()).collect();
         // "Reload all plugins" always shows; "Reload alpha" matches the
         // prefix; "Reload beta" does not.
@@ -742,8 +742,7 @@ mod tests {
 
     #[test]
     fn reload_single_carries_plugin_name_in_action() {
-        let names = vec!["echo".to_owned()];
-        let results = super::query("reload echo", &names);
+        let results = super::query("reload echo", &["echo"]);
         let echo = results
             .iter()
             .find(|r| r.result.title == "Reload echo")

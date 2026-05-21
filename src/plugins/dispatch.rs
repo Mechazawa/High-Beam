@@ -35,8 +35,10 @@ pub(crate) fn dispatch_streaming(
     cancel: &CancellationToken,
     tx: &mpsc::UnboundedSender<StreamedResult>,
 ) {
-    // Built-in Core emits synchronously, ahead of the JS pipeline.
-    let plugin_names: Vec<String> = plugins.iter().map(|p| p.manifest.name.clone()).collect();
+    // Built-in Core emits synchronously, ahead of the JS pipeline. Pass a
+    // borrow of the plugin name list rather than cloning N owned `String`s
+    // per keystroke — `core::query` only needs to read them.
+    let plugin_names: Vec<&str> = plugins.iter().map(|p| p.manifest.name.as_str()).collect();
     for result in crate::plugins::builtin::core::query(input, &plugin_names) {
         if tx.send(result).is_err() {
             return;

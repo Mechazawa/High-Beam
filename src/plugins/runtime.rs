@@ -335,6 +335,13 @@ impl LoadedPlugin {
 
 impl Drop for LoadedPlugin {
     fn drop(&mut self) {
+        // Invariant: `interrupt_flag` is owned by exactly one plugin
+        // generation. The registry serialises reloads (no parallel
+        // installs/reloads of the same plugin), so the Arc isn't shared
+        // with the next-generation `LoadedPlugin`, and clearing the flag
+        // here can never race with a fresh plugin's watchdog. If reloads
+        // ever go parallel, this reset must move into the constructor
+        // (where the new plugin owns a fresh AtomicBool) instead.
         self.interrupt_flag.store(false, Ordering::Relaxed);
     }
 }
