@@ -5,6 +5,12 @@
   "description": "Look up a word in macOS Dictionary.app — `define <word>` or `dict <word>`",
   "timeoutMs": 100,
   "memoryMb": 16,
-  "platforms": ["macos"],
-  "capabilities": ["actions"]
+  "platforms": [
+    "macos"
+  ],
+  "capabilities": [
+    "actions"
+  ],
+  "manifestUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/dictionary-macos/manifest.json",
+  "entryUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/dictionary-macos/plugin.js"
 }

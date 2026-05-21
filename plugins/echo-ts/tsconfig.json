@@ -6,7 +6,7 @@
         "strict": true,
         "noEmit": false,
         "paths": {
-            "highbeam:*": ["../../../sdk/highbeam/*"]
+            "highbeam:*": ["../../sdk/highbeam/*"]
         }
     },
     "include": ["plugin.ts"],

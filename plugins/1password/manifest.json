@@ -7,8 +7,16 @@
   "debounceMs": 150,
   "timeoutMs": 3000,
   "memoryMb": 32,
-  "platforms": ["macos", "linux"],
-  "capabilities": ["actions", "system.exec", "clipboard.write", "fs.cache"],
+  "platforms": [
+    "macos",
+    "linux"
+  ],
+  "capabilities": [
+    "actions",
+    "system.exec",
+    "clipboard.write",
+    "fs.cache"
+  ],
   "defaultEnabled": false,
   "options": [
     {
@@ -37,5 +45,7 @@
       "min": 0,
       "max": 600
     }
-  ]
+  ],
+  "manifestUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/1password/manifest.json",
+  "entryUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/1password/plugin.js"
 }

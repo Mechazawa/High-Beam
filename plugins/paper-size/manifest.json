@@ -5,5 +5,9 @@
   "description": "Look up paper size dimensions — type a paper size name like A4 or letter",
   "timeoutMs": 50,
   "memoryMb": 8,
-  "capabilities": ["actions"]
+  "capabilities": [
+    "actions"
+  ],
+  "manifestUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/paper-size/manifest.json",
+  "entryUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/paper-size/plugin.js"
 }

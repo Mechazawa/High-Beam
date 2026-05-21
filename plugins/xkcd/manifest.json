@@ -6,5 +6,11 @@
   "debounceMs": 200,
   "timeoutMs": 5000,
   "memoryMb": 32,
-  "capabilities": ["actions", "http", "fs.cache"]
+  "capabilities": [
+    "actions",
+    "http",
+    "fs.cache"
+  ],
+  "manifestUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/xkcd/manifest.json",
+  "entryUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/xkcd/plugin.js"
 }

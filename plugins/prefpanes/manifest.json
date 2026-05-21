@@ -6,6 +6,14 @@
   "debounceMs": 100,
   "timeoutMs": 600,
   "memoryMb": 32,
-  "platforms": ["macos"],
-  "capabilities": ["actions", "fs.read", "icons"]
+  "platforms": [
+    "macos"
+  ],
+  "capabilities": [
+    "actions",
+    "fs.read",
+    "icons"
+  ],
+  "manifestUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/prefpanes/manifest.json",
+  "entryUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/prefpanes/plugin.js"
 }

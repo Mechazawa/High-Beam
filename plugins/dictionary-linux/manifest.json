@@ -5,6 +5,13 @@
   "description": "Look up a word using WordNet or DICT — `define <word>`",
   "timeoutMs": 1500,
   "memoryMb": 32,
-  "platforms": ["linux"],
-  "capabilities": ["actions", "system.exec"]
+  "platforms": [
+    "linux"
+  ],
+  "capabilities": [
+    "actions",
+    "system.exec"
+  ],
+  "manifestUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/dictionary-linux/manifest.json",
+  "entryUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/dictionary-linux/plugin.js"
 }

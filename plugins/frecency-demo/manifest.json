@@ -6,5 +6,6 @@
   "entry": "plugin.js",
   "timeoutMs": 500,
   "memoryMb": 32,
-  "capabilities": ["actions"]
+  "capabilities": ["actions"],
+  "defaultEnabled": false
 }

@@ -6,8 +6,15 @@
   "debounceMs": 100,
   "timeoutMs": 2000,
   "memoryMb": 64,
-  "platforms": ["macos", "linux"],
-  "capabilities": ["actions", "fs.read", "fs.cache"],
+  "platforms": [
+    "macos",
+    "linux"
+  ],
+  "capabilities": [
+    "actions",
+    "fs.read",
+    "fs.cache"
+  ],
   "options": [
     {
       "key": "vault_path",
@@ -41,5 +48,7 @@
       "min": 0,
       "max": 600
     }
-  ]
+  ],
+  "manifestUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/obsidian/manifest.json",
+  "entryUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/obsidian/plugin.js"
 }

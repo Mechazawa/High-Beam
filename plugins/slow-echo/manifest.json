@@ -7,5 +7,6 @@
     "timeoutMs": 5000,
     "memoryMb": 32,
     "debounceMs": 0,
-    "capabilities": ["actions"]
+    "capabilities": ["actions"],
+    "defaultEnabled": false
 }

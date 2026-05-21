@@ -6,5 +6,9 @@
   "debounceMs": 50,
   "timeoutMs": 100,
   "memoryMb": 16,
-  "capabilities": ["actions"]
+  "capabilities": [
+    "actions"
+  ],
+  "manifestUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/web-search/manifest.json",
+  "entryUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/web-search/plugin.js"
 }

@@ -7,8 +7,16 @@
   "debounceMs": 50,
   "timeoutMs": 750,
   "memoryMb": 32,
-  "platforms": ["macos", "linux"],
-  "capabilities": ["actions", "clipboard.read", "clipboard.write", "fs.cache"],
+  "platforms": [
+    "macos",
+    "linux"
+  ],
+  "capabilities": [
+    "actions",
+    "clipboard.read",
+    "clipboard.write",
+    "fs.cache"
+  ],
   "options": [
     {
       "key": "keyword",
@@ -32,5 +40,7 @@
       "min": 64,
       "max": 1048576
     }
-  ]
+  ],
+  "manifestUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/clipboard-history/manifest.json",
+  "entryUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/clipboard-history/plugin.js"
 }

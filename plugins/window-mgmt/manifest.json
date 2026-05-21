@@ -1,10 +1,16 @@
 {
-    "name": "window-mgmt",
-    "displayName": "Window Management",
-    "version": "0.1.0",
-    "description": "Snap the frontmost window — `left half`, `maximize`, `center`, etc.",
-    "timeoutMs": 1000,
-    "memoryMb": 16,
-    "platforms": ["macos"],
-    "capabilities": ["actions"]
+  "name": "window-mgmt",
+  "displayName": "Window Management",
+  "version": "0.1.0",
+  "description": "Snap the frontmost window — `left half`, `maximize`, `center`, etc.",
+  "timeoutMs": 1000,
+  "memoryMb": 16,
+  "platforms": [
+    "macos"
+  ],
+  "capabilities": [
+    "actions"
+  ],
+  "manifestUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/window-mgmt/manifest.json",
+  "entryUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/window-mgmt/plugin.js"
 }

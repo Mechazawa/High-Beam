@@ -6,6 +6,16 @@
   "debounceMs": 100,
   "timeoutMs": 800,
   "memoryMb": 64,
-  "platforms": ["macos", "linux"],
-  "capabilities": ["actions", "fs.read", "icons", "system.exec"]
+  "platforms": [
+    "macos",
+    "linux"
+  ],
+  "capabilities": [
+    "actions",
+    "fs.read",
+    "icons",
+    "system.exec"
+  ],
+  "manifestUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/app-launcher/manifest.json",
+  "entryUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/app-launcher/plugin.js"
 }

@@ -6,6 +6,15 @@
   "debounceMs": 150,
   "timeoutMs": 1500,
   "memoryMb": 32,
-  "platforms": ["macos", "linux"],
-  "capabilities": ["actions", "icons", "system.exec"]
+  "platforms": [
+    "macos",
+    "linux"
+  ],
+  "capabilities": [
+    "actions",
+    "icons",
+    "system.exec"
+  ],
+  "manifestUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/file-search/manifest.json",
+  "entryUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/file-search/plugin.js"
 }
