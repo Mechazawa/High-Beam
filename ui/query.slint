@@ -163,6 +163,11 @@ export component QueryWindow inherits Window {
     callback set-option-string(string, string, string);
     callback set-option-bool(string, string, bool);
     callback set-option-int(string, string, int);
+    // Enum click cycles to the next choice — Rust needs to push the new
+    // value back to refresh the visual. Separate from `set-option-string`
+    // so text-input edits don't trigger the same write-back-to-the-
+    // property dance (which yanks TextInput focus on every keystroke).
+    callback cycle-option-enum(string, string);
     // Global-pane callbacks. `set-hotkey` fires on blur/commit of the hotkey
     // input; `select-global` flips the rail selection to the global entry.
     callback set-hotkey(string);
@@ -972,7 +977,7 @@ export component QueryWindow inherits Window {
                                         // CSV so we don't need a per-option model.
                                         TouchArea {
                                             clicked => {
-                                                root.set-option-string(opt.plugin-name, opt.key, opt.enum-choices);
+                                                root.cycle-option-enum(opt.plugin-name, opt.key);
                                             }
                                             Text {
                                                 x: 8px;

@@ -120,44 +120,45 @@ impl SettingsController {
             }
         });
 
+        // Per-keystroke edits intentionally skip `refresh_options` /
+        // `refresh_global`. Writing the new value back into the bound
+        // Slint property re-renders the TextInput and yanks focus out
+        // of it on every character. Persistence happens; on next
+        // settings-open the user sees the saved value.
         let ctrl = self.clone();
-        let weak = window.as_weak();
         window.on_set_option_string(move |plugin, key, value| {
             ctrl.set_option_for_kind(&plugin, &key, value.as_str());
-            if let Some(w) = weak.upgrade() {
-                ctrl.refresh_options(&w);
-            }
         });
 
         let ctrl = self.clone();
-        let weak = window.as_weak();
         window.on_set_option_bool(move |plugin, key, value| {
             ctrl.set_option(&plugin, key.as_str(), JsonValue::Bool(value));
-            if let Some(w) = weak.upgrade() {
-                ctrl.refresh_options(&w);
-            }
         });
 
         let ctrl = self.clone();
-        let weak = window.as_weak();
         window.on_set_option_int(move |plugin, key, value| {
             ctrl.set_option(
                 &plugin,
                 key.as_str(),
                 JsonValue::Number(i64::from(value).into()),
             );
+        });
+
+        // Enum cycling is a click, not a keystroke — refreshing the
+        // option model is what makes the new choice visible, and there's
+        // no TextInput focus to preserve.
+        let ctrl = self.clone();
+        let weak = window.as_weak();
+        window.on_cycle_option_enum(move |plugin, key| {
+            ctrl.set_option_for_kind(&plugin, &key, "");
             if let Some(w) = weak.upgrade() {
                 ctrl.refresh_options(&w);
             }
         });
 
         let ctrl = self.clone();
-        let weak = window.as_weak();
         window.on_set_hotkey(move |value| {
             ctrl.set_hotkey(value.as_str());
-            if let Some(w) = weak.upgrade() {
-                ctrl.refresh_global(&w);
-            }
         });
 
         let weak = window.as_weak();
