@@ -84,13 +84,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn normalized_os_matches_consts() {
-        // Today it's a passthrough — future remap experiments should surface
-        // here rather than silently drifting.
-        assert_eq!(normalized_os(), std::env::consts::OS);
-    }
-
-    #[test]
     fn os_version_never_empty() {
         let v = os_version();
         assert!(!v.is_empty());

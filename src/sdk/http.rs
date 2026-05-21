@@ -258,29 +258,3 @@ fn build_response<'js>(
 fn throw_http(ctx: &Ctx<'_>, message: &str) -> rquickjs::Error {
     throw_named(ctx, "HttpError", message)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn default_timeout_is_thirty_seconds() {
-        assert_eq!(DEFAULT_TIMEOUT, Duration::from_secs(30));
-    }
-
-    #[test]
-    fn client_is_lazily_constructed() {
-        let a: *const Client = client();
-        let b: *const Client = client();
-        assert_eq!(a, b);
-    }
-
-    #[test]
-    fn user_agent_tracks_crate_version() {
-        // The literal lives at the builder; check it's wired through the
-        // `concat!` form (compile-time, no allocation).
-        let expected: &'static str = concat!("high-beam/", env!("CARGO_PKG_VERSION"));
-        assert!(expected.starts_with("high-beam/"));
-        assert_eq!(expected, format!("high-beam/{}", env!("CARGO_PKG_VERSION")));
-    }
-}

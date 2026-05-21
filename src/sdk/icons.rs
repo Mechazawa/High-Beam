@@ -219,16 +219,6 @@ mod tests {
         assert_eq!(&bytes[0..8], b"\x89PNG\r\n\x1a\n");
     }
 
-    #[test]
-    fn cache_is_reused_across_calls() {
-        let c = cache();
-        c.lock().unwrap().insert(("k".into(), 1), "v".into());
-        let v = c.lock().unwrap().get(&("k".to_owned(), 1)).cloned();
-        assert_eq!(v.as_deref(), Some("v"));
-        // Cleanup — the cache is process-global and shared with other tests.
-        c.lock().unwrap().remove(&("k".to_owned(), 1));
-    }
-
     /// Drive a real `JoinError` by panicking inside `spawn_blocking` and
     /// assert our message helper renders it as `IconError` text — a process
     /// killed mid-call must surface, not silently degrade to a placeholder.

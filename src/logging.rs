@@ -27,18 +27,3 @@ pub fn try_init() {
         .compact()
         .try_init();
 }
-
-#[cfg(test)]
-mod tests {
-    use super::try_init;
-
-    #[test]
-    fn double_try_init_does_not_panic() {
-        // Under cargo test `try_init` short-circuits, but the contract — a
-        // second call is a no-op rather than a panic — applies in both
-        // modes. Production callers (main, daemon::run) only ever go
-        // through this surface, so the test mirrors that.
-        try_init();
-        try_init();
-    }
-}

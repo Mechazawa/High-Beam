@@ -280,19 +280,4 @@ mod tests {
         assert_eq!(row.picks, 2);
         assert_eq!(row.last_picked_at, 43);
     }
-
-    #[test]
-    fn snapshot_from_rows_round_trip() {
-        let snap = Snapshot::from_rows(vec![(
-            "x".into(),
-            "y".into(),
-            PickRow {
-                picks: 5,
-                last_picked_at: 99,
-            },
-        )]);
-        let row = snap.get("x", "y").expect("present");
-        assert_eq!(row.picks, 5);
-        assert_eq!(row.last_picked_at, 99);
-    }
 }

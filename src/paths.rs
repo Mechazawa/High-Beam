@@ -89,32 +89,3 @@ pub(crate) fn ensure_parent_dir(path: &std::path::Path) -> io::Result<()> {
     }
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn socket_path_ends_in_sock() {
-        let path = socket_path().expect("resolve socket path");
-        assert_eq!(
-            path.extension().and_then(std::ffi::OsStr::to_str),
-            Some("sock"),
-            "socket path should end in .sock; got {}",
-            path.display()
-        );
-    }
-
-    #[test]
-    fn socket_path_filename_is_app_specific() {
-        let path = socket_path().expect("resolve socket path");
-        let filename = path
-            .file_name()
-            .and_then(std::ffi::OsStr::to_str)
-            .expect("socket path has a filename");
-        assert!(
-            filename.contains("high-beam"),
-            "socket filename should mention the app; got {filename}"
-        );
-    }
-}

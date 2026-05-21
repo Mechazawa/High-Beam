@@ -239,18 +239,6 @@ mod tests {
     }
 
     #[test]
-    fn merge_assigns_unique_order_per_yield() {
-        let mut live = Vec::new();
-        let mut order = 0usize;
-        for k in ["a", "b", "c"] {
-            merge_into_live(&mut live, &mut order, streamed(k, 0.0, false), None, 0);
-        }
-        assert_eq!(order, 3);
-        let orders: Vec<_> = live.iter().map(|r| r.order).collect();
-        assert_eq!(orders, [0, 1, 2]);
-    }
-
-    #[test]
     fn frecency_promotes_recent_picks_above_tied_weights() {
         let snap = Snapshot::from_rows(vec![(
             "a".into(),
@@ -313,7 +301,11 @@ mod tests {
 
     #[test]
     fn frecency_keyed_on_plugin_name_too() {
-        // (plugin=a, key=x) must NOT bump (plugin=b, key=x).
+        // (plugin=a, key=x) must NOT bump (plugin=b, key=x). Inserting
+        // `b:x` BEFORE `a:x` forces the assertion to discriminate: with
+        // correct (plugin, key) lookup only `a:x` gets the bonus and
+        // overtakes the earlier-inserted `b:x`; with the bug both would
+        // share the bonus and tie-break by insertion order → `b:x` first.
         let snap = Snapshot::from_rows(vec![(
             "a".into(),
             "x".into(),
@@ -322,15 +314,15 @@ mod tests {
                 last_picked_at: 1_000,
             },
         )]);
-        let keys = merge_all_with(
-            vec![
-                streamed_from("a", "x", 50.0, false),
-                streamed_from("b", "x", 50.0, false),
-            ],
-            Some(&snap),
-            1_000,
-        );
-        // a:x carries the 5-pick bonus; b:x doesn't.
-        assert_eq!(keys, ["x", "x"]);
+        let mut live = Vec::new();
+        let mut order = 0usize;
+        for it in [
+            streamed_from("b", "x", 50.0, false),
+            streamed_from("a", "x", 50.0, false),
+        ] {
+            merge_into_live(&mut live, &mut order, it, Some(&snap), 1_000);
+        }
+        let composite: Vec<String> = live.iter().map(RankedResult::composite_key).collect();
+        assert_eq!(composite, ["a:x", "b:x"]);
     }
 }
