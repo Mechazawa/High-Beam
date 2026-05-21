@@ -52,12 +52,30 @@ pub struct GlobalSettings {
     /// (e.g. `"Shift+Space"`, `"Cmd+K"`). Validated at daemon start; a
     /// malformed value never blocks launch — see `daemon::parse_or_default`.
     pub hotkey: String,
+    /// Last user-positioned launcher window origin in physical pixels.
+    /// `None` means "no saved position" — the host falls back to the
+    /// centered default. Using `Option` rather than e.g. `(0, 0)` avoids
+    /// the ambiguity of "did the user actually drop the window at (0, 0)
+    /// or have they never moved it?".
+    pub launcher_position: Option<WindowPosition>,
+}
+
+/// Saved outer-position of the launcher window, in physical pixels relative
+/// to the virtual desktop origin (top-left of the primary display on
+/// macOS/Windows; varies by WM on X11/Wayland). Stored as `i32` because
+/// winit's `set_outer_position` takes `i32` directly and negative values
+/// are valid for windows on a secondary display placed left/above primary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WindowPosition {
+    pub x: i32,
+    pub y: i32,
 }
 
 impl Default for GlobalSettings {
     fn default() -> Self {
         Self {
             hotkey: DEFAULT_HOTKEY.to_owned(),
+            launcher_position: None,
         }
     }
 }
@@ -157,11 +175,14 @@ impl Settings {
                 (name, plugin)
             })
             .collect();
-        let global = GlobalSettings {
-            hotkey: raw
-                .global
-                .and_then(|g| g.hotkey)
-                .unwrap_or_else(|| DEFAULT_HOTKEY.to_owned()),
+        let global = {
+            let raw_global = raw.global.unwrap_or_default();
+            GlobalSettings {
+                hotkey: raw_global
+                    .hotkey
+                    .unwrap_or_else(|| DEFAULT_HOTKEY.to_owned()),
+                launcher_position: raw_global.launcher_position,
+            }
         };
         Ok(Self {
             path: None,
@@ -201,12 +222,16 @@ impl Settings {
             })
             .collect();
         // Skip the `[global]` section when it matches defaults so a
-        // freshly-installed settings file stays minimal.
+        // freshly-installed settings file stays minimal. Both fields write
+        // through unconditionally once we emit the section — `hotkey` so
+        // the user sees the active value on disk, `launcher_position` so
+        // a remembered drag round-trips.
         let global = if self.global == GlobalSettings::default() {
             None
         } else {
             Some(GlobalFile {
                 hotkey: Some(self.global.hotkey.clone()),
+                launcher_position: self.global.launcher_position,
             })
         };
         let file = SettingsFile { global, plugins };
@@ -311,6 +336,18 @@ impl Settings {
     pub fn set_hotkey(&mut self, hotkey: &str) {
         hotkey.trim().clone_into(&mut self.global.hotkey);
     }
+
+    /// Record the launcher window's last user-chosen origin. Overwrites any
+    /// previous saved position — the user's most recent drag is always the
+    /// one we want to restore.
+    pub fn set_launcher_position(&mut self, position: WindowPosition) {
+        self.global.launcher_position = Some(position);
+    }
+
+    /// Forget the saved launcher position so the next show recenters.
+    pub fn clear_launcher_position(&mut self) {
+        self.global.launcher_position = None;
+    }
 }
 
 /// The TOML wire shape. Keep optional everywhere so partial files
@@ -327,6 +364,8 @@ struct SettingsFile {
 struct GlobalFile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     hotkey: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    launcher_position: Option<WindowPosition>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -584,6 +623,87 @@ mod tests {
         let mut s = Settings::default();
         s.set_hotkey("  Shift+F1  ");
         assert_eq!(s.global().hotkey, "Shift+F1");
+    }
+
+    #[test]
+    fn launcher_position_defaults_to_none() {
+        // Pristine settings and an empty `[global]` block both yield None so
+        // the host falls back to the centered default.
+        let s = Settings::default();
+        assert!(s.global().launcher_position.is_none());
+
+        let s = Settings::from_toml("[global]\n").expect("parse");
+        assert!(s.global().launcher_position.is_none());
+
+        let s = Settings::from_toml("[global]\nhotkey = \"Cmd+K\"\n").expect("parse");
+        assert!(s.global().launcher_position.is_none());
+    }
+
+    #[test]
+    fn launcher_position_parses_from_toml() {
+        let text = "\
+            [global]\n\
+            [global.launcher_position]\n\
+            x = 320\n\
+            y = 180\n\
+        ";
+        let s = Settings::from_toml(text).expect("parse");
+        assert_eq!(
+            s.global().launcher_position,
+            Some(WindowPosition { x: 320, y: 180 })
+        );
+    }
+
+    #[test]
+    fn launcher_position_roundtrips_through_toml() {
+        let mut s = Settings::default();
+        s.set_launcher_position(WindowPosition { x: -42, y: 17 });
+        let text = s.to_toml();
+        assert!(
+            text.contains("[global.launcher_position]"),
+            "expected launcher_position table in TOML, got: {text}"
+        );
+        let reloaded = Settings::from_toml(&text).expect("reparse");
+        assert_eq!(
+            reloaded.global().launcher_position,
+            Some(WindowPosition { x: -42, y: 17 })
+        );
+    }
+
+    #[test]
+    fn set_then_clear_launcher_position_round_trips_disk() {
+        let dir = fresh_tmp("launcher-pos");
+        let path = dir.join("settings.toml");
+
+        let mut s = Settings::load_from(&path);
+        s.set_launcher_position(WindowPosition { x: 100, y: 200 });
+        s.save().expect("save");
+
+        let mut reloaded = Settings::load_from(&path);
+        assert_eq!(
+            reloaded.global().launcher_position,
+            Some(WindowPosition { x: 100, y: 200 })
+        );
+
+        reloaded.clear_launcher_position();
+        reloaded.save().expect("save");
+        let again = Settings::load_from(&path);
+        assert!(again.global().launcher_position.is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn default_settings_still_omit_global_section_with_position_field() {
+        // Guard against the new `launcher_position` field flipping the
+        // "default settings have no [global] block" invariant — the file
+        // stays minimal when nothing's been customised.
+        let s = Settings::default();
+        let text = s.to_toml();
+        assert!(
+            !text.contains("[global"),
+            "default settings should not write [global*]: {text}"
+        );
     }
 
     #[test]
