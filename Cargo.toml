@@ -125,6 +125,25 @@ window-size = { width = 660, height = 400 }
 app-position = { x = 180, y = 170 }
 application-folder-position = { x = 480, y = 170 }
 
+# Release-profile knobs for the bundled binary. The launcher is mostly idle
+# between keystrokes, so single-digit-ms wins from cross-crate optimisation
+# add up over a session of hundreds of queries.
+#
+# * `lto = "fat"` + `codegen-units = 1` — give LLVM the whole program for
+#   inlining; pays ~3–5 min compile time per release for ~10–15% smaller
+#   binary + measurable hot-path speedup.
+# * `strip = true` — strip debug symbols from the shipped binary. Halves
+#   the .app payload; symbols stay in `target/release/deps/*.dSYM` so
+#   stack traces from a crash report can still be resolved locally.
+# * `panic` is deliberately left at the default `unwind` — a panicking
+#   plugin task (icon extractor, archive extractor, etc.) must surface as
+#   a `JoinError` the dispatcher can recover from, not take the daemon
+#   down. `panic = "abort"` would silently regress that.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true
+
 [dependencies]
 # `unstable-winit-030` exposes focus/blur events and the underlying winit
 # window so we can set native properties .slint can't express.

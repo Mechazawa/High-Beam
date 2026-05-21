@@ -194,8 +194,8 @@ async fn load_one(plugin_dir: &Path, settings: &Settings) -> Result<LoadedPlugin
         log.write(LogLevel::Warn, &warning);
     }
 
-    for warning in manifest.parsed_options().warnings {
-        log.write(LogLevel::Warn, &warning);
+    for warning in &manifest.parsed_options().warnings {
+        log.write(LogLevel::Warn, warning);
     }
 
     for cap in &manifest.capabilities {

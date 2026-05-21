@@ -138,16 +138,14 @@ pub(crate) fn hide(window: &QueryWindow) {
 pub(crate) fn hide_and_persist_position(window: &QueryWindow, settings: &SettingsController) {
     if let Some(pos) = capture_outer_position(window) {
         let settings = settings.clone();
-        // Spawn-and-forget. The thread name + `.ok()` mirror the frecency
-        // bump in `app::spawn_pick_bump` — a failed spawn is logged
-        // implicitly via the `Result` and not surfaced because the user's
-        // close action can't reasonably wait for our settings I/O.
-        thread::Builder::new()
+        if let Err(err) = thread::Builder::new()
             .name("highbeam-settings-position".into())
             .spawn(move || {
                 settings.set_launcher_position(pos);
             })
-            .ok();
+        {
+            tracing::warn!(%err, "settings: position-persist thread spawn failed");
+        }
     }
     hide(window);
 }

@@ -98,10 +98,17 @@ pub struct RankedResult {
 }
 
 impl RankedResult {
-    /// `<plugin>:<result_key>` — used by the UI as a row id.
+    /// `<plugin>:<result_key>` — used by the UI as a row id. Hot enough
+    /// (one call per visible row per render) that we hand-roll the
+    /// concatenation with an exact-capacity allocation instead of going
+    /// through `format!`'s formatter machinery.
     #[must_use]
     pub fn composite_key(&self) -> String {
-        format!("{}:{}", self.plugin_name, self.result.key)
+        let mut out = String::with_capacity(self.plugin_name.len() + 1 + self.result.key.len());
+        out.push_str(&self.plugin_name);
+        out.push(':');
+        out.push_str(&self.result.key);
+        out
     }
 }
 

@@ -86,12 +86,11 @@ impl PluginRegistry {
         name: &str,
         settings: &Settings,
     ) -> Result<Arc<LoadedPlugin>, ReloadError> {
-        let needle = name.to_ascii_lowercase();
         let (idx, plugin_dir) = {
             let guard = self.inner.plugins.read().await;
             let pos = guard
                 .iter()
-                .position(|p| p.manifest.name.eq_ignore_ascii_case(&needle))
+                .position(|p| p.manifest.name.eq_ignore_ascii_case(name))
                 .ok_or_else(|| ReloadError::NotFound(name.to_owned()))?;
             (pos, guard[pos].plugin_dir.clone())
         };

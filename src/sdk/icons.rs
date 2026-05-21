@@ -76,16 +76,25 @@ pub fn install<'js>(ctx: &Ctx<'js>, can_icons: bool) -> JsResult<()> {
     Ok(())
 }
 
-fn cache() -> &'static Mutex<HashMap<(String, u32), String>> {
-    static CACHE: std::sync::OnceLock<Mutex<HashMap<(String, u32), String>>> =
+/// Two-level so a cache hit doesn't have to allocate a `String` just to
+/// build the composite probe key — the outer map keys on `String` and
+/// lookups borrow as `&str` directly. Inner map is keyed on the size,
+/// which is already a small `Copy` integer.
+fn cache() -> &'static Mutex<HashMap<String, HashMap<u32, String>>> {
+    static CACHE: std::sync::OnceLock<Mutex<HashMap<String, HashMap<u32, String>>>> =
         std::sync::OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 async fn resolve_icon(ctx: &Ctx<'_>, path: &str, size: u32) -> JsResult<String> {
-    let key = (path.to_owned(), size);
-    if let Some(hit) = cache().lock().expect("icon cache mutex").get(&key) {
-        return Ok(hit.clone());
+    if let Some(hit) = cache()
+        .lock()
+        .expect("icon cache mutex")
+        .get(path)
+        .and_then(|by_size| by_size.get(&size))
+        .cloned()
+    {
+        return Ok(hit);
     }
     let path_owned = path.to_owned();
     // A JoinError here means the blocking task panicked or was cancelled —
@@ -101,7 +110,9 @@ async fn resolve_icon(ctx: &Ctx<'_>, path: &str, size: u32) -> JsResult<String> 
     cache()
         .lock()
         .expect("icon cache mutex")
-        .insert(key, data_uri.clone());
+        .entry(path.to_owned())
+        .or_default()
+        .insert(size, data_uri.clone());
     Ok(data_uri)
 }
 

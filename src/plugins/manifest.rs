@@ -4,6 +4,7 @@
 //! land without breaking older plugins.
 
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
@@ -67,6 +68,11 @@ pub struct Manifest {
     /// installer backfills this field with the URL the user ran against.
     #[serde(default)]
     pub manifest_url: Option<String>,
+    /// Memoised result of [`Self::parsed_options`]. Settings callbacks call
+    /// `parsed_options` once per option-set event, and re-running the
+    /// JSON-shape validation each time is wasted work.
+    #[serde(skip, default)]
+    parsed_options_cache: OnceLock<ParsedOptions>,
 }
 
 /// One option a plugin author declared in `manifest.json` and the settings
@@ -249,18 +255,20 @@ impl Manifest {
     /// shipping a typo in `manifest.json` still gets their plugin loaded,
     /// just without the offending option.
     #[must_use]
-    pub fn parsed_options(&self) -> ParsedOptions {
-        let mut defs = Vec::new();
-        let mut warnings = Vec::new();
-        for (idx, raw) in self.options.iter().enumerate() {
-            match parse_option(raw) {
-                Ok(def) => defs.push(def),
-                Err(reason) => {
-                    warnings.push(format!("options[{idx}]: {reason}"));
+    pub fn parsed_options(&self) -> &ParsedOptions {
+        self.parsed_options_cache.get_or_init(|| {
+            let mut defs = Vec::new();
+            let mut warnings = Vec::new();
+            for (idx, raw) in self.options.iter().enumerate() {
+                match parse_option(raw) {
+                    Ok(def) => defs.push(def),
+                    Err(reason) => {
+                        warnings.push(format!("options[{idx}]: {reason}"));
+                    }
                 }
             }
-        }
-        ParsedOptions { defs, warnings }
+            ParsedOptions { defs, warnings }
+        })
     }
 
     /// Diagnostic strings the loader should record for this manifest, one per

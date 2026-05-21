@@ -333,6 +333,10 @@ fn handle_query(
     let cancel = CancellationToken::new();
 
     let weak_reset = weak.clone();
+    // `invoke_from_event_loop` only returns Err once the event loop has
+    // exited — i.e. the daemon is shutting down. At that point dropping the
+    // UI update is exactly what we want, so the Err arm is silently
+    // discarded here and at every other call site in this module.
     let _ = slint::invoke_from_event_loop(move || {
         if let Some(w) = weak_reset.upgrade() {
             w.set_results(ModelRc::new(VecModel::from(Vec::<ResultRow>::new())));

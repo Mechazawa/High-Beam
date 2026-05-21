@@ -232,7 +232,7 @@ impl SettingsController {
             window.set_plugin_options(ModelRc::new(VecModel::from(Vec::<PluginOption>::new())));
             return;
         };
-        let defs = manifest.parsed_options().defs;
+        let defs = &manifest.parsed_options().defs;
         let settings = self.inner.settings.lock().expect("settings lock");
         let user_opts = settings.plugin_options(&manifest.name);
         let options: Vec<PluginOption> = defs
@@ -269,20 +269,15 @@ impl SettingsController {
         let Some(manifest) = self.inner.manifests.iter().find(|m| m.name == plugin) else {
             return;
         };
-        let Some(def) = manifest
-            .parsed_options()
-            .defs
-            .into_iter()
-            .find(|d| d.key == key)
-        else {
+        let Some(def) = manifest.parsed_options().defs.iter().find(|d| d.key == key) else {
             return;
         };
-        let value = match def.kind {
+        let value = match &def.kind {
             OptionKind::Int { min, max, .. } => {
                 let Ok(parsed) = raw.trim().parse::<i64>() else {
                     return;
                 };
-                let clamped = clamp_int(parsed, min, max);
+                let clamped = clamp_int(parsed, *min, *max);
                 JsonValue::Number(clamped.into())
             }
             // For enums, the Slint-side cycles by re-emitting the CSV of
@@ -294,9 +289,9 @@ impl SettingsController {
                         .plugin_options(plugin)
                         .get(key)
                         .and_then(|v| v.as_str().map(str::to_owned))
-                        .unwrap_or(default)
+                        .unwrap_or_else(|| default.clone())
                 };
-                let next = next_choice(&current, &choices);
+                let next = next_choice(&current, choices);
                 JsonValue::String(next)
             }
             // Bool flows through `set_option_bool` in practice; if Slint
