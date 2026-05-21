@@ -5,6 +5,7 @@
 pub mod actions;
 pub mod builtin;
 pub mod dispatch;
+pub mod install;
 pub mod loader;
 pub mod log;
 pub mod manifest;
