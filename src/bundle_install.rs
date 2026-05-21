@@ -83,8 +83,20 @@ fn user_plugins_dir() -> Option<PathBuf> {
 /// we return `None`.
 fn bundled_plugins_dir() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
-    let resources = exe.parent()?.parent()?.join("Resources");
-    let candidate = resources.join("plugins");
+    // macOS `.app`: exe at Contents/MacOS/high-beam, plugins at
+    // Contents/Resources/plugins.
+    // Linux: exe at <prefix>/bin/highbeam, plugins at
+    // <prefix>/share/highbeam/plugins (works for /usr, /usr/local, ~/.local,
+    // and any tarball-relocated PREFIX).
+    #[cfg(target_os = "macos")]
+    let candidate = exe.parent()?.parent()?.join("Resources").join("plugins");
+    #[cfg(not(target_os = "macos"))]
+    let candidate = exe
+        .parent()?
+        .parent()?
+        .join("share")
+        .join("highbeam")
+        .join("plugins");
     candidate.is_dir().then_some(candidate)
 }
 
