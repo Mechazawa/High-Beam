@@ -15,12 +15,28 @@ use crate::plugins::result::Action;
 /// `HideWindow` is the default — invoking the row's action removes the
 /// reason the launcher is on screen, so we close it. `KeepOpen` is for
 /// in-window navigation actions like `OpenSettings`, which switch views
-/// rather than dismissing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// rather than dismissing. `HostTask` is the install/update/reload path —
+/// the action couldn't be executed inline because it needs the tokio
+/// runtime; the caller forwards the task to the runtime thread instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ActionOutcome {
     HideWindow,
     KeepOpen,
     OpenSettingsView,
+    HostTask(HostTask),
+}
+
+/// Host-side maintenance tasks the runtime thread executes off the back of
+/// pressing Enter on a Core verb row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HostTask {
+    /// `None` ⇒ reload every plugin; `Some(name)` ⇒ reload just that one.
+    Reload { name: Option<String> },
+    /// Install a plugin from the given manifest URL.
+    Install { url: String },
+    /// Iterate every plugin with a `manifestUrl` and install any newer
+    /// remote version.
+    UpdateAll,
 }
 
 /// Execute an action.
@@ -55,6 +71,13 @@ pub fn execute(action: &Action) -> Result<ActionOutcome, Box<dyn Error>> {
             std::process::exit(0);
         }
         Action::OpenSettings => Ok(ActionOutcome::OpenSettingsView),
+        Action::ReloadPlugin { name } => Ok(ActionOutcome::HostTask(HostTask::Reload {
+            name: name.clone(),
+        })),
+        Action::InstallPlugin { url } => Ok(ActionOutcome::HostTask(HostTask::Install {
+            url: url.clone(),
+        })),
+        Action::UpdatePlugins => Ok(ActionOutcome::HostTask(HostTask::UpdateAll)),
         // Noop preserved the pre-outcome behaviour of hiding the window —
         // the launcher closes after Enter, even on a `Noop` row like the
         // version readout, because the user explicitly chose to act.
@@ -97,5 +120,48 @@ mod tests {
     fn noop_still_hides_window_to_match_prior_behaviour() {
         let outcome = execute(&Action::Noop).expect("execute");
         assert_eq!(outcome, ActionOutcome::HideWindow);
+    }
+
+    #[test]
+    fn reload_action_yields_host_task() {
+        let outcome = execute(&Action::ReloadPlugin {
+            name: Some("echo".into()),
+        })
+        .expect("execute");
+        assert_eq!(
+            outcome,
+            ActionOutcome::HostTask(HostTask::Reload {
+                name: Some("echo".into())
+            })
+        );
+    }
+
+    #[test]
+    fn reload_all_action_yields_host_task() {
+        let outcome = execute(&Action::ReloadPlugin { name: None }).expect("execute");
+        assert_eq!(
+            outcome,
+            ActionOutcome::HostTask(HostTask::Reload { name: None })
+        );
+    }
+
+    #[test]
+    fn install_action_yields_host_task() {
+        let outcome = execute(&Action::InstallPlugin {
+            url: "https://example.com/m.json".into(),
+        })
+        .expect("execute");
+        assert_eq!(
+            outcome,
+            ActionOutcome::HostTask(HostTask::Install {
+                url: "https://example.com/m.json".into()
+            })
+        );
+    }
+
+    #[test]
+    fn update_action_yields_host_task() {
+        let outcome = execute(&Action::UpdatePlugins).expect("execute");
+        assert_eq!(outcome, ActionOutcome::HostTask(HostTask::UpdateAll));
     }
 }

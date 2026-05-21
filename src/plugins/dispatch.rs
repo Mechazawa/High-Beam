@@ -36,7 +36,8 @@ pub(crate) fn dispatch_streaming(
     tx: &mpsc::UnboundedSender<StreamedResult>,
 ) {
     // Built-in Core emits synchronously, ahead of the JS pipeline.
-    for result in crate::plugins::builtin::core::query(input) {
+    let plugin_names: Vec<String> = plugins.iter().map(|p| p.manifest.name.clone()).collect();
+    for result in crate::plugins::builtin::core::query(input, &plugin_names) {
         if tx.send(result).is_err() {
             return;
         }

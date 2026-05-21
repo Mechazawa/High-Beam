@@ -11,6 +11,14 @@ pub const NAME: &str = "core";
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Verb the user types to install a plugin from a manifest URL.
+const INSTALL_VERB: &str = "install";
+/// Verb the user types to reload one or every loaded plugin.
+const RELOAD_VERB: &str = "reload";
+/// Verb the user types to check every loaded plugin against its remote
+/// manifest and re-install any with a newer version.
+const UPDATE_VERB: &str = "update";
+
 struct Keyword {
     label: &'static str,
     subtitle: Option<&'static str>,
@@ -267,7 +275,7 @@ fn empty_trash_action() -> Action {
 }
 
 #[must_use]
-pub(crate) fn query(input: &str) -> Vec<StreamedResult> {
+pub(crate) fn query(input: &str, plugin_names: &[String]) -> Vec<StreamedResult> {
     let q = input.trim();
     if q.is_empty() {
         return Vec::new();
@@ -297,7 +305,141 @@ pub(crate) fn query(input: &str) -> Vec<StreamedResult> {
             });
         }
     }
+
+    out.extend(install_rows(&q_lower, q));
+    out.extend(reload_rows(&q_lower, q, plugin_names));
+    out.extend(update_rows(&q_lower));
     out
+}
+
+/// `install <url>` — one row, only when the verb prefix matches and an
+/// argument is present. The row's action carries the verbatim URL; the
+/// installer validates scheme/format later.
+fn install_rows(q_lower: &str, q: &str) -> Vec<StreamedResult> {
+    let Some(rest) = strip_verb(q, INSTALL_VERB) else {
+        return verb_only_row(q_lower, INSTALL_VERB, "type a manifest URL after `install`");
+    };
+    let trimmed = rest.trim();
+    if trimmed.is_empty() {
+        return verb_only_row(q_lower, INSTALL_VERB, "type a manifest URL after `install`");
+    }
+    vec![row(
+        "install".to_owned(),
+        format!("install {trimmed}"),
+        Some("download + install plugin"),
+        100.0,
+        Action::InstallPlugin {
+            url: trimmed.to_owned(),
+        },
+    )]
+}
+
+/// `reload` (no arg) → "Reload all plugins". `reload <prefix>` → one row per
+/// loaded plugin whose name starts with the prefix. `reload` with an empty
+/// list of plugins still shows the "all plugins" affordance so the user can
+/// reload at any time.
+fn reload_rows(q_lower: &str, q: &str, plugin_names: &[String]) -> Vec<StreamedResult> {
+    let Some(rest) = strip_verb(q, RELOAD_VERB) else {
+        return verb_only_row(
+            q_lower,
+            RELOAD_VERB,
+            "reload one plugin (type a name after `reload`) or all",
+        );
+    };
+    let trimmed = rest.trim();
+    let mut rows = vec![row(
+        "reload-all".to_owned(),
+        "Reload all plugins".to_owned(),
+        Some("re-scan the plugin directory + re-evaluate every plugin"),
+        100.0,
+        Action::ReloadPlugin { name: None },
+    )];
+    let target = trimmed.to_ascii_lowercase();
+    for name in plugin_names {
+        if !target.is_empty() && !name.to_ascii_lowercase().starts_with(&target) {
+            continue;
+        }
+        rows.push(row(
+            format!("reload-{name}"),
+            format!("Reload {name}"),
+            Some("re-evaluate this plugin in place"),
+            90.0,
+            Action::ReloadPlugin {
+                name: Some(name.clone()),
+            },
+        ));
+    }
+    rows
+}
+
+/// `update` — single row; pressing Enter iterates every plugin with a
+/// `manifestUrl` and reports per-plugin progress.
+fn update_rows(q_lower: &str) -> Vec<StreamedResult> {
+    if !UPDATE_VERB.starts_with(q_lower) {
+        return Vec::new();
+    }
+    #[allow(clippy::cast_precision_loss)]
+    let weight = ((q_lower.len() as f64) / UPDATE_VERB.len() as f64 * 100.0).min(100.0);
+    vec![row(
+        "update".to_owned(),
+        "Update plugins".to_owned(),
+        Some("check every plugin's manifestUrl and install any newer version"),
+        weight,
+        Action::UpdatePlugins,
+    )]
+}
+
+/// Strip a leading verb token off the trimmed input. Returns the remainder
+/// (including the leading separator whitespace) iff the verb matched at the
+/// start, case-insensitive.
+fn strip_verb<'a>(input: &'a str, verb: &str) -> Option<&'a str> {
+    let lower = input.to_ascii_lowercase();
+    if lower == verb {
+        return Some("");
+    }
+    if let Some(rest) = lower.strip_prefix(verb)
+        && rest.starts_with(char::is_whitespace)
+    {
+        // Index off the original to preserve the user's casing in `rest`.
+        return Some(&input[verb.len()..]);
+    }
+    None
+}
+
+/// Row shown for a verb the user is mid-typing — the action is `Noop` so
+/// pressing Enter on the placeholder does nothing destructive.
+fn verb_only_row(q_lower: &str, verb: &str, subtitle: &str) -> Vec<StreamedResult> {
+    let Some(weight) = match_weight(q_lower, verb) else {
+        return Vec::new();
+    };
+    vec![row(
+        verb.to_owned(),
+        verb.to_owned(),
+        Some(subtitle),
+        weight,
+        Action::Noop,
+    )]
+}
+
+fn row(
+    key: String,
+    title: String,
+    subtitle: Option<&str>,
+    weight: f64,
+    action: Action,
+) -> StreamedResult {
+    StreamedResult {
+        plugin_name: NAME.to_owned(),
+        result: PluginResult {
+            key,
+            title,
+            subtitle: subtitle.map(str::to_owned),
+            icon: None,
+            weight,
+            pinned: false,
+            action,
+        },
+    }
 }
 
 fn match_weight(query_lower: &str, label: &str) -> Option<f64> {
@@ -314,6 +456,12 @@ fn match_weight(query_lower: &str, label: &str) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Most existing test cases don't care about the plugin list; this
+    /// shim keeps them call-site clean.
+    fn query(input: &str) -> Vec<StreamedResult> {
+        super::query(input, &[])
+    }
 
     #[test]
     fn empty_query_yields_nothing() {
@@ -568,5 +716,103 @@ mod tests {
             results.iter().all(|r| r.result.title != "eject"),
             "eject should not appear on Linux, got {results:?}"
         );
+    }
+
+    #[test]
+    fn reload_with_no_arg_offers_all_plugins() {
+        let names = vec!["alpha".to_owned(), "beta".to_owned()];
+        let results = super::query("reload", &names);
+        let titles: Vec<_> = results.iter().map(|r| r.result.title.clone()).collect();
+        assert!(titles.contains(&"Reload all plugins".to_owned()));
+        assert!(titles.contains(&"Reload alpha".to_owned()));
+        assert!(titles.contains(&"Reload beta".to_owned()));
+    }
+
+    #[test]
+    fn reload_with_prefix_filters_plugin_list() {
+        let names = vec!["alpha".to_owned(), "beta".to_owned()];
+        let results = super::query("reload al", &names);
+        let titles: Vec<_> = results.iter().map(|r| r.result.title.clone()).collect();
+        // "Reload all plugins" always shows; "Reload alpha" matches the
+        // prefix; "Reload beta" does not.
+        assert!(titles.contains(&"Reload all plugins".to_owned()));
+        assert!(titles.contains(&"Reload alpha".to_owned()));
+        assert!(!titles.contains(&"Reload beta".to_owned()));
+    }
+
+    #[test]
+    fn reload_single_carries_plugin_name_in_action() {
+        let names = vec!["echo".to_owned()];
+        let results = super::query("reload echo", &names);
+        let echo = results
+            .iter()
+            .find(|r| r.result.title == "Reload echo")
+            .expect("Reload echo row");
+        match &echo.result.action {
+            Action::ReloadPlugin { name } => assert_eq!(name.as_deref(), Some("echo")),
+            other => panic!("expected ReloadPlugin, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reload_all_action_has_none_name() {
+        let results = super::query("reload", &[]);
+        let all = results
+            .iter()
+            .find(|r| r.result.title == "Reload all plugins")
+            .expect("Reload all row");
+        assert!(matches!(
+            all.result.action,
+            Action::ReloadPlugin { name: None }
+        ));
+    }
+
+    #[test]
+    fn install_with_url_produces_install_action() {
+        let results = super::query("install https://example.com/p/manifest.json", &[]);
+        let row = results
+            .iter()
+            .find(|r| r.result.title.starts_with("install https://"))
+            .expect("install row");
+        match &row.result.action {
+            Action::InstallPlugin { url } => {
+                assert_eq!(url, "https://example.com/p/manifest.json");
+            }
+            other => panic!("expected InstallPlugin, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn install_without_url_only_shows_hint_row() {
+        let results = super::query("install", &[]);
+        // No InstallPlugin action emitted when the URL is missing.
+        assert!(
+            !results
+                .iter()
+                .any(|r| matches!(r.result.action, Action::InstallPlugin { .. })),
+            "install without URL must not produce an InstallPlugin action",
+        );
+        // The hint row sits there with a Noop so accidental Enter is harmless.
+        let hint = results
+            .iter()
+            .find(|r| r.result.title == "install")
+            .expect("install hint row");
+        assert!(matches!(hint.result.action, Action::Noop));
+    }
+
+    #[test]
+    fn update_verb_produces_update_action() {
+        let results = super::query("update", &[]);
+        let row = results
+            .iter()
+            .find(|r| r.result.title == "Update plugins")
+            .expect("update row");
+        assert!(matches!(row.result.action, Action::UpdatePlugins));
+    }
+
+    #[test]
+    fn update_verb_matches_prefix() {
+        let results = super::query("upd", &[]);
+        assert!(results.iter().any(|r| r.result.title == "Update plugins"));
     }
 }

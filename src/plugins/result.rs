@@ -64,6 +64,23 @@ pub enum Action {
     /// module deliberately doesn't expose a builder for it.
     #[serde(rename = "openSettings")]
     OpenSettings,
+    /// Reload a plugin (or all plugins) without restarting the daemon.
+    /// Host-only — produced by the Core `reload` verb.
+    #[serde(rename = "reloadPlugin")]
+    ReloadPlugin {
+        /// `None` ⇒ reload every plugin; `Some(name)` ⇒ reload just that one.
+        #[serde(default)]
+        name: Option<String>,
+    },
+    /// Install a plugin from a manifest URL. Host-only — produced by the
+    /// Core `install <url>` verb.
+    #[serde(rename = "installPlugin")]
+    InstallPlugin { url: String },
+    /// Check every loaded plugin with a `manifestUrl` against its remote
+    /// counterpart and install any with a strictly higher version. Host-only
+    /// — produced by the Core `update` verb.
+    #[serde(rename = "updatePlugins")]
+    UpdatePlugins,
     /// A no-op result that just sits in the list (e.g. version readout).
     #[serde(rename = "noop")]
     Noop,

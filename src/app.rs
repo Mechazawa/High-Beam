@@ -18,6 +18,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::QueryWindow;
 use crate::frecency::{self, FrecencyDb};
+use crate::plugins;
 use crate::plugins::actions;
 use crate::plugins::dispatch::{self, StreamedResult};
 use crate::plugins::loader::{self, LoaderOptions};
@@ -36,6 +37,7 @@ pub struct PluginHost {
 
 enum HostMessage {
     Query { id: u64, input: String },
+    Task(actions::HostTask),
     Shutdown,
 }
 
@@ -138,6 +140,22 @@ fn spawn_runtime_thread(
                             );
                             current_cancel = Some(cancel);
                         }
+                        HostMessage::Task(task) => {
+                            if let Some(prev) = current_cancel.take() {
+                                prev.cancel();
+                            }
+                            // Bump the query id so any stale yield from the
+                            // last keystroke can't paint over the progress
+                            // rows the task is about to push.
+                            let task_id = latest_id.fetch_add(1, Ordering::Relaxed) + 1;
+                            let progress = ProgressEmitter::new(
+                                task_id,
+                                weak.clone(),
+                                Arc::clone(&latest),
+                                Arc::clone(&latest_id),
+                            );
+                            handle_host_task(task, &registry, progress).await;
+                        }
                         HostMessage::Shutdown => {
                             if let Some(prev) = current_cancel.take() {
                                 prev.cancel();
@@ -160,9 +178,10 @@ fn wire_window_callbacks(
     settings: SettingsController,
 ) {
     let latest_id_for_main = Arc::clone(latest_id);
+    let tx_for_edit = tx.clone();
     window.on_query_edited(move |text| {
         let id = latest_id_for_main.fetch_add(1, Ordering::Relaxed) + 1;
-        if tx
+        if tx_for_edit
             .send(HostMessage::Query {
                 id,
                 input: text.into(),
@@ -174,8 +193,15 @@ fn wire_window_callbacks(
     });
 
     let weak_for_invoke = window.as_weak();
+    let tx_for_invoke = tx;
     window.on_invoke_selected(move || {
-        invoke_selected(&weak_for_invoke, &latest, frecency_db.as_ref(), &settings);
+        invoke_selected(
+            &weak_for_invoke,
+            &latest,
+            frecency_db.as_ref(),
+            &settings,
+            &tx_for_invoke,
+        );
     });
 }
 
@@ -186,6 +212,7 @@ fn invoke_selected(
     latest: &Arc<Mutex<Vec<RankedResult>>>,
     frecency_db: Option<&FrecencyDb>,
     settings: &SettingsController,
+    host_tx: &mpsc::UnboundedSender<HostMessage>,
 ) {
     let Some(w) = weak.upgrade() else { return };
     let idx = usize::try_from(w.get_selected_index().max(0)).unwrap_or(0);
@@ -223,6 +250,17 @@ fn invoke_selected(
                     w.invoke_show_settings();
                 }
                 actions::ActionOutcome::KeepOpen => {}
+                actions::ActionOutcome::HostTask(task) => {
+                    // Clearing the input + results lets the streaming
+                    // progress rows the runtime thread will push become the
+                    // sole content of the launcher view.
+                    w.invoke_clear_input();
+                    w.set_results(ModelRc::new(VecModel::from(Vec::<ResultRow>::new())));
+                    w.set_selected_index(0);
+                    if host_tx.send(HostMessage::Task(task)).is_err() {
+                        tracing::error!("plugins: runtime thread exited; host task dropped",);
+                    }
+                }
             }
         }
         Err(err) => {
@@ -373,5 +411,157 @@ fn is_renderable_icon(spec: Option<&str>) -> bool {
 impl Drop for PluginHost {
     fn drop(&mut self) {
         let _ = self.query_tx.send(HostMessage::Shutdown);
+    }
+}
+
+/// Stable-key stream of progress rows shared with the launcher's result
+/// list. Re-emitting a key replaces the previous row in place, so the
+/// install / update / reload tasks can drive a row through "installing →
+/// installed" without inventing new rows.
+///
+/// The emitter holds a fixed `query_id` — re-using `latest_id` keeps these
+/// rows from being clobbered by a stale yield from a previously-cancelled
+/// JS query.
+struct ProgressEmitter {
+    query_id: u64,
+    weak: slint::Weak<QueryWindow>,
+    latest: Arc<Mutex<Vec<RankedResult>>>,
+    latest_id: Arc<AtomicU64>,
+}
+
+impl ProgressEmitter {
+    fn new(
+        query_id: u64,
+        weak: slint::Weak<QueryWindow>,
+        latest: Arc<Mutex<Vec<RankedResult>>>,
+        latest_id: Arc<AtomicU64>,
+    ) -> Self {
+        Self {
+            query_id,
+            weak,
+            latest,
+            latest_id,
+        }
+    }
+
+    /// Push (or replace by `key`) one progress row and re-render.
+    fn emit(
+        &self,
+        key: &str,
+        title: String,
+        subtitle: Option<String>,
+        action: plugins::result::Action,
+    ) {
+        // Skip the paint if another query/task has already taken over —
+        // late-arriving progress for an abandoned task shouldn't repaint.
+        if self.query_id < self.latest_id.load(Ordering::Relaxed) {
+            return;
+        }
+        let next = RankedResult {
+            plugin_name: crate::plugins::builtin::core::NAME.to_owned(),
+            result: plugins::result::PluginResult {
+                key: key.to_owned(),
+                title,
+                subtitle,
+                icon: None,
+                weight: 100.0,
+                pinned: true,
+                action,
+            },
+            order: 0,
+        };
+        if let Ok(mut slot) = self.latest.lock() {
+            if let Some(existing) = slot.iter_mut().find(|r| r.result.key == next.result.key) {
+                existing.result = next.result.clone();
+            } else {
+                let order = slot.len();
+                slot.push(RankedResult {
+                    order,
+                    ..next.clone()
+                });
+            }
+        }
+        let weak = self.weak.clone();
+        let snapshot: Vec<RankedResult> = self.latest.lock().map(|s| s.clone()).unwrap_or_default();
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(w) = weak.upgrade() {
+                render_results(&w, &snapshot);
+            }
+        });
+    }
+}
+
+async fn handle_host_task(
+    task: actions::HostTask,
+    registry: &PluginRegistry,
+    progress: ProgressEmitter,
+) {
+    match task {
+        actions::HostTask::Reload { name } => {
+            run_reload(name, registry, &progress).await;
+        }
+        actions::HostTask::Install { .. } | actions::HostTask::UpdateAll => {
+            // Wired up in follow-up commits; for now show a placeholder so
+            // the user knows the action was received.
+            progress.emit(
+                "host-task-not-yet",
+                "not yet implemented".to_owned(),
+                Some("install / update wiring lands in a follow-up commit".to_owned()),
+                plugins::result::Action::Noop,
+            );
+        }
+    }
+}
+
+async fn run_reload(name: Option<String>, registry: &PluginRegistry, progress: &ProgressEmitter) {
+    let settings = Settings::load_or_default();
+    match name {
+        None => {
+            progress.emit(
+                "reload-all",
+                "Reloading all plugins…".to_owned(),
+                None,
+                plugins::result::Action::Noop,
+            );
+            let names = registry.reload_all(&settings).await;
+            progress.emit(
+                "reload-all",
+                format!("Reloaded {} plugin(s)", names.len()),
+                Some(if names.is_empty() {
+                    "no plugins on disk".to_owned()
+                } else {
+                    names.join(", ")
+                }),
+                plugins::result::Action::Noop,
+            );
+        }
+        Some(target) => {
+            let key = format!("reload-{target}");
+            progress.emit(
+                &key,
+                format!("Reloading {target}…"),
+                None,
+                plugins::result::Action::Noop,
+            );
+            match registry.reload_one(&target, &settings).await {
+                Ok(plugin) => {
+                    let version = plugin.manifest.version.clone();
+                    progress.emit(
+                        &key,
+                        format!("Reloaded {target}"),
+                        version.map(|v| format!("v{v}")),
+                        plugins::result::Action::Noop,
+                    );
+                }
+                Err(err) => {
+                    progress.emit(
+                        &key,
+                        format!("Failed to reload {target}"),
+                        Some(err.to_string()),
+                        plugins::result::Action::Noop,
+                    );
+                }
+            }
+        }
     }
 }
