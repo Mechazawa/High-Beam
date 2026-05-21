@@ -91,7 +91,7 @@ pub fn start(
 
     wire_window_callbacks(
         window,
-        tx.clone(),
+        &tx,
         &latest_id,
         WindowCallbackCtx {
             latest,
@@ -214,7 +214,7 @@ struct WindowCallbackCtx {
 
 fn wire_window_callbacks(
     window: &QueryWindow,
-    tx: mpsc::UnboundedSender<HostMessage>,
+    tx: &mpsc::UnboundedSender<HostMessage>,
     latest_id: &Arc<AtomicU64>,
     ctx: WindowCallbackCtx,
 ) {
@@ -229,12 +229,18 @@ fn wire_window_callbacks(
 
     let latest_id_for_main = Arc::clone(latest_id);
     let tx_for_edit = tx.clone();
-    // Notify the history state machine on every keystroke so that editing
-    // while cycling (policy A: Cmd+Up/Down) abandons the cycle correctly.
+    // Any edit commits a history preview: clear the muted-render flag and
+    // exit the cycle on the Rust side too. The plugin pipeline runs against
+    // the post-edit text regardless of how we got here (typing or pressing
+    // Enter on a preview, which the UI synthesises as an `edited` event).
     let history_state_for_edit = Arc::clone(&history_state);
+    let weak_for_edit = window.as_weak();
     window.on_query_edited(move |text| {
         if let Ok(mut hs) = history_state_for_edit.lock() {
             hs.mark_edited();
+        }
+        if let Some(w) = weak_for_edit.upgrade() {
+            w.set_is_history_preview(false);
         }
         let id = latest_id_for_main.fetch_add(1, Ordering::Relaxed) + 1;
         if tx_for_edit
@@ -264,40 +270,7 @@ fn wire_window_callbacks(
         );
     });
 
-    // History cycling — Cmd+Up (policy A).
-    let weak_for_up = window.as_weak();
-    let history_state_for_up = Arc::clone(&history_state);
-    let latest_id_for_up = Arc::clone(latest_id);
-    let tx_for_up = tx.clone();
-    window.on_history_up(move || {
-        let Some(w) = weak_for_up.upgrade() else {
-            return;
-        };
-        let current = w.get_query_text().to_string();
-        if let Ok(mut hs) = history_state_for_up.lock()
-            && let InputAction::SetTo(text) = hs.history_up(&current)
-        {
-            apply_history_text(&w, &text);
-            dispatch_history_query(&latest_id_for_up, &tx_for_up, text);
-        }
-    });
-
-    // History cycling — Cmd+Down (policy A).
-    let weak_for_down = window.as_weak();
-    let history_state_for_down = history_state;
-    let latest_id_for_down = Arc::clone(latest_id);
-    let tx_for_down = tx.clone();
-    window.on_history_down(move || {
-        let Some(w) = weak_for_down.upgrade() else {
-            return;
-        };
-        if let Ok(mut hs) = history_state_for_down.lock()
-            && let InputAction::SetTo(text) = hs.history_down()
-        {
-            apply_history_text(&w, &text);
-            dispatch_history_query(&latest_id_for_down, &tx_for_down, text);
-        }
-    });
+    wire_history_callbacks(window, &history_state, history_db.as_ref());
 
     // Install — confirmed.
     let confirm_state_install = Arc::clone(&confirm_state);
@@ -314,32 +287,78 @@ fn wire_window_callbacks(
     });
 }
 
+/// Wire the four query-history Slint callbacks: Up + Down cycle, and the
+/// dismiss callback that persists the live input to history when the
+/// launcher hides (Esc / blur / action-induced hide).
+fn wire_history_callbacks(
+    window: &QueryWindow,
+    history_state: &Arc<Mutex<QueryHistoryState>>,
+    history_db: Option<&QueryHistoryDb>,
+) {
+    let weak_for_up = window.as_weak();
+    let history_state_for_up = Arc::clone(history_state);
+    window.on_history_up(move || {
+        let Some(w) = weak_for_up.upgrade() else {
+            return;
+        };
+        let current = w.get_query_text().to_string();
+        if let Ok(mut hs) = history_state_for_up.lock()
+            && let InputAction::SetTo(text) = hs.history_up(&current)
+        {
+            apply_history_text(&w, &text);
+            w.set_is_history_preview(hs.is_preview());
+        }
+    });
+
+    let weak_for_down = window.as_weak();
+    let history_state_for_down = Arc::clone(history_state);
+    window.on_history_down(move || {
+        let Some(w) = weak_for_down.upgrade() else {
+            return;
+        };
+        if let Ok(mut hs) = history_state_for_down.lock()
+            && let InputAction::SetTo(text) = hs.history_down()
+        {
+            apply_history_text(&w, &text);
+            w.set_is_history_preview(hs.is_preview());
+        }
+    });
+
+    // Persist on dismiss (Esc / blur / action-induced hide). Skips empty
+    // input and history previews — `invoke_selected` already pushed any
+    // submitted query, and the DB dedups against the last entry so the
+    // action-then-hide path can't double-write.
+    let history_db_for_dismiss = history_db.cloned();
+    let history_state_for_dismiss = Arc::clone(history_state);
+    let weak_for_dismiss = window.as_weak();
+    window.on_persist_dismiss(move |text| {
+        let text = text.to_string();
+        if text.is_empty() {
+            return;
+        }
+        if let Some(w) = weak_for_dismiss.upgrade()
+            && w.get_is_history_preview()
+        {
+            return;
+        }
+        push_history(
+            history_db_for_dismiss.as_ref(),
+            &history_state_for_dismiss,
+            &text,
+        );
+    });
+}
+
 /// Write `text` into the window's query input without firing `query_edited`.
 ///
 /// Direct assignment via Slint's `set-input-text` bypasses the `edited`
-/// callback on purpose — `on_query_edited` would call `mark_edited()` on
-/// the history state machine and clobber the cycle cursor on the very
-/// next keystroke. The cycle path instead calls
-/// [`dispatch_history_query`] separately to keep the plugin pipeline in
-/// sync with what the user is seeing.
+/// callback on purpose — the history-cycle path doesn't want to fire the
+/// plugin pipeline while the user is just previewing entries (the cycled
+/// text renders muted; Enter or any edit commits and triggers the query
+/// via the regular `on_query_edited` path).
 fn apply_history_text(window: &QueryWindow, text: &str) {
     window.set_query_text(text.into());
     window.invoke_set_input_text(text.into());
-}
-
-/// Dispatch a plugin query for `text` directly, bypassing the
-/// `query-edited` callback. Used by the history-cycle handlers so
-/// cycling actually re-runs the plugin pipeline against the cycled query
-/// without going through the path that mutates history state.
-fn dispatch_history_query(
-    latest_id: &Arc<AtomicU64>,
-    tx: &mpsc::UnboundedSender<HostMessage>,
-    text: String,
-) {
-    let id = latest_id.fetch_add(1, Ordering::Relaxed) + 1;
-    if tx.send(HostMessage::Query { id, input: text }).is_err() {
-        tracing::error!("plugins: runtime thread exited; history query dropped");
-    }
 }
 
 /// Pull the pending oneshot sender out of `confirm_state` and send `decision`.

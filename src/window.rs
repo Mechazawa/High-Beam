@@ -136,6 +136,13 @@ pub(crate) fn hide(window: &QueryWindow) {
 /// block the UI thread — same pattern the frecency picks use — so the
 /// hide is observably instant regardless of disk latency.
 pub(crate) fn hide_and_persist_position(window: &QueryWindow, settings: &SettingsController) {
+    // Fire the `persist-dismiss` callback so app.rs can append the input
+    // text to query history. Rust receives the current value via the
+    // callback parameter; we don't read it here to avoid the lifetime
+    // dance with `get_query_text()` across the hide.
+    let input_text = window.get_query_text();
+    window.invoke_persist_dismiss(input_text);
+
     if let Some(pos) = capture_outer_position(window) {
         let settings = settings.clone();
         if let Err(err) = thread::Builder::new()

@@ -44,19 +44,22 @@ impl QueryHistoryState {
         }
     }
 
-    /// Handle Cmd+Up (history-back).
+    /// Handle Up. Only enters preview mode when the input is empty — once
+    /// the user has typed anything, Up is reserved for result-list nav.
+    /// Stepping older while already in preview always works.
     ///
-    /// - On the draft slot with a non-empty history: save the current input as
-    ///   the draft and jump to the most-recent entry.
+    /// - Empty input + non-empty history + not yet cycling: enter preview at
+    ///   the most-recent entry.
     /// - Already cycling and not at the oldest: step one entry older.
-    /// - Already at the oldest: no-op (clamped).
+    /// - Otherwise: no-op (non-empty live input, oldest already, empty
+    ///   history).
     pub(crate) fn history_up(&mut self, current_input: &str) -> InputAction {
         match self.cursor {
             None => {
-                if self.entries.is_empty() {
+                if self.entries.is_empty() || !current_input.is_empty() {
                     return InputAction::NoChange;
                 }
-                self.draft = Some(current_input.to_owned());
+                self.draft = Some(String::new());
                 let idx = self.entries.len() - 1;
                 self.cursor = Some(idx);
                 InputAction::SetTo(self.entries[idx].clone())
@@ -70,11 +73,12 @@ impl QueryHistoryState {
         }
     }
 
-    /// Handle Cmd+Down (history-forward).
+    /// Handle Down. Only meaningful while in preview.
     ///
-    /// - On the draft slot: no-op (already at the newest position).
     /// - Cycling and not at the newest entry: step one entry newer.
-    /// - At the newest entry: restore the draft, clear cursor.
+    /// - At the newest entry: exit preview, clear input (the live draft was
+    ///   empty — that's the gating precondition for entering preview).
+    /// - Not cycling: no-op (regular Down navigates results elsewhere).
     pub(crate) fn history_down(&mut self) -> InputAction {
         match self.cursor {
             None => InputAction::NoChange,
@@ -84,12 +88,19 @@ impl QueryHistoryState {
                 InputAction::SetTo(self.entries[new_idx].clone())
             }
             Some(_) => {
-                // At the newest entry — return to draft slot.
-                let draft = self.draft.take().unwrap_or_default();
+                self.draft = None;
                 self.cursor = None;
-                InputAction::SetTo(draft)
+                InputAction::SetTo(String::new())
             }
         }
+    }
+
+    /// Whether the user is currently viewing a history entry (a preview that
+    /// hasn't been committed by editing or pressing Enter). The UI layer
+    /// uses this to render the input with the muted-text colour.
+    #[must_use]
+    pub(crate) fn is_preview(&self) -> bool {
+        self.cursor.is_some()
     }
 
     /// Notify the state machine that the user has edited the input text.
@@ -119,12 +130,6 @@ impl QueryHistoryState {
         self.cursor = None;
         self.draft = None;
     }
-
-    /// Whether the user is currently viewing a history entry (not the draft).
-    #[cfg(test)]
-    pub(crate) fn is_cycling(&self) -> bool {
-        self.cursor.is_some()
-    }
 }
 
 #[cfg(test)]
@@ -140,41 +145,50 @@ mod tests {
     #[test]
     fn up_with_empty_history_is_noop() {
         let mut s = QueryHistoryState::default();
-        let action = s.history_up("draft text");
+        let action = s.history_up("");
         assert_eq!(action, InputAction::NoChange);
-        assert!(!s.is_cycling());
+        assert!(!s.is_preview());
     }
 
     #[test]
-    fn up_from_draft_saves_draft_and_jumps_to_newest() {
+    fn up_with_non_empty_input_is_noop() {
+        // The empty-input precondition is what reserves regular Up for
+        // result-list navigation once the user has started typing.
+        let mut s = state_with(&["a", "b"]);
+        let action = s.history_up("typing");
+        assert_eq!(action, InputAction::NoChange);
+        assert!(!s.is_preview());
+    }
+
+    #[test]
+    fn up_from_empty_enters_preview_at_newest() {
         let mut s = state_with(&["a", "b", "c"]);
-        let action = s.history_up("my draft");
+        let action = s.history_up("");
         assert_eq!(action, InputAction::SetTo("c".into()));
-        assert!(s.is_cycling());
-        assert_eq!(s.draft, Some("my draft".into()));
+        assert!(s.is_preview());
     }
 
     #[test]
     fn up_from_newest_moves_to_older() {
         let mut s = state_with(&["old", "new"]);
-        s.history_up("draft");
-        let action = s.history_up("new"); // `current_input` ignored while cycling
+        s.history_up("");
+        let action = s.history_up("new"); // current_input ignored once cycling
         assert_eq!(action, InputAction::SetTo("old".into()));
     }
 
     #[test]
     fn up_at_oldest_is_clamped_noop() {
         let mut s = state_with(&["only"]);
-        s.history_up("draft");
+        s.history_up("");
         let action = s.history_up("only");
         assert_eq!(action, InputAction::NoChange);
-        assert!(s.is_cycling());
+        assert!(s.is_preview());
     }
 
     // ---- history_down ------------------------------------------------------
 
     #[test]
-    fn down_on_draft_slot_is_noop() {
+    fn down_when_not_previewing_is_noop() {
         let mut s = QueryHistoryState::default();
         let action = s.history_down();
         assert_eq!(action, InputAction::NoChange);
@@ -183,7 +197,7 @@ mod tests {
     #[test]
     fn down_from_older_entry_moves_toward_newest() {
         let mut s = state_with(&["a", "b", "c"]);
-        s.history_up("draft"); // cursor → 2 ("c")
+        s.history_up(""); // cursor → 2 ("c")
         s.history_up("c"); // cursor → 1 ("b")
         s.history_up("b"); // cursor → 0 ("a")
         let action = s.history_down(); // cursor → 1 ("b")
@@ -191,57 +205,40 @@ mod tests {
     }
 
     #[test]
-    fn down_past_newest_restores_draft_and_clears_cursor() {
+    fn down_past_newest_exits_preview_with_empty_input() {
         let mut s = state_with(&["a", "b"]);
-        s.history_up("my draft"); // cursor → 1 ("b"), draft = "my draft"
-        let action = s.history_down(); // cursor → None, draft restored
-        assert_eq!(action, InputAction::SetTo("my draft".into()));
-        assert!(!s.is_cycling());
-        assert_eq!(s.draft, None);
+        s.history_up(""); // cursor → 1 ("b")
+        let action = s.history_down(); // exit preview
+        assert_eq!(action, InputAction::SetTo(String::new()));
+        assert!(!s.is_preview());
     }
 
-    // ---- round-trip: the user-requested must-test -------------------------
-
     #[test]
-    fn up_then_down_restores_original_draft() {
+    fn up_then_down_returns_to_empty_input() {
         let mut s = state_with(&["old query"]);
-        let action_up = s.history_up("partial draft");
+        let action_up = s.history_up("");
         assert_eq!(action_up, InputAction::SetTo("old query".into()));
         let action_down = s.history_down();
-        assert_eq!(action_down, InputAction::SetTo("partial draft".into()));
-        assert!(!s.is_cycling());
-    }
-
-    #[test]
-    fn up_multiple_then_down_all_the_way_restores_draft() {
-        let mut s = state_with(&["q1", "q2", "q3"]);
-        s.history_up("draft");
-        s.history_up("q3");
-        s.history_up("q2");
-        // Now at q1 (oldest). Walk all the way back to draft.
-        s.history_down();
-        s.history_down();
-        let action = s.history_down();
-        assert_eq!(action, InputAction::SetTo("draft".into()));
-        assert!(!s.is_cycling());
+        assert_eq!(action_down, InputAction::SetTo(String::new()));
+        assert!(!s.is_preview());
     }
 
     // ---- mark_edited -------------------------------------------------------
 
     #[test]
-    fn editing_while_cycling_clears_cursor() {
+    fn editing_while_previewing_exits_preview() {
         let mut s = state_with(&["entry"]);
-        s.history_up("draft");
-        assert!(s.is_cycling());
+        s.history_up("");
+        assert!(s.is_preview());
         s.mark_edited();
-        assert!(!s.is_cycling());
+        assert!(!s.is_preview());
     }
 
     #[test]
-    fn editing_on_draft_slot_is_noop() {
+    fn editing_when_not_previewing_is_noop() {
         let mut s = state_with(&["entry"]);
-        s.mark_edited(); // no cursor — should not panic
-        assert!(!s.is_cycling());
+        s.mark_edited();
+        assert!(!s.is_preview());
     }
 
     // ---- on_submit ---------------------------------------------------------
@@ -249,10 +246,10 @@ mod tests {
     #[test]
     fn submit_resets_cursor_and_draft() {
         let mut s = state_with(&["old"]);
-        s.history_up("draft");
-        assert!(s.is_cycling());
+        s.history_up("");
+        assert!(s.is_preview());
         s.on_submit("new query", vec!["old".into(), "new query".into()]);
-        assert!(!s.is_cycling());
+        assert!(!s.is_preview());
         assert_eq!(s.draft, None);
     }
 
