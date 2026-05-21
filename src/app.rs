@@ -7,7 +7,7 @@
 //! are filtered by a monotonic `query_id`.
 
 use std::error::Error;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -500,17 +500,312 @@ async fn handle_host_task(
         actions::HostTask::Reload { name } => {
             run_reload(name, registry, &progress).await;
         }
-        actions::HostTask::Install { .. } | actions::HostTask::UpdateAll => {
-            // Wired up in follow-up commits; for now show a placeholder so
-            // the user knows the action was received.
-            progress.emit(
-                "host-task-not-yet",
-                "not yet implemented".to_owned(),
-                Some("install / update wiring lands in a follow-up commit".to_owned()),
-                plugins::result::Action::Noop,
-            );
+        actions::HostTask::Install { url } => {
+            run_install(&url, registry, &progress).await;
+        }
+        actions::HostTask::UpdateAll => {
+            run_update_all(registry, &progress).await;
         }
     }
+}
+
+/// Drive the install pipeline for a single manifest URL, streaming progress
+/// rows under the stable key `install`. Returns the loaded plugin's name on
+/// success — `run_update_all` re-uses this so each per-plugin update lands
+/// progress under a stable per-plugin key.
+async fn run_install(
+    url: &str,
+    registry: &PluginRegistry,
+    progress: &ProgressEmitter,
+) -> Option<String> {
+    progress.emit(
+        "install",
+        format!("Installing {url}…"),
+        Some("fetching manifest".to_owned()),
+        plugins::result::Action::Noop,
+    );
+    install_pipeline(url, "install", registry, progress).await
+}
+
+/// Inner install pipeline, parameterised on the progress-row key so the
+/// caller can decide between a single `install` row and per-plugin
+/// `update-<name>` rows.
+async fn install_pipeline(
+    url: &str,
+    progress_key: &str,
+    registry: &PluginRegistry,
+    progress: &ProgressEmitter,
+) -> Option<String> {
+    let manifest = match plugins::install::fetch_and_validate_manifest(url).await {
+        Ok(m) => m,
+        Err(err) => {
+            progress.emit(
+                progress_key,
+                "Install failed".to_owned(),
+                Some(err.to_string()),
+                plugins::result::Action::Noop,
+            );
+            return None;
+        }
+    };
+    let plugin_name = manifest.name.clone();
+    let plugin_version = manifest.version.clone().unwrap_or_default();
+    let staging = stage_payload(&manifest, url, progress_key, progress).await?;
+    finalize_install(FinalizeCtx {
+        plugin_name: &plugin_name,
+        plugin_version: &plugin_version,
+        staging_payload_root: &staging,
+        progress_key,
+        registry,
+        progress,
+    })
+    .await
+}
+
+/// Download + extract + cross-check into a fresh staging dir. Returns the
+/// path of the extracted payload root.
+async fn stage_payload(
+    manifest: &plugins::manifest::Manifest,
+    url: &str,
+    progress_key: &str,
+    progress: &ProgressEmitter,
+) -> Option<PathBuf> {
+    let plugin_name = manifest.name.clone();
+    let plugin_version = manifest.version.clone().unwrap_or_default();
+    let Some(archive_url) = manifest.archive_url.clone() else {
+        emit_install_failure(
+            progress,
+            progress_key,
+            &plugin_name,
+            "manifest missing archiveUrl",
+        );
+        return None;
+    };
+
+    progress.emit(
+        progress_key,
+        format!("Installing {plugin_name} v{plugin_version}…"),
+        Some(format!("downloading {archive_url}")),
+        plugins::result::Action::Noop,
+    );
+    let (bytes, format) = match plugins::install::download_archive(&archive_url).await {
+        Ok(pair) => pair,
+        Err(err) => {
+            emit_install_failure(progress, progress_key, &plugin_name, &err.to_string());
+            return None;
+        }
+    };
+
+    let staging = match temp_dir_for_install(&plugin_name) {
+        Ok(dir) => dir,
+        Err(err) => {
+            emit_install_failure(
+                progress,
+                progress_key,
+                &plugin_name,
+                &format!("create staging dir: {err}"),
+            );
+            return None;
+        }
+    };
+    if let Err(err) = plugins::install::extract_archive(&bytes, format, &staging) {
+        cleanup_staging(&staging);
+        emit_install_failure(progress, progress_key, &plugin_name, &err.to_string());
+        return None;
+    }
+    let payload_root = plugins::install::find_payload_root(&staging);
+    if let Err(err) = plugins::install::cross_check_embedded(&payload_root, manifest, url) {
+        cleanup_staging(&staging);
+        emit_install_failure(progress, progress_key, &plugin_name, &err.to_string());
+        return None;
+    }
+    let writeable = plugins::install::manifest_for_write(manifest, url);
+    if let Err(err) = plugins::install::write_manifest_json(&payload_root, &writeable) {
+        cleanup_staging(&staging);
+        emit_install_failure(progress, progress_key, &plugin_name, &err.to_string());
+        return None;
+    }
+    Some(payload_root)
+}
+
+/// Bundle of references `finalize_install` consumes — purely a packaging
+/// concession to clippy's arg-count lint; every field is borrowed.
+struct FinalizeCtx<'a> {
+    plugin_name: &'a str,
+    plugin_version: &'a str,
+    staging_payload_root: &'a Path,
+    progress_key: &'a str,
+    registry: &'a PluginRegistry,
+    progress: &'a ProgressEmitter,
+}
+
+/// Atomically swap the staged payload into the user's plugin dir, hot-reload
+/// it, and report the result. `staging_payload_root` is the path returned by
+/// `stage_payload` — its parent (the tmpdir) is cleaned up before returning.
+async fn finalize_install(ctx: FinalizeCtx<'_>) -> Option<String> {
+    let FinalizeCtx {
+        plugin_name,
+        plugin_version,
+        staging_payload_root,
+        progress_key,
+        registry,
+        progress,
+    } = ctx;
+    let plugins_dir = registry.options().plugins_dir.clone();
+    let installed_path = match plugins::install::move_into_plugins_dir(
+        staging_payload_root,
+        &plugins_dir,
+        plugin_name,
+    ) {
+        Ok(p) => p,
+        Err(err) => {
+            cleanup_staging(staging_payload_root);
+            emit_install_failure(progress, progress_key, plugin_name, &err.to_string());
+            return None;
+        }
+    };
+    // The payload root's parent is the staging tmpdir — best-effort wipe.
+    if let Some(staging_parent) = staging_payload_root.parent() {
+        cleanup_staging(staging_parent);
+    }
+
+    progress.emit(
+        progress_key,
+        format!("Loading {plugin_name} v{plugin_version}…"),
+        Some(installed_path.display().to_string()),
+        plugins::result::Action::Noop,
+    );
+
+    let settings = Settings::load_or_default();
+    match loader::load_one_for_reload(&installed_path, &settings).await {
+        Ok(loaded) => {
+            registry.install(loaded).await;
+            progress.emit(
+                progress_key,
+                format!("Installed {plugin_name} v{plugin_version}"),
+                Some("ready to use".to_owned()),
+                plugins::result::Action::Noop,
+            );
+            Some(plugin_name.to_owned())
+        }
+        Err(err) => {
+            progress.emit(
+                progress_key,
+                format!("Installed {plugin_name} but load failed"),
+                Some(err),
+                plugins::result::Action::Noop,
+            );
+            None
+        }
+    }
+}
+
+fn emit_install_failure(
+    progress: &ProgressEmitter,
+    progress_key: &str,
+    plugin_name: &str,
+    detail: &str,
+) {
+    progress.emit(
+        progress_key,
+        format!("Install {plugin_name} failed"),
+        Some(detail.to_owned()),
+        plugins::result::Action::Noop,
+    );
+}
+
+async fn run_update_all(registry: &PluginRegistry, progress: &ProgressEmitter) {
+    let plugins = registry.snapshot().await;
+    if plugins.is_empty() {
+        progress.emit(
+            "update-summary",
+            "No plugins loaded".to_owned(),
+            Some("nothing to update".to_owned()),
+            plugins::result::Action::Noop,
+        );
+        return;
+    }
+    let mut updated = 0usize;
+    let mut up_to_date = 0usize;
+    let mut failed = 0usize;
+    for plugin in plugins {
+        let local_version = plugin.manifest.version.clone().unwrap_or_default();
+        let Some(manifest_url) = plugin.manifest.manifest_url.clone() else {
+            let key = format!("update-{}", plugin.manifest.name);
+            progress.emit(
+                &key,
+                format!("Skipped {}", plugin.manifest.name),
+                Some("no manifestUrl — plugin opts out of updates".to_owned()),
+                plugins::result::Action::Noop,
+            );
+            continue;
+        };
+        let name = plugin.manifest.name.clone();
+        let key = format!("update-{name}");
+        progress.emit(
+            &key,
+            format!("Checking {name}…"),
+            Some(manifest_url.clone()),
+            plugins::result::Action::Noop,
+        );
+        let remote = match plugins::install::fetch_and_validate_manifest(&manifest_url).await {
+            Ok(m) => m,
+            Err(err) => {
+                failed += 1;
+                progress.emit(
+                    &key,
+                    format!("Update check failed: {name}"),
+                    Some(err.to_string()),
+                    plugins::result::Action::Noop,
+                );
+                continue;
+            }
+        };
+        let remote_version = remote.version.clone().unwrap_or_default();
+        if !plugins::manifest::is_newer_version(&remote_version, &local_version) {
+            up_to_date += 1;
+            progress.emit(
+                &key,
+                format!("Up to date: {name} v{local_version}"),
+                None,
+                plugins::result::Action::Noop,
+            );
+            continue;
+        }
+        progress.emit(
+            &key,
+            format!("Updating {name} v{local_version} → v{remote_version}…"),
+            None,
+            plugins::result::Action::Noop,
+        );
+        if install_pipeline(&manifest_url, &key, registry, progress)
+            .await
+            .is_some()
+        {
+            updated += 1;
+        } else {
+            failed += 1;
+        }
+    }
+    progress.emit(
+        "update-summary",
+        format!("Update complete — {updated} updated, {up_to_date} up to date, {failed} failed"),
+        None,
+        plugins::result::Action::Noop,
+    );
+}
+
+fn temp_dir_for_install(name: &str) -> std::io::Result<PathBuf> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let dir = std::env::temp_dir().join(format!("high-beam-install-{name}-{now}"));
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+fn cleanup_staging(path: &Path) {
+    let _ = std::fs::remove_dir_all(path);
 }
 
 async fn run_reload(name: Option<String>, registry: &PluginRegistry, progress: &ProgressEmitter) {
