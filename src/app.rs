@@ -26,6 +26,7 @@ use crate::plugins::loader::{self, LoaderOptions};
 use crate::plugins::registry::PluginRegistry;
 use crate::plugins::result::RankedResult;
 use crate::plugins::runtime::LoadedPlugin;
+use crate::query_history::{InputAction, QueryHistoryDb, QueryHistoryState};
 use crate::settings::Settings;
 use crate::settings_ui::SettingsController;
 use crate::ui::{ConfirmCapRow, ResultRow};
@@ -70,6 +71,14 @@ pub fn start(
 
     let confirm_state: ConfirmState = Arc::new(Mutex::new(None));
 
+    let settings_snapshot = Settings::load_or_default();
+    let history_db = open_query_history_db();
+    let initial_entries = history_db
+        .as_ref()
+        .map(|db| db.load_recent(settings_snapshot.query_history_max_entries()))
+        .unwrap_or_default();
+    let history_state = Arc::new(Mutex::new(QueryHistoryState::new(initial_entries)));
+
     spawn_runtime_thread(
         rx,
         plugins_override,
@@ -83,11 +92,15 @@ pub fn start(
     wire_window_callbacks(
         window,
         tx.clone(),
-        latest,
         &latest_id,
-        frecency_db,
-        settings,
-        confirm_state,
+        WindowCallbackCtx {
+            latest,
+            frecency_db,
+            settings,
+            confirm_state,
+            history_db,
+            history_state,
+        },
     );
 
     Ok(PluginHost { query_tx: tx })
@@ -187,18 +200,42 @@ fn spawn_runtime_thread(
     Ok(())
 }
 
-fn wire_window_callbacks(
-    window: &QueryWindow,
-    tx: mpsc::UnboundedSender<HostMessage>,
+/// Aggregate of plugin-result + confirm + history state threaded into
+/// `wire_window_callbacks`. Groups logically-related handles so the function
+/// stays within clippy's argument-count limit.
+struct WindowCallbackCtx {
     latest: Arc<Mutex<Vec<RankedResult>>>,
-    latest_id: &Arc<AtomicU64>,
     frecency_db: Option<FrecencyDb>,
     settings: SettingsController,
     confirm_state: ConfirmState,
+    history_db: Option<QueryHistoryDb>,
+    history_state: Arc<Mutex<QueryHistoryState>>,
+}
+
+fn wire_window_callbacks(
+    window: &QueryWindow,
+    tx: mpsc::UnboundedSender<HostMessage>,
+    latest_id: &Arc<AtomicU64>,
+    ctx: WindowCallbackCtx,
 ) {
+    let WindowCallbackCtx {
+        latest,
+        frecency_db,
+        settings,
+        confirm_state,
+        history_db,
+        history_state,
+    } = ctx;
+
     let latest_id_for_main = Arc::clone(latest_id);
     let tx_for_edit = tx.clone();
+    // Notify the history state machine on every keystroke so that editing
+    // while cycling (policy A: Cmd+Up/Down) abandons the cycle correctly.
+    let history_state_for_edit = Arc::clone(&history_state);
     window.on_query_edited(move |text| {
+        if let Ok(mut hs) = history_state_for_edit.lock() {
+            hs.mark_edited();
+        }
         let id = latest_id_for_main.fetch_add(1, Ordering::Relaxed) + 1;
         if tx_for_edit
             .send(HostMessage::Query {
@@ -213,6 +250,8 @@ fn wire_window_callbacks(
 
     let weak_for_invoke = window.as_weak();
     let tx_for_invoke = tx;
+    let history_db_for_invoke = history_db.clone();
+    let history_state_for_invoke = Arc::clone(&history_state);
     window.on_invoke_selected(move || {
         invoke_selected(
             &weak_for_invoke,
@@ -220,7 +259,38 @@ fn wire_window_callbacks(
             frecency_db.as_ref(),
             &settings,
             &tx_for_invoke,
+            history_db_for_invoke.as_ref(),
+            &history_state_for_invoke,
         );
+    });
+
+    // History cycling — Cmd+Up (policy A).
+    let weak_for_up = window.as_weak();
+    let history_state_for_up = Arc::clone(&history_state);
+    window.on_history_up(move || {
+        let Some(w) = weak_for_up.upgrade() else {
+            return;
+        };
+        let current = w.get_query_text().to_string();
+        if let Ok(mut hs) = history_state_for_up.lock()
+            && let InputAction::SetTo(text) = hs.history_up(&current)
+        {
+            apply_history_text(&w, text);
+        }
+    });
+
+    // History cycling — Cmd+Down (policy A).
+    let weak_for_down = window.as_weak();
+    let history_state_for_down = history_state;
+    window.on_history_down(move || {
+        let Some(w) = weak_for_down.upgrade() else {
+            return;
+        };
+        if let Ok(mut hs) = history_state_for_down.lock()
+            && let InputAction::SetTo(text) = hs.history_down()
+        {
+            apply_history_text(&w, text);
+        }
     });
 
     // Install — confirmed.
@@ -236,6 +306,16 @@ fn wire_window_callbacks(
     window.on_confirm_cancel(move || {
         send_confirm_decision(&confirm_state_cancel, false, &weak_confirm_cancel);
     });
+}
+
+/// Write `text` into the window's query input without firing `query_edited`.
+///
+/// Assigning `input.text` directly via Slint's public function bypasses the
+/// `edited` callback, which is what we want: cycling through history entries
+/// should not trigger plugin searches.
+fn apply_history_text(window: &QueryWindow, text: String) {
+    window.set_query_text(text.clone().into());
+    window.invoke_set_input_text(text.into());
 }
 
 /// Pull the pending oneshot sender out of `confirm_state` and send `decision`.
@@ -259,17 +339,20 @@ fn send_confirm_decision(state: &ConfirmState, decision: bool, weak: &slint::Wea
     });
 }
 
-/// Resolve the highlighted row, execute its action, and bump frecency on
-/// success.
+/// Resolve the highlighted row, execute its action, bump frecency and push the
+/// query to history on success.
 fn invoke_selected(
     weak: &slint::Weak<QueryWindow>,
     latest: &Arc<Mutex<Vec<RankedResult>>>,
     frecency_db: Option<&FrecencyDb>,
     settings: &SettingsController,
     host_tx: &mpsc::UnboundedSender<HostMessage>,
+    history_db: Option<&QueryHistoryDb>,
+    history_state: &Arc<Mutex<QueryHistoryState>>,
 ) {
     let Some(w) = weak.upgrade() else { return };
     let idx = usize::try_from(w.get_selected_index().max(0)).unwrap_or(0);
+    let query_text = w.get_query_text().to_string();
     let snapshot = match latest.lock() {
         Ok(s) => s,
         Err(err) => {
@@ -284,6 +367,11 @@ fn invoke_selected(
     let plugin_name = picked.plugin_name.clone();
     let result_key = picked.result.key.clone();
     drop(snapshot);
+
+    // Push the query to history before the action runs — if the action hides
+    // the window we still want the entry recorded.
+    push_history(history_db, history_state, &query_text);
+
     match actions::execute(&action) {
         Ok(outcome) => {
             if let Some(db) = frecency_db {
@@ -320,6 +408,51 @@ fn invoke_selected(
         Err(err) => {
             tracing::error!(plugin = %plugin_name, %err, "plugins: action failed");
             window::hide_and_persist_position(&w, settings);
+        }
+    }
+}
+
+/// Append `query` to the persistent history and update the in-memory state
+/// machine entries. Runs on the UI thread — the DB write is fast enough for
+/// a one-off per Enter press.
+fn push_history(
+    history_db: Option<&QueryHistoryDb>,
+    history_state: &Arc<Mutex<QueryHistoryState>>,
+    query: &str,
+) {
+    if query.is_empty() {
+        return;
+    }
+    let max_entries = Settings::load_or_default().query_history_max_entries();
+    let new_entries = if let Some(db) = history_db {
+        if let Err(err) = db.push(query, max_entries) {
+            tracing::warn!(%err, "query_history: push failed");
+        }
+        db.load_recent(max_entries)
+    } else {
+        Vec::new()
+    };
+    if let Ok(mut hs) = history_state.lock() {
+        hs.on_submit(query, new_entries);
+    }
+}
+
+/// Open the query-history DB at the platform default path. Returns `None` on
+/// failure so the daemon stays functional without history.
+fn open_query_history_db() -> Option<QueryHistoryDb> {
+    let Some(path) = crate::query_history::default_db_path() else {
+        tracing::warn!("query_history: could not resolve data dir; running without history");
+        return None;
+    };
+    match QueryHistoryDb::open(&path) {
+        Ok(db) => Some(db),
+        Err(err) => {
+            tracing::warn!(
+                path = %path.display(),
+                %err,
+                "query_history: failed to open; continuing without history",
+            );
+            None
         }
     }
 }

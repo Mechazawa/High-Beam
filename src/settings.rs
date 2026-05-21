@@ -59,6 +59,9 @@ pub struct GlobalSettings {
     /// the ambiguity of "did the user actually drop the window at (0, 0)
     /// or have they never moved it?".
     pub launcher_position: Option<WindowPosition>,
+    /// Maximum number of entries kept in the persistent query-history DB.
+    /// Older rows are deleted when this cap is exceeded on insert.
+    pub query_history_max_entries: usize,
 }
 
 /// Saved outer-position of the launcher window, in physical pixels relative
@@ -72,11 +75,16 @@ pub struct WindowPosition {
     pub y: i32,
 }
 
+/// Default maximum query-history entries. Matches the spec (100) and is
+/// intentionally small enough to load quickly into memory at startup.
+pub const DEFAULT_QUERY_HISTORY_MAX_ENTRIES: usize = 100;
+
 impl Default for GlobalSettings {
     fn default() -> Self {
         Self {
             hotkey: DEFAULT_HOTKEY.to_owned(),
             launcher_position: None,
+            query_history_max_entries: DEFAULT_QUERY_HISTORY_MAX_ENTRIES,
         }
     }
 }
@@ -178,11 +186,15 @@ impl Settings {
             .collect();
         let global = {
             let raw_global = raw.global.unwrap_or_default();
+            let max_entries = raw_global
+                .query_history_max_entries
+                .map_or(DEFAULT_QUERY_HISTORY_MAX_ENTRIES, |v| v.clamp(1, 10_000));
             GlobalSettings {
                 hotkey: raw_global
                     .hotkey
                     .unwrap_or_else(|| DEFAULT_HOTKEY.to_owned()),
                 launcher_position: raw_global.launcher_position,
+                query_history_max_entries: max_entries,
             }
         };
         Ok(Self {
@@ -223,16 +235,23 @@ impl Settings {
             })
             .collect();
         // Skip the `[global]` section when it matches defaults so a
-        // freshly-installed settings file stays minimal. Both fields write
+        // freshly-installed settings file stays minimal. All fields write
         // through unconditionally once we emit the section — `hotkey` so
         // the user sees the active value on disk, `launcher_position` so
-        // a remembered drag round-trips.
+        // a remembered drag round-trips, and `query_history_max_entries`
+        // so the user's customised cap survives a reload.
         let global = if self.global == GlobalSettings::default() {
             None
         } else {
+            let max = self.global.query_history_max_entries;
             Some(GlobalFile {
                 hotkey: Some(self.global.hotkey.clone()),
                 launcher_position: self.global.launcher_position,
+                query_history_max_entries: if max == DEFAULT_QUERY_HISTORY_MAX_ENTRIES {
+                    None
+                } else {
+                    Some(max)
+                },
             })
         };
         let file = SettingsFile { global, plugins };
@@ -342,6 +361,12 @@ impl Settings {
         &self.global
     }
 
+    /// The configured maximum query-history entry count.
+    #[must_use]
+    pub fn query_history_max_entries(&self) -> usize {
+        self.global.query_history_max_entries
+    }
+
     /// Set the global hotkey accelerator string. Trimmed before storing so
     /// `"Shift+Space "` from a stray `TextInput` doesn't fail the parser later.
     pub fn set_hotkey(&mut self, hotkey: &str) {
@@ -377,6 +402,8 @@ struct GlobalFile {
     hotkey: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     launcher_position: Option<WindowPosition>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    query_history_max_entries: Option<usize>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]

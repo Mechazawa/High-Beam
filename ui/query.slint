@@ -139,6 +139,11 @@ export component QueryWindow inherits Window {
     // Fires when the user presses Enter on the highlighted row. The Rust side
     // looks up the corresponding result and runs its action.
     callback invoke-selected();
+    // History-cycling callbacks — fired by Cmd+Up / Cmd+Down (policy A).
+    // The Rust side owns the state machine and writes the new text back via
+    // `set_query_text` + `invoke_set_input_text`; no Slint-side state needed.
+    callback history-up();
+    callback history-down();
 
     // Settings-related callbacks. Rust persists state, then pushes the
     // re-rendered slots/options back through the `in-out` properties.
@@ -183,6 +188,14 @@ export component QueryWindow inherits Window {
         root.query-text = "";
         root.results = [];
         root.selected-index = 0;
+    }
+
+    // Replace the visible input text with `text` without firing `query-edited`.
+    // Used by history cycling so pressing Cmd+Up/Down shows the historical entry
+    // in the text field but does NOT trigger a plugin search.
+    public function set-input-text(text: string) {
+        input.text = text;
+        root.query-text = text;
     }
 
     // Switch between launcher and settings views. Public so Rust can invoke
@@ -307,6 +320,17 @@ export component QueryWindow inherits Window {
                             if (root.results.length > 0) {
                                 root.invoke-selected();
                             }
+                            return accept;
+                        }
+                        // Policy A: Cmd+Up / Cmd+Down cycle through query history.
+                        // Regular Up/Down without a modifier continue to navigate
+                        // the result list so existing behaviour is unchanged.
+                        if (event.text == Key.UpArrow && (event.modifiers.meta || event.modifiers.alt)) {
+                            root.history-up();
+                            return accept;
+                        }
+                        if (event.text == Key.DownArrow && (event.modifiers.meta || event.modifiers.alt)) {
+                            root.history-down();
                             return accept;
                         }
                         if (event.text == Key.DownArrow) {

@@ -10,6 +10,7 @@ pub mod ipc;
 pub mod logging;
 pub mod paths;
 pub mod plugins;
+pub mod query_history;
 pub mod sdk;
 pub mod settings;
 pub mod settings_ui;
