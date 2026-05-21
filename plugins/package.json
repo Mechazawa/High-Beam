@@ -1,0 +1,12 @@
+{
+    "name": "high-beam-plugins",
+    "private": true,
+    "workspaces": ["*"],
+    "scripts": {
+        "test": "npm test --workspaces --if-present"
+    },
+    "devDependencies": {
+        "typescript": "^5.4.0",
+        "vitest": "^1.6.0"
+    }
+}

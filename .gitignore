@@ -5,10 +5,11 @@
 /target
 *.rs.bk
 
-# Plugin dev-time dependencies. The default plugins under `plugins/`
-# ship `package.json` so `npm install` pulls vitest for their tests, but
-# the install output is never committed. Lockfiles ARE tracked for
-# reproducibility.
+# Plugin dev-time dependencies. Plugins live in an npm workspace at
+# `plugins/` — vitest + typescript hoist to the single root
+# `node_modules`, no per-plugin trees. The per-plugin glob stays as
+# defence-in-depth for ad-hoc local `npm install` mishaps.
+/plugins/node_modules
 /plugins/*/node_modules
 /sdk/highbeam/node_modules
 

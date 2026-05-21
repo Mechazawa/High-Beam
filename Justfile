@@ -7,21 +7,11 @@ test:
     cargo test
 
 # Run vitest in every default plugin that ships its own test suite.
-# Assumes `npm install` has been run once per plugin dir.
+# Plugins live in an npm workspace at `plugins/` — one install, one
+# lockfile, one node_modules tree. Run `cd plugins && npm install`
+# once after a fresh clone.
 test-plugins:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    shopt -s nullglob
-    failed=0
-    for dir in plugins/*/; do
-        if [ -f "$dir/package.json" ] && [ -d "$dir/node_modules" ]; then
-            echo "--- vitest: $dir ---"
-            (cd "$dir" && npm test --silent) || failed=1
-        elif [ -f "$dir/package.json" ]; then
-            echo "skip $dir — run \`npm install\` in this directory first"
-        fi
-    done
-    exit $failed
+    cd plugins && npm test --workspaces --if-present
 
 lint:
     cargo clippy --all-targets --all-features -- -D warnings -A clippy::pedantic

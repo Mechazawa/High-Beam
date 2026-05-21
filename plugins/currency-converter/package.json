@@ -1,11 +1,8 @@
 {
-    "name": "@high-beam-plugin/currency-converter",
-    "version": "1.0.0",
-    "type": "module",
-    "scripts": {
-        "test": "vitest run"
-    },
-    "devDependencies": {
-        "vitest": "^1.6.0"
-    }
+  "name": "@high-beam-plugin/currency-converter",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  }
 }

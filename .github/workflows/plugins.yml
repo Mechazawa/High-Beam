@@ -50,15 +50,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          # Built-in npm cache, scoped to this plugin's lockfile so cache
-          # hits don't span unrelated plugins.
+          # Single workspace lockfile at plugins/ — vitest + typescript hoist
+          # to the root, every plugin shares the install.
           cache: 'npm'
-          cache-dependency-path: plugins/${{ matrix.plugin }}/package-lock.json
+          cache-dependency-path: plugins/package-lock.json
 
-      - name: npm ci
-        working-directory: plugins/${{ matrix.plugin }}
+      - name: npm ci (workspace root)
+        working-directory: plugins
         run: npm ci
 
       - name: npm test
-        working-directory: plugins/${{ matrix.plugin }}
-        run: npm test
+        working-directory: plugins
+        run: npm test --workspace=${{ matrix.plugin }} --if-present
