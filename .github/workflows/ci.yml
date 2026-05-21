@@ -9,9 +9,9 @@ name: CI
 
 on:
   push:
-    branches: [master, rust]
+    branches: [master]
   pull_request:
-    branches: [master, rust]
+    branches: [master]
 
 # Cancel superseded runs on the same ref. Saves runner-minutes when a PR
 # is force-pushed during review.

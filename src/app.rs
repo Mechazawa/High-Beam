@@ -578,8 +578,10 @@ async fn install_pipeline(
     .await
 }
 
-/// Download + extract + cross-check into a fresh staging dir. Returns the
-/// path of the extracted payload root.
+/// Download + (extract or write) into a fresh staging dir. Returns the
+/// path of the staged payload root. Branches on whichever distribution
+/// shape the manifest declared — `archiveUrl` (multi-file archive) or
+/// `entryUrl` (single JS file).
 async fn stage_payload(
     manifest: &plugins::manifest::Manifest,
     url: &str,
@@ -588,29 +590,6 @@ async fn stage_payload(
 ) -> Option<PathBuf> {
     let plugin_name = manifest.name.clone();
     let plugin_version = manifest.version.clone().unwrap_or_default();
-    let Some(archive_url) = manifest.archive_url.clone() else {
-        emit_install_failure(
-            progress,
-            progress_key,
-            &plugin_name,
-            "manifest missing archiveUrl",
-        );
-        return None;
-    };
-
-    progress.emit(
-        progress_key,
-        format!("Installing {plugin_name} v{plugin_version}…"),
-        Some(format!("downloading {archive_url}")),
-        plugins::result::Action::Noop,
-    );
-    let (bytes, format) = match plugins::install::download_archive(&archive_url).await {
-        Ok(pair) => pair,
-        Err(err) => {
-            emit_install_failure(progress, progress_key, &plugin_name, &err.to_string());
-            return None;
-        }
-    };
 
     let staging = match temp_dir_for_install(&plugin_name) {
         Ok(dir) => dir,
@@ -624,22 +603,58 @@ async fn stage_payload(
             return None;
         }
     };
-    let staging_for_extract = staging.clone();
-    let extract_result = tokio::task::spawn_blocking(move || {
-        plugins::install::extract_archive(&bytes, format, &staging_for_extract)
-    })
-    .await;
-    if let Err(err) = unwrap_spawn_blocking(extract_result, "extract") {
-        cleanup_staging(&staging);
-        emit_install_failure(progress, progress_key, &plugin_name, &err);
-        return None;
-    }
-    let payload_root = plugins::install::find_payload_root(&staging);
-    if let Err(err) = plugins::install::cross_check_embedded(&payload_root, manifest, url) {
-        cleanup_staging(&staging);
-        emit_install_failure(progress, progress_key, &plugin_name, &err.to_string());
-        return None;
-    }
+
+    let payload_root = match (
+        manifest.archive_url.as_deref(),
+        manifest.entry_url.as_deref(),
+    ) {
+        (Some(archive_url), None) => {
+            stage_from_archive(
+                manifest,
+                url,
+                archive_url,
+                &plugin_name,
+                &plugin_version,
+                &staging,
+                progress_key,
+                progress,
+            )
+            .await?
+        }
+        (None, Some(entry_url)) => {
+            stage_from_entry(
+                manifest,
+                entry_url,
+                &plugin_name,
+                &plugin_version,
+                &staging,
+                progress_key,
+                progress,
+            )
+            .await?
+        }
+        (Some(_), Some(_)) => {
+            cleanup_staging(&staging);
+            emit_install_failure(
+                progress,
+                progress_key,
+                &plugin_name,
+                "manifest declares both archiveUrl and entryUrl — pick one",
+            );
+            return None;
+        }
+        (None, None) => {
+            cleanup_staging(&staging);
+            emit_install_failure(
+                progress,
+                progress_key,
+                &plugin_name,
+                "manifest missing archiveUrl or entryUrl",
+            );
+            return None;
+        }
+    };
+
     let writeable = plugins::install::manifest_for_write(manifest, url);
     let payload_root_for_write = payload_root.clone();
     let write_result = tokio::task::spawn_blocking(move || {
@@ -649,6 +664,93 @@ async fn stage_payload(
     if let Err(err) = unwrap_spawn_blocking(write_result, "write_manifest_json") {
         cleanup_staging(&staging);
         emit_install_failure(progress, progress_key, &plugin_name, &err);
+        return None;
+    }
+    Some(payload_root)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn stage_from_archive(
+    manifest: &plugins::manifest::Manifest,
+    install_url: &str,
+    archive_url: &str,
+    plugin_name: &str,
+    plugin_version: &str,
+    staging: &Path,
+    progress_key: &str,
+    progress: &ProgressEmitter,
+) -> Option<PathBuf> {
+    progress.emit(
+        progress_key,
+        format!("Installing {plugin_name} v{plugin_version}…"),
+        Some(format!("downloading {archive_url}")),
+        plugins::result::Action::Noop,
+    );
+    let (bytes, format) = match plugins::install::download_archive(archive_url).await {
+        Ok(pair) => pair,
+        Err(err) => {
+            cleanup_staging(staging);
+            emit_install_failure(progress, progress_key, plugin_name, &err.to_string());
+            return None;
+        }
+    };
+    let staging_for_extract = staging.to_path_buf();
+    let extract_result = tokio::task::spawn_blocking(move || {
+        plugins::install::extract_archive(&bytes, format, &staging_for_extract)
+    })
+    .await;
+    if let Err(err) = unwrap_spawn_blocking(extract_result, "extract") {
+        cleanup_staging(staging);
+        emit_install_failure(progress, progress_key, plugin_name, &err);
+        return None;
+    }
+    let payload_root = plugins::install::find_payload_root(staging);
+    if let Err(err) = plugins::install::cross_check_embedded(&payload_root, manifest, install_url) {
+        cleanup_staging(staging);
+        emit_install_failure(progress, progress_key, plugin_name, &err.to_string());
+        return None;
+    }
+    Some(payload_root)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn stage_from_entry(
+    manifest: &plugins::manifest::Manifest,
+    entry_url: &str,
+    plugin_name: &str,
+    plugin_version: &str,
+    staging: &Path,
+    progress_key: &str,
+    progress: &ProgressEmitter,
+) -> Option<PathBuf> {
+    progress.emit(
+        progress_key,
+        format!("Installing {plugin_name} v{plugin_version}…"),
+        Some(format!("downloading {entry_url}")),
+        plugins::result::Action::Noop,
+    );
+    let bytes = match plugins::install::download_entry(entry_url).await {
+        Ok(b) => b,
+        Err(err) => {
+            cleanup_staging(staging);
+            emit_install_failure(progress, progress_key, plugin_name, &err.to_string());
+            return None;
+        }
+    };
+    // The single-file shape mirrors what an archive would have produced:
+    // `<staging>/<plugin>/<entry>` so `finalize_install`'s rename-into-place
+    // doesn't need to know which path got us here.
+    let payload_root = staging.join(plugin_name);
+    let entry_filename = manifest.entry.clone();
+    let payload_root_for_write = payload_root.clone();
+    let write_result = tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+        std::fs::create_dir_all(&payload_root_for_write)?;
+        std::fs::write(payload_root_for_write.join(&entry_filename), &bytes)
+    })
+    .await;
+    if let Err(err) = unwrap_spawn_blocking(write_result, "write_entry") {
+        cleanup_staging(staging);
+        emit_install_failure(progress, progress_key, plugin_name, &err);
         return None;
     }
     Some(payload_root)

@@ -1,0 +1,28 @@
+{
+  "name": "bitwarden",
+  "displayName": "Bitwarden",
+  "version": "1.0.0",
+  "description": "Bridge to the Bitwarden vault via the `bw` CLI — requires `bw login` + `bw unlock` and `BW_SESSION` exported in the daemon's environment",
+  "debounceMs": 150,
+  "timeoutMs": 3000,
+  "memoryMb": 32,
+  "platforms": ["macos", "linux"],
+  "capabilities": ["actions", "system.exec", "clipboard.write", "fs.cache"],
+  "defaultEnabled": false,
+  "options": [
+    {
+      "key": "keyword",
+      "type": "string",
+      "label": "Trigger keyword",
+      "default": "bw"
+    },
+    {
+      "key": "cache_seconds",
+      "type": "int",
+      "label": "Vault item cache TTL (seconds)",
+      "default": 30,
+      "min": 0,
+      "max": 600
+    }
+  ]
+}

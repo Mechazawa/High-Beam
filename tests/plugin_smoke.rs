@@ -14,18 +14,24 @@ const SMOKE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Plugins under `plugins/` whose code is loadable today.
 const EXAMPLES: &[&str] = &[
+    "plugins/1password",
     "plugins/app-launcher",
+    "plugins/bitwarden",
     "plugins/calculator",
+    "plugins/clipboard-history",
     "plugins/color-converter",
+    "plugins/currency-converter",
     "plugins/dictionary-linux",
     "plugins/dictionary-macos",
     "plugins/dnd",
     "plugins/echo",
     "plugins/echo-ts",
+    "plugins/emoji-picker",
     "plugins/file-search",
     "plugins/frecency-demo",
     "plugins/http-codes",
     "plugins/kill-process",
+    "plugins/obsidian",
     "plugins/paper-size",
     "plugins/prefpanes",
     "plugins/quick-links",
@@ -164,6 +170,36 @@ fn window_mgmt_loads_in_rquickjs() {
 #[test]
 fn xkcd_loads_in_rquickjs() {
     smoke_test("plugins/xkcd");
+}
+
+#[test]
+fn onepassword_loads_in_rquickjs() {
+    smoke_test("plugins/1password");
+}
+
+#[test]
+fn bitwarden_loads_in_rquickjs() {
+    smoke_test("plugins/bitwarden");
+}
+
+#[test]
+fn clipboard_history_loads_in_rquickjs() {
+    smoke_test("plugins/clipboard-history");
+}
+
+#[test]
+fn currency_converter_loads_in_rquickjs() {
+    smoke_test("plugins/currency-converter");
+}
+
+#[test]
+fn emoji_picker_loads_in_rquickjs() {
+    smoke_test("plugins/emoji-picker");
+}
+
+#[test]
+fn obsidian_loads_in_rquickjs() {
+    smoke_test("plugins/obsidian");
 }
 
 #[test]

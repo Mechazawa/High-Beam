@@ -1,0 +1,41 @@
+{
+  "name": "1password",
+  "displayName": "1Password",
+  "version": "1.0.0",
+  "description": "Search the local 1Password vault via the `op` CLI — requires the CLI to be installed and signed in (`op signin`).",
+  "entry": "plugin.js",
+  "debounceMs": 150,
+  "timeoutMs": 3000,
+  "memoryMb": 32,
+  "platforms": ["macos", "linux"],
+  "capabilities": ["actions", "system.exec", "clipboard.write", "fs.cache"],
+  "defaultEnabled": false,
+  "options": [
+    {
+      "key": "keyword",
+      "type": "string",
+      "label": "Trigger keyword",
+      "default": "op"
+    },
+    {
+      "key": "account",
+      "type": "string",
+      "label": "1Password account (passed as --account; leave blank for default)",
+      "default": ""
+    },
+    {
+      "key": "vault",
+      "type": "string",
+      "label": "Vault to restrict the search to (passed as --vault; leave blank for all)",
+      "default": ""
+    },
+    {
+      "key": "cache_seconds",
+      "type": "int",
+      "label": "How long to cache the item list (seconds)",
+      "default": 30,
+      "min": 0,
+      "max": 600
+    }
+  ]
+}

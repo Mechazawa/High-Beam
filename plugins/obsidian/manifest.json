@@ -1,0 +1,45 @@
+{
+  "name": "obsidian",
+  "displayName": "Obsidian",
+  "version": "1.0.0",
+  "description": "Search your Obsidian vault by note filename and open the chosen note in Obsidian.",
+  "debounceMs": 100,
+  "timeoutMs": 2000,
+  "memoryMb": 64,
+  "platforms": ["macos", "linux"],
+  "capabilities": ["actions", "fs.read", "fs.cache"],
+  "options": [
+    {
+      "key": "vault_path",
+      "type": "string",
+      "label": "Absolute path to the Obsidian vault root",
+      "default": ""
+    },
+    {
+      "key": "vault_name",
+      "type": "string",
+      "label": "Vault name (defaults to the vault directory's basename)",
+      "default": ""
+    },
+    {
+      "key": "keyword",
+      "type": "string",
+      "label": "Trigger keyword",
+      "default": "obs"
+    },
+    {
+      "key": "always_on",
+      "type": "bool",
+      "label": "Search the vault on every query (no keyword required)",
+      "default": false
+    },
+    {
+      "key": "cache_seconds",
+      "type": "int",
+      "label": "How long to cache the vault file list (seconds)",
+      "default": 60,
+      "min": 0,
+      "max": 600
+    }
+  ]
+}

@@ -10,9 +10,9 @@ name: Plugins
 
 on:
   push:
-    branches: [master, rust]
+    branches: [master]
   pull_request:
-    branches: [master, rust]
+    branches: [master]
 
 concurrency:
   group: plugins-${{ github.ref }}
@@ -28,12 +28,18 @@ jobs:
       fail-fast: false
       matrix:
         plugin:
+          - 1password
           - app-launcher
+          - bitwarden
           - calculator
+          - clipboard-history
+          - currency-converter
           - dnd
           - echo
           - echo-ts
+          - emoji-picker
           - http-codes
+          - obsidian
           - paper-size
           - xkcd
 

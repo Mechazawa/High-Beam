@@ -1,0 +1,34 @@
+{
+    "name": "currency-converter",
+    "displayName": "Currency Converter",
+    "version": "1.0.0",
+    "description": "Convert between currencies — `100 USD to EUR`, `5 GBP JPY`, or `200 SEK` against your home currency. Uses open.er-api.com (no API key required).",
+    "timeoutMs": 3000,
+    "memoryMb": 32,
+    "platforms": ["macos", "linux"],
+    "capabilities": ["actions", "http", "clipboard.write", "fs.cache"],
+    "options": [
+        {
+            "key": "home_currency",
+            "type": "string",
+            "label": "Home currency (3-letter ISO 4217 code, used as the implicit target)",
+            "default": ""
+        },
+        {
+            "key": "precision",
+            "type": "int",
+            "label": "Decimal places in the formatted output",
+            "default": 2,
+            "min": 0,
+            "max": 6
+        },
+        {
+            "key": "cache_seconds",
+            "type": "int",
+            "label": "Cache TTL in seconds (0 = trust the API's next-update timestamp, typically 24h)",
+            "default": 0,
+            "min": 0,
+            "max": 86400
+        }
+    ]
+}

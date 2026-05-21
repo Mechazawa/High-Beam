@@ -1,0 +1,25 @@
+{
+  "name": "emoji-picker",
+  "displayName": "Emoji Picker",
+  "version": "1.0.0",
+  "description": "Fuzzy-search emoji by name, alias, or tag — Enter copies the character.",
+  "debounceMs": 50,
+  "timeoutMs": 500,
+  "memoryMb": 64,
+  "capabilities": ["actions", "fs.read"],
+  "platforms": ["macos", "linux"],
+  "options": [
+    {
+      "key": "trigger",
+      "type": "string",
+      "label": "Trigger keyword (e.g. `emoji`)",
+      "default": "emoji"
+    },
+    {
+      "key": "skin_tones",
+      "type": "bool",
+      "label": "Include skin-tone variants",
+      "default": false
+    }
+  ]
+}
