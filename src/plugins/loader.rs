@@ -90,10 +90,20 @@ pub fn scan_manifests(options: &LoaderOptions) -> Vec<Manifest> {
 /// enabled, so callers that don't care about user settings can pass it
 /// directly.
 pub async fn load_all(options: &LoaderOptions, settings: &Settings) -> Vec<Arc<LoadedPlugin>> {
-    let entries = match std::fs::read_dir(&options.plugins_dir) {
-        Ok(e) => e,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
-        Err(err) => {
+    let plugins_dir = options.plugins_dir.clone();
+    let scan = tokio::task::spawn_blocking(move || -> std::io::Result<Vec<PathBuf>> {
+        let entries = std::fs::read_dir(&plugins_dir)?;
+        Ok(entries
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.is_dir())
+            .collect())
+    })
+    .await;
+    let dirs = match scan {
+        Ok(Ok(dirs)) => dirs,
+        Ok(Err(err)) if err.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Ok(Err(err)) => {
             tracing::error!(
                 plugins_dir = %options.plugins_dir.display(),
                 %err,
@@ -101,14 +111,18 @@ pub async fn load_all(options: &LoaderOptions, settings: &Settings) -> Vec<Arc<L
             );
             return Vec::new();
         }
+        Err(join_err) => {
+            tracing::error!(
+                plugins_dir = %options.plugins_dir.display(),
+                %join_err,
+                "plugins: scan task panicked",
+            );
+            return Vec::new();
+        }
     };
 
     let mut plugins = Vec::new();
-    for entry in entries.filter_map(Result::ok) {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
+    for path in dirs {
         match load_one(&path, settings).await {
             Ok(plugin) => {
                 tracing::info!(
@@ -159,9 +173,15 @@ pub async fn load_one_for_reload(
 
 async fn load_one(plugin_dir: &Path, settings: &Settings) -> Result<LoadedPlugin, LoadError> {
     let manifest_path = plugin_dir.join("manifest.json");
-    let bytes = std::fs::read(&manifest_path).map_err(|err| {
-        LoadError::Failed(format!("read {}: {err}", manifest_path.display()).into())
-    })?;
+    let read_path = manifest_path.clone();
+    let bytes = tokio::task::spawn_blocking(move || std::fs::read(&read_path))
+        .await
+        .map_err(|join_err| {
+            LoadError::Failed(format!("manifest read task panicked: {join_err}").into())
+        })?
+        .map_err(|err| {
+            LoadError::Failed(format!("read {}: {err}", manifest_path.display()).into())
+        })?;
     // Manifest parse failures are reported to stderr rather than plugin.log
     // because the manifest is the source of the plugin's name — writing into
     // a per-plugin file before the parse succeeds would require inventing one.
@@ -219,7 +239,7 @@ async fn load_one(plugin_dir: &Path, settings: &Settings) -> Result<LoadedPlugin
     // of branching on "did the user set a value?".
     let merged_options = crate::sdk::settings::merge_options(
         &manifest.parsed_options().defs,
-        &settings.plugin_options(&manifest.name),
+        settings.plugin_options(&manifest.name),
     );
 
     let cache_dir = crate::plugins::runtime::default_cache_dir(&manifest.name);

@@ -165,12 +165,21 @@ impl LoadedPlugin {
         merged_options: HashMap<String, JsonValue>,
     ) -> Result<Self, PluginError> {
         let entry_path = manifest.entry_path(plugin_dir);
-        let source = std::fs::read_to_string(&entry_path).map_err(|err| {
-            PluginError::Io(std::io::Error::new(
-                err.kind(),
-                format!("read {}: {err}", entry_path.display()),
-            ))
-        })?;
+        let read_path = entry_path.clone();
+        let source = tokio::task::spawn_blocking(move || std::fs::read_to_string(&read_path))
+            .await
+            .map_err(|join_err| {
+                PluginError::Io(std::io::Error::other(format!(
+                    "spawn_blocking join failed reading {}: {join_err}",
+                    entry_path.display()
+                )))
+            })?
+            .map_err(|err| {
+                PluginError::Io(std::io::Error::new(
+                    err.kind(),
+                    format!("read {}: {err}", entry_path.display()),
+                ))
+            })?;
 
         let runtime = AsyncRuntime::new().map_err(|err| PluginError::Js(err.to_string()))?;
 

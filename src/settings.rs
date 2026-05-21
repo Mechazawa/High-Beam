@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -282,15 +283,14 @@ impl Settings {
         self.plugins.get(name).is_none_or(|s| s.enabled)
     }
 
-    /// All option values the user has set for a plugin. Returns an empty map
-    /// when the plugin has no overrides — callers fall back to manifest
-    /// defaults at lookup time.
+    /// All option values the user has set for a plugin. Returns a borrowed
+    /// reference to the plugin's options map, or to a shared empty map when
+    /// the plugin has no overrides — callers fall back to manifest defaults
+    /// at lookup time.
     #[must_use]
-    pub fn plugin_options(&self, name: &str) -> HashMap<String, JsonValue> {
-        self.plugins
-            .get(name)
-            .map(|s| s.options.clone())
-            .unwrap_or_default()
+    pub fn plugin_options(&self, name: &str) -> &HashMap<String, JsonValue> {
+        static EMPTY: LazyLock<HashMap<String, JsonValue>> = LazyLock::new(HashMap::new);
+        self.plugins.get(name).map_or(&EMPTY, |s| &s.options)
     }
 
     /// Toggle a plugin's enabled flag. Creates the slot on first set.

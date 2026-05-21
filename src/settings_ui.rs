@@ -237,7 +237,7 @@ impl SettingsController {
         let user_opts = settings.plugin_options(&manifest.name);
         let options: Vec<PluginOption> = defs
             .iter()
-            .map(|def| option_row(&manifest.name, def, &user_opts))
+            .map(|def| option_row(&manifest.name, def, user_opts))
             .collect();
         window.set_plugin_options(ModelRc::new(VecModel::from(options)));
     }
@@ -325,70 +325,51 @@ fn option_row(
         .cloned()
         .unwrap_or_else(|| def.default_json());
 
-    let (kind, value_string, value_bool, value_int, int_min, int_max, has_min, has_max, choices) =
-        match &def.kind {
-            OptionKind::String { .. } => (
-                "string",
-                value.as_str().unwrap_or_default().to_owned(),
-                false,
-                0_i32,
-                0_i32,
-                0_i32,
-                false,
-                false,
-                String::new(),
-            ),
-            OptionKind::Bool { .. } => (
-                "bool",
-                String::new(),
-                value.as_bool().unwrap_or(false),
-                0,
-                0,
-                0,
-                false,
-                false,
-                String::new(),
-            ),
-            OptionKind::Int { min, max, .. } => {
-                let raw = value.as_i64().unwrap_or(0);
-                (
-                    "int",
-                    raw.to_string(),
-                    false,
-                    i32::try_from(raw).unwrap_or(0),
-                    min.and_then(|m| i32::try_from(m).ok()).unwrap_or(0),
-                    max.and_then(|m| i32::try_from(m).ok()).unwrap_or(0),
-                    min.is_some(),
-                    max.is_some(),
-                    String::new(),
-                )
-            }
-            OptionKind::Enum { choices, .. } => (
-                "enum",
-                value.as_str().unwrap_or_default().to_owned(),
-                false,
-                0,
-                0,
-                0,
-                false,
-                false,
-                choices.join(","),
-            ),
-        };
-
-    PluginOption {
+    let base = PluginOption {
         plugin_name: SharedString::from(plugin_name),
         key: SharedString::from(def.key.as_str()),
         label: SharedString::from(def.label.as_str()),
-        kind: SharedString::from(kind),
-        value_string: SharedString::from(value_string),
-        value_bool,
-        value_int,
-        int_min,
-        int_max,
-        has_int_min: has_min,
-        has_int_max: has_max,
-        enum_choices: SharedString::from(choices),
+        kind: SharedString::default(),
+        value_string: SharedString::default(),
+        value_bool: false,
+        value_int: 0,
+        int_min: 0,
+        int_max: 0,
+        has_int_min: false,
+        has_int_max: false,
+        enum_choices: SharedString::default(),
+    };
+
+    match &def.kind {
+        OptionKind::String { .. } => PluginOption {
+            kind: SharedString::from("string"),
+            value_string: SharedString::from(value.as_str().unwrap_or_default()),
+            ..base
+        },
+        OptionKind::Bool { .. } => PluginOption {
+            kind: SharedString::from("bool"),
+            value_bool: value.as_bool().unwrap_or(false),
+            ..base
+        },
+        OptionKind::Int { min, max, .. } => {
+            let raw = value.as_i64().unwrap_or(0);
+            PluginOption {
+                kind: SharedString::from("int"),
+                value_string: SharedString::from(raw.to_string()),
+                value_int: i32::try_from(raw).unwrap_or(0),
+                int_min: min.and_then(|m| i32::try_from(m).ok()).unwrap_or(0),
+                int_max: max.and_then(|m| i32::try_from(m).ok()).unwrap_or(0),
+                has_int_min: min.is_some(),
+                has_int_max: max.is_some(),
+                ..base
+            }
+        }
+        OptionKind::Enum { choices, .. } => PluginOption {
+            kind: SharedString::from("enum"),
+            value_string: SharedString::from(value.as_str().unwrap_or_default()),
+            enum_choices: SharedString::from(choices.join(",")),
+            ..base
+        },
     }
 }
 

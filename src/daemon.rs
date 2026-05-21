@@ -190,7 +190,7 @@ fn spawn_hotkey_listener(
     }
     let hotkey_id = hotkey.id();
 
-    thread::Builder::new()
+    if let Err(err) = thread::Builder::new()
         .name("highbeam-hotkey".into())
         .spawn(move || {
             let receiver = GlobalHotKeyEvent::receiver();
@@ -206,7 +206,10 @@ fn spawn_hotkey_listener(
                 }
             }
         })
-        .expect("spawn hotkey thread");
+    {
+        tracing::error!(%err, "failed to spawn hotkey listener thread; hotkey disabled");
+        return None;
+    }
 
     Some(manager)
 }

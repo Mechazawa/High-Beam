@@ -33,8 +33,6 @@ pub(crate) struct PickRow {
     pub(crate) last_picked_at: i64,
 }
 
-type ResultId = (String, String);
-
 /// Owned handle to the frecency database. `Arc<Mutex>` is enough — picks
 /// happen at most a few times per second from one thread.
 #[derive(Clone)]
@@ -106,20 +104,21 @@ impl FrecencyDb {
             let picks: u32 = row.get(2)?;
             let last_picked_at: i64 = row.get(3)?;
             Ok((
-                (plugin_name, result_key),
+                plugin_name,
+                result_key,
                 PickRow {
                     picks,
                     last_picked_at,
                 },
             ))
         });
-        let mut map = HashMap::new();
+        let mut map: HashMap<String, HashMap<String, PickRow>> = HashMap::new();
         match rows {
             Ok(iter) => {
                 for row in iter {
                     match row {
-                        Ok((id, pick)) => {
-                            map.insert(id, pick);
+                        Ok((plugin, key, pick)) => {
+                            map.entry(plugin).or_default().insert(key, pick);
                         }
                         Err(err) => tracing::warn!(%err, "frecency: row decode failed"),
                     }
@@ -143,10 +142,12 @@ impl FrecencyDb {
         result_key: &str,
         now: i64,
     ) -> rusqlite::Result<()> {
-        let guard = self
-            .inner
-            .lock()
-            .map_err(|err| rusqlite::Error::ToSqlConversionFailure(format!("{err}").into()))?;
+        let guard = self.inner.lock().map_err(|err| {
+            rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_MISUSE),
+                Some(format!("frecency db mutex poisoned: {err}")),
+            )
+        })?;
         guard.execute(
             "INSERT INTO picks (plugin_name, result_key, picks, last_picked_at)
              VALUES (?1, ?2, 1, ?3)
@@ -198,23 +199,29 @@ pub(crate) fn now_seconds() -> i64 {
 
 /// Per-query snapshot of the picks table — owned `HashMap` so the dispatcher
 /// can pass it around without juggling lifetimes against the DB connection.
+///
+/// Two-level so `get()` can borrow the plugin name as `&str` without
+/// allocating a composite key per lookup; the inner-map miss path still
+/// allocates one `String` for the result-key probe, but that allocation
+/// dominates only when there ARE entries for the plugin.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Snapshot {
-    picks: HashMap<ResultId, PickRow>,
+    picks: HashMap<String, HashMap<String, PickRow>>,
 }
 
 impl Snapshot {
     #[must_use]
     pub(crate) fn get(&self, plugin_name: &str, result_key: &str) -> Option<PickRow> {
-        self.picks
-            .get(&(plugin_name.to_owned(), result_key.to_owned()))
-            .copied()
+        self.picks.get(plugin_name)?.get(result_key).copied()
     }
 
     #[cfg(test)]
     #[must_use]
     pub(crate) fn from_rows(rows: Vec<(String, String, PickRow)>) -> Self {
-        let picks = rows.into_iter().map(|(p, k, r)| ((p, k), r)).collect();
+        let mut picks: HashMap<String, HashMap<String, PickRow>> = HashMap::new();
+        for (plugin, key, row) in rows {
+            picks.entry(plugin).or_default().insert(key, row);
+        }
         Self { picks }
     }
 }

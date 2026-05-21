@@ -295,7 +295,9 @@ fn open_frecency_db() -> Option<FrecencyDb> {
 /// runtime is registered.
 fn spawn_pick_bump(db: &FrecencyDb, plugin_name: String, result_key: String) {
     let db = db.clone();
-    thread::Builder::new()
+    let plugin_name_for_log = plugin_name.clone();
+    let result_key_for_log = result_key.clone();
+    if let Err(err) = thread::Builder::new()
         .name("highbeam-frecency-bump".into())
         .spawn(move || {
             if let Err(err) = db.bump(&plugin_name, &result_key) {
@@ -307,7 +309,14 @@ fn spawn_pick_bump(db: &FrecencyDb, plugin_name: String, result_key: String) {
                 );
             }
         })
-        .ok();
+    {
+        tracing::warn!(
+            plugin = %plugin_name_for_log,
+            result_key = %result_key_for_log,
+            %err,
+            "frecency: bump thread spawn failed; pick lost",
+        );
+    }
 }
 
 /// Start a fresh query: clear the row list, kick off the streaming dispatch,
@@ -352,10 +361,10 @@ fn handle_query(
                             streamed,
                             frecency_snapshot.as_ref(),
                         );
-                        let snapshot = live.clone();
                         if let Ok(mut slot) = latest.lock() {
-                            slot.clone_from(&snapshot);
+                            slot.clone_from(&live);
                         }
+                        let snapshot = live.clone();
                         let weak = weak.clone();
                         let _ = slint::invoke_from_event_loop(move || {
                             if let Some(w) = weak.upgrade() {
@@ -470,19 +479,22 @@ impl ProgressEmitter {
             },
             order: 0,
         };
-        if let Ok(mut slot) = self.latest.lock() {
-            if let Some(existing) = slot.iter_mut().find(|r| r.result.key == next.result.key) {
-                existing.result = next.result.clone();
-            } else {
-                let order = slot.len();
-                slot.push(RankedResult {
-                    order,
-                    ..next.clone()
-                });
+        let snapshot: Vec<RankedResult> = match self.latest.lock() {
+            Ok(mut slot) => {
+                if let Some(existing) = slot.iter_mut().find(|r| r.result.key == next.result.key) {
+                    existing.result = next.result.clone();
+                } else {
+                    let order = slot.len();
+                    slot.push(RankedResult {
+                        order,
+                        ..next.clone()
+                    });
+                }
+                slot.clone()
             }
-        }
+            Err(_) => return,
+        };
         let weak = self.weak.clone();
-        let snapshot: Vec<RankedResult> = self.latest.lock().map(|s| s.clone()).unwrap_or_default();
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(w) = weak.upgrade() {
                 render_results(&w, &snapshot);
@@ -608,9 +620,14 @@ async fn stage_payload(
             return None;
         }
     };
-    if let Err(err) = plugins::install::extract_archive(&bytes, format, &staging) {
+    let staging_for_extract = staging.clone();
+    let extract_result = tokio::task::spawn_blocking(move || {
+        plugins::install::extract_archive(&bytes, format, &staging_for_extract)
+    })
+    .await;
+    if let Err(err) = unwrap_spawn_blocking(extract_result, "extract") {
         cleanup_staging(&staging);
-        emit_install_failure(progress, progress_key, &plugin_name, &err.to_string());
+        emit_install_failure(progress, progress_key, &plugin_name, &err);
         return None;
     }
     let payload_root = plugins::install::find_payload_root(&staging);
@@ -620,12 +637,31 @@ async fn stage_payload(
         return None;
     }
     let writeable = plugins::install::manifest_for_write(manifest, url);
-    if let Err(err) = plugins::install::write_manifest_json(&payload_root, &writeable) {
+    let payload_root_for_write = payload_root.clone();
+    let write_result = tokio::task::spawn_blocking(move || {
+        plugins::install::write_manifest_json(&payload_root_for_write, &writeable)
+    })
+    .await;
+    if let Err(err) = unwrap_spawn_blocking(write_result, "write_manifest_json") {
         cleanup_staging(&staging);
-        emit_install_failure(progress, progress_key, &plugin_name, &err.to_string());
+        emit_install_failure(progress, progress_key, &plugin_name, &err);
         return None;
     }
     Some(payload_root)
+}
+
+/// Flatten a `JoinResult<Result<T, E>>` from `spawn_blocking` into one
+/// stringly-typed error so callers can pipe the message straight into
+/// `emit_install_failure`. `op` names the operation for panicked-task logs.
+fn unwrap_spawn_blocking<T, E: std::fmt::Display>(
+    result: Result<Result<T, E>, tokio::task::JoinError>,
+    op: &str,
+) -> Result<T, String> {
+    match result {
+        Ok(Ok(v)) => Ok(v),
+        Ok(Err(err)) => Err(err.to_string()),
+        Err(join_err) => Err(format!("{op} task panicked: {join_err}")),
+    }
 }
 
 /// Bundle of references `finalize_install` consumes — purely a packaging
@@ -652,15 +688,17 @@ async fn finalize_install(ctx: FinalizeCtx<'_>) -> Option<String> {
         progress,
     } = ctx;
     let plugins_dir = registry.options().plugins_dir.clone();
-    let installed_path = match plugins::install::move_into_plugins_dir(
-        staging_payload_root,
-        &plugins_dir,
-        plugin_name,
-    ) {
+    let staging_path = staging_payload_root.to_path_buf();
+    let plugin_name_owned = plugin_name.to_owned();
+    let move_result = tokio::task::spawn_blocking(move || {
+        plugins::install::move_into_plugins_dir(&staging_path, &plugins_dir, &plugin_name_owned)
+    })
+    .await;
+    let installed_path = match unwrap_spawn_blocking(move_result, "move_into_plugins_dir") {
         Ok(p) => p,
         Err(err) => {
             cleanup_staging(staging_payload_root);
-            emit_install_failure(progress, progress_key, plugin_name, &err.to_string());
+            emit_install_failure(progress, progress_key, plugin_name, &err);
             return None;
         }
     };
