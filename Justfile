@@ -43,3 +43,13 @@ check: fmt lint test
 bundle:
     cargo build --release
     cargo packager --release
+
+# Re-render bundle/icon.svg -> bundle/icon.png at 1024x1024. cargo-packager
+# reads the PNG and auto-generates the multi-resolution .icns at bundle
+# time. Uses macOS's built-in qlmanage so no extra tooling is needed.
+icon:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    qlmanage -t -s 1024 -o /tmp bundle/icon.svg >/dev/null
+    mv /tmp/icon.svg.png bundle/icon.png
+    echo "bundle/icon.png regenerated from bundle/icon.svg (1024x1024)"
