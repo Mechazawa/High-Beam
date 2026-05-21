@@ -190,9 +190,10 @@ export component QueryWindow inherits Window {
         root.selected-index = 0;
     }
 
-    // Replace the visible input text with `text` without firing `query-edited`.
-    // Used by history cycling so pressing Cmd+Up/Down shows the historical entry
-    // in the text field but does NOT trigger a plugin search.
+    // Replace the visible input text with `text` without firing
+    // `query-edited`. The history-cycle path dispatches the plugin query
+    // directly so it can keep the cycle cursor alive; if we re-entered via
+    // `query-edited` the edit-while-cycling state machine would clobber it.
     public function set-input-text(text: string) {
         input.text = text;
         root.query-text = text;

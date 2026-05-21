@@ -249,7 +249,7 @@ fn wire_window_callbacks(
     });
 
     let weak_for_invoke = window.as_weak();
-    let tx_for_invoke = tx;
+    let tx_for_invoke = tx.clone();
     let history_db_for_invoke = history_db.clone();
     let history_state_for_invoke = Arc::clone(&history_state);
     window.on_invoke_selected(move || {
@@ -267,6 +267,8 @@ fn wire_window_callbacks(
     // History cycling — Cmd+Up (policy A).
     let weak_for_up = window.as_weak();
     let history_state_for_up = Arc::clone(&history_state);
+    let latest_id_for_up = Arc::clone(latest_id);
+    let tx_for_up = tx.clone();
     window.on_history_up(move || {
         let Some(w) = weak_for_up.upgrade() else {
             return;
@@ -275,13 +277,16 @@ fn wire_window_callbacks(
         if let Ok(mut hs) = history_state_for_up.lock()
             && let InputAction::SetTo(text) = hs.history_up(&current)
         {
-            apply_history_text(&w, text);
+            apply_history_text(&w, &text);
+            dispatch_history_query(&latest_id_for_up, &tx_for_up, text);
         }
     });
 
     // History cycling — Cmd+Down (policy A).
     let weak_for_down = window.as_weak();
     let history_state_for_down = history_state;
+    let latest_id_for_down = Arc::clone(latest_id);
+    let tx_for_down = tx.clone();
     window.on_history_down(move || {
         let Some(w) = weak_for_down.upgrade() else {
             return;
@@ -289,7 +294,8 @@ fn wire_window_callbacks(
         if let Ok(mut hs) = history_state_for_down.lock()
             && let InputAction::SetTo(text) = hs.history_down()
         {
-            apply_history_text(&w, text);
+            apply_history_text(&w, &text);
+            dispatch_history_query(&latest_id_for_down, &tx_for_down, text);
         }
     });
 
@@ -310,12 +316,30 @@ fn wire_window_callbacks(
 
 /// Write `text` into the window's query input without firing `query_edited`.
 ///
-/// Assigning `input.text` directly via Slint's public function bypasses the
-/// `edited` callback, which is what we want: cycling through history entries
-/// should not trigger plugin searches.
-fn apply_history_text(window: &QueryWindow, text: String) {
-    window.set_query_text(text.clone().into());
+/// Direct assignment via Slint's `set-input-text` bypasses the `edited`
+/// callback on purpose — `on_query_edited` would call `mark_edited()` on
+/// the history state machine and clobber the cycle cursor on the very
+/// next keystroke. The cycle path instead calls
+/// [`dispatch_history_query`] separately to keep the plugin pipeline in
+/// sync with what the user is seeing.
+fn apply_history_text(window: &QueryWindow, text: &str) {
+    window.set_query_text(text.into());
     window.invoke_set_input_text(text.into());
+}
+
+/// Dispatch a plugin query for `text` directly, bypassing the
+/// `query-edited` callback. Used by the history-cycle handlers so
+/// cycling actually re-runs the plugin pipeline against the cycled query
+/// without going through the path that mutates history state.
+fn dispatch_history_query(
+    latest_id: &Arc<AtomicU64>,
+    tx: &mpsc::UnboundedSender<HostMessage>,
+    text: String,
+) {
+    let id = latest_id.fetch_add(1, Ordering::Relaxed) + 1;
+    if tx.send(HostMessage::Query { id, input: text }).is_err() {
+        tracing::error!("plugins: runtime thread exited; history query dropped");
+    }
 }
 
 /// Pull the pending oneshot sender out of `confirm_state` and send `decision`.
