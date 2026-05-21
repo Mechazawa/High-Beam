@@ -1,0 +1,19 @@
+[Unit]
+Description=High Beam keyboard launcher daemon
+# Wait for the graphical session before starting — the daemon owns a
+# Slint/winit window that needs Wayland/X11 to be up. `PartOf` ties our
+# lifecycle to the session: log out, daemon stops; log back in, it starts.
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/highbeam
+# `highbeam --open` from a WM keybind is how the window gets summoned,
+# so the long-lived daemon process here just sits in its IPC socket
+# accept-loop. Restart on crash to keep the keybind responsive.
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
