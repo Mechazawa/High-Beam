@@ -246,7 +246,12 @@ fn wire_window_callbacks(
     let history_db_for_invoke = history_db.clone();
     let history_state_for_invoke = Arc::clone(&history_state);
     let settings_for_invoke = settings.clone();
-    window.on_invoke_selected(move || {
+    window.on_invoke_selected(move |meta, control, shift, alt| {
+        let mods = (u8::from(meta) * crate::settings_ui::MOD_META)
+            | (u8::from(control) * crate::settings_ui::MOD_CONTROL)
+            | (u8::from(shift) * crate::settings_ui::MOD_SHIFT)
+            | (u8::from(alt) * crate::settings_ui::MOD_ALT);
+        let alt_held = settings_for_invoke.alt_modifier_held(mods);
         invoke_selected(
             &weak_for_invoke,
             &latest,
@@ -255,6 +260,7 @@ fn wire_window_callbacks(
             &tx_for_invoke,
             history_db_for_invoke.as_ref(),
             &history_state_for_invoke,
+            alt_held,
         );
     });
 
@@ -373,6 +379,7 @@ fn send_confirm_decision(state: &ConfirmState, decision: bool, weak: &slint::Wea
 
 /// Resolve the highlighted row, execute its action, bump frecency and push the
 /// query to history on success.
+#[allow(clippy::too_many_arguments)]
 fn invoke_selected(
     weak: &slint::Weak<QueryWindow>,
     latest: &Arc<Mutex<Vec<RankedResult>>>,
@@ -381,6 +388,7 @@ fn invoke_selected(
     host_tx: &mpsc::UnboundedSender<HostMessage>,
     history_db: Option<&QueryHistoryDb>,
     history_state: &Arc<Mutex<QueryHistoryState>>,
+    alt_held: bool,
 ) {
     let Some(w) = weak.upgrade() else { return };
 
@@ -397,7 +405,18 @@ fn invoke_selected(
         return;
     };
 
-    let action = picked.result.action.clone();
+    // Alt held + the result opts in via altAction ⇒ run the alternate.
+    // No altAction set ⇒ fall back to the primary so the modifier is a
+    // no-op for plugins that don't bother with secondary verbs.
+    let action = if alt_held {
+        picked
+            .result
+            .alt_action
+            .clone()
+            .unwrap_or_else(|| picked.result.action.clone())
+    } else {
+        picked.result.action.clone()
+    };
     let plugin_name = picked.plugin_name.clone();
     let result_key = picked.result.key.clone();
     drop(snapshot);
@@ -699,6 +718,7 @@ impl ProgressEmitter {
                 weight: 100.0,
                 pinned: true,
                 action,
+                alt_action: None,
             },
             order: 0,
         };

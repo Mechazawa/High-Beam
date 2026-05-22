@@ -18,6 +18,13 @@ export interface Result {
     pinned?: boolean;
     /** Primary action; invoked on Enter / mouse-click. */
     action: Action;
+    /**
+     * Alternate action invoked when the user holds the alt-action
+     * modifier (configurable in Settings → Global; default Alt) at the
+     * moment of Enter / mouse-click. Falls back to `action` when unset,
+     * so plugins can opt rows into a secondary verb individually.
+     */
+    altAction?: Action;
 }
 
 /** Tagged-union of actions the host knows how to execute. */

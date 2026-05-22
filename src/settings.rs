@@ -28,6 +28,17 @@ const SETTINGS_FILENAME: &str = "settings.toml";
 /// byte-for-byte.
 pub const DEFAULT_HOTKEY: &str = "Shift+Space";
 
+/// Default modifier for the alt-action binding. Alt collides least with
+/// system shortcuts (Cmd is reserved by macOS for menus; Ctrl by terminals
+/// on Linux); plugin authors can opt rows into a secondary verb without
+/// the user worrying about accidental triggers.
+pub const DEFAULT_ALT_ACTION_MODIFIER: &str = "Alt";
+
+/// The modifier strings the alt-action setting accepts. Matched
+/// case-insensitively; anything outside this set falls back to the
+/// default at load time.
+pub const ALT_ACTION_MODIFIER_CHOICES: &[&str] = &["Alt", "Shift", "Cmd", "Ctrl"];
+
 /// User-edited launcher state.
 ///
 /// The on-disk shape is the [`SettingsFile`] TOML schema; this is the in-memory
@@ -62,6 +73,10 @@ pub struct GlobalSettings {
     /// Maximum number of entries kept in the persistent query-history DB.
     /// Older rows are deleted when this cap is exceeded on insert.
     pub query_history_max_entries: usize,
+    /// Modifier the user holds at Enter / click to run the result's
+    /// `altAction` instead of the primary action. One of
+    /// [`ALT_ACTION_MODIFIER_CHOICES`].
+    pub alt_action_modifier: String,
 }
 
 /// Saved outer-position of the launcher window, in physical pixels relative
@@ -85,8 +100,19 @@ impl Default for GlobalSettings {
             hotkey: DEFAULT_HOTKEY.to_owned(),
             launcher_position: None,
             query_history_max_entries: DEFAULT_QUERY_HISTORY_MAX_ENTRIES,
+            alt_action_modifier: DEFAULT_ALT_ACTION_MODIFIER.to_owned(),
         }
     }
+}
+
+/// Normalise an alt-action modifier string to one of [`ALT_ACTION_MODIFIER_CHOICES`].
+/// Returns the default when the input doesn't match any known choice.
+#[must_use]
+pub fn normalize_alt_action_modifier(raw: &str) -> String {
+    ALT_ACTION_MODIFIER_CHOICES
+        .iter()
+        .find(|c| c.eq_ignore_ascii_case(raw))
+        .map_or_else(|| DEFAULT_ALT_ACTION_MODIFIER.to_owned(), |c| (*c).to_owned())
 }
 
 /// Per-plugin settings as we store them.
@@ -190,10 +216,15 @@ impl Settings {
             let max_entries = raw_global
                 .query_history_max_entries
                 .map_or(DEFAULT_QUERY_HISTORY_MAX_ENTRIES, |v| v.clamp(1, 10_000));
+            let alt_mod = raw_global
+                .alt_action_modifier
+                .as_deref()
+                .map_or_else(|| DEFAULT_ALT_ACTION_MODIFIER.to_owned(), normalize_alt_action_modifier);
             GlobalSettings {
                 hotkey: raw_global.hotkey.unwrap_or_else(|| DEFAULT_HOTKEY.to_owned()),
                 launcher_position: raw_global.launcher_position,
                 query_history_max_entries: max_entries,
+                alt_action_modifier: alt_mod,
             }
         };
         Ok(Self {
@@ -244,6 +275,11 @@ impl Settings {
             None
         } else {
             let max = self.global.query_history_max_entries;
+            let alt_mod = if self.global.alt_action_modifier == DEFAULT_ALT_ACTION_MODIFIER {
+                None
+            } else {
+                Some(self.global.alt_action_modifier.clone())
+            };
             Some(GlobalFile {
                 hotkey: Some(self.global.hotkey.clone()),
                 launcher_position: self.global.launcher_position,
@@ -252,6 +288,7 @@ impl Settings {
                 } else {
                     Some(max)
                 },
+                alt_action_modifier: alt_mod,
             })
         };
         let file = SettingsFile { global, plugins };
@@ -363,6 +400,20 @@ impl Settings {
         self.global.query_history_max_entries
     }
 
+    /// The configured alt-action modifier (`"Alt"`, `"Shift"`, `"Cmd"`,
+    /// `"Ctrl"`). Already normalised at load time.
+    #[must_use]
+    pub fn alt_action_modifier(&self) -> &str {
+        &self.global.alt_action_modifier
+    }
+
+    /// Replace the alt-action modifier. Input is normalised against
+    /// [`ALT_ACTION_MODIFIER_CHOICES`]; unknown values reset to the
+    /// default rather than persisting garbage.
+    pub fn set_alt_action_modifier(&mut self, value: &str) {
+        self.global.alt_action_modifier = normalize_alt_action_modifier(value);
+    }
+
     /// Set the global hotkey accelerator string. Trimmed before storing so
     /// `"Shift+Space "` from a stray `TextInput` doesn't fail the parser later.
     pub fn set_hotkey(&mut self, hotkey: &str) {
@@ -400,6 +451,8 @@ struct GlobalFile {
     launcher_position: Option<WindowPosition>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     query_history_max_entries: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    alt_action_modifier: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]

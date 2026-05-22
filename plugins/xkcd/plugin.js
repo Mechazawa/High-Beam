@@ -17,6 +17,7 @@ const TRIGGER = /^xkcd(?:\s+(.+))?$/i;
 const LATEST_URL = "https://xkcd.com/info.0.json";
 const COMIC_URL = (n) => `https://xkcd.com/${n}/info.0.json`;
 const COMIC_PAGE = (n) => `https://xkcd.com/${n}/`;
+const EXPLAIN_PAGE = (n) => `https://www.explainxkcd.com/wiki/index.php/${n}`;
 
 const CACHE_NAME = "xkcd-index.json";
 // 24h freshness window. New comics land Mon/Wed/Fri so a daily refresh is
@@ -57,6 +58,9 @@ function resultFor(comic) {
         weight: 80,
         pinned: false,
         action: openUrl(COMIC_PAGE(comic.num)),
+        // Alt opens the explainxkcd page — separate plugin would be heavier
+        // than just wiring the secondary verb here.
+        altAction: openUrl(EXPLAIN_PAGE(comic.num)),
     };
 }
 
@@ -193,6 +197,7 @@ export async function* query(input, signal) {
             weight: 80,
             pinned: false,
             action: openUrl(COMIC_PAGE(item.num)),
+            altAction: openUrl(EXPLAIN_PAGE(item.num)),
         };
     }
 }

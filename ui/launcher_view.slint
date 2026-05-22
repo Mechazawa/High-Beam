@@ -32,7 +32,9 @@ export component LauncherView {
     // Callbacks forwarded to the parent
     callback query-edited(string);
     callback escape-pressed();
-    callback invoke-selected();
+    // Modifier flags ride along so Rust can pick the result's `altAction`
+    // when the configured alt modifier is held.
+    callback invoke-selected(bool, bool, bool, bool);
     callback history-up();
     callback history-down();
     callback show-settings();
@@ -121,7 +123,12 @@ export component LauncherView {
                             return accept;
                         }
                         if (root.results.length > 0) {
-                            root.invoke-selected();
+                            root.invoke-selected(
+                                event.modifiers.meta,
+                                event.modifiers.control,
+                                event.modifiers.shift,
+                                event.modifiers.alt,
+                            );
                         }
                         return accept;
                     }
@@ -159,9 +166,16 @@ export component LauncherView {
                 spacing: 0px;
                 for row[idx] in results: TouchArea {
                     height: 56px;
-                    clicked => {
-                        root.selected-index = idx;
-                        root.invoke-selected();
+                    pointer-event(event) => {
+                        if (event.kind == PointerEventKind.up && event.button == PointerEventButton.left) {
+                            root.selected-index = idx;
+                            root.invoke-selected(
+                                event.modifiers.meta,
+                                event.modifiers.control,
+                                event.modifiers.shift,
+                                event.modifiers.alt,
+                            );
+                        }
                     }
                     Rectangle {
                         background: idx == root.selected-index ? root.selection-color : transparent;

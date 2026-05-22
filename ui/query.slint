@@ -50,6 +50,7 @@ export component QueryWindow inherits Window {
     // true so opening settings lands on Global rather than a random plugin.
     in-out property <bool> showing-global: true;
     in-out property <string> hotkey-value: "Shift+Space";
+    in-out property <string> alt-action-modifier: "Alt";
     // Keyboard rail selection: 0 = Global, 1 = plugin[0], 2 = plugin[1], etc.
     // Distinct from `selected-plugin-index` so arrow-key nav can sit on Global
     // without mutating the plugin selection state behind it.
@@ -96,7 +97,9 @@ export component QueryWindow inherits Window {
     callback persist-dismiss(string);
     // Fires when the user presses Enter on the highlighted row. The Rust side
     // looks up the corresponding result and runs its action.
-    callback invoke-selected();
+    // Modifier flags ride along so Rust can pick `altAction` when the
+    // configured alt modifier is held at Enter / click time.
+    callback invoke-selected(bool, bool, bool, bool);
     // History cycling — Up only acts on history when the input is empty (so
     // regular Up keeps navigating results once the user has typed). Down only
     // acts on history while previewing. Rust owns the state machine and
@@ -131,6 +134,7 @@ export component QueryWindow inherits Window {
     // `select-global` flips the rail selection to the global entry.
     callback capture-hotkey(bool, bool, bool, bool, string) -> bool;
     callback reset-hotkey-to-default();
+    callback cycle-alt-action-modifier();
     callback select-global();
     // Whether the hotkey field is currently listening for a key combo —
     // drives the prompt text + highlighted border in the global pane.
@@ -280,7 +284,7 @@ export component QueryWindow inherits Window {
 
             query-edited(s) => { root.query-edited(s); }
             escape-pressed => { root.escape-pressed(); }
-            invoke-selected => { root.invoke-selected(); }
+            invoke-selected(meta, control, shift, alt) => { root.invoke-selected(meta, control, shift, alt); }
             history-up => { root.history-up(); }
             history-down => { root.history-down(); }
             show-settings => { root.show-settings(); }
@@ -303,6 +307,7 @@ export component QueryWindow inherits Window {
             rail-focus-index <=> root.rail-focus-index;
             hotkey-value <=> root.hotkey-value;
             capturing-hotkey <=> root.capturing-hotkey;
+            alt-action-modifier <=> root.alt-action-modifier;
 
             foreground-color: root.foreground-color;
             muted-color: root.muted-color;
@@ -322,6 +327,7 @@ export component QueryWindow inherits Window {
             cycle-option-enum(plugin, key) => { root.cycle-option-enum(plugin, key); }
             capture-hotkey(meta, ctrl, shift, alt, text) => { return root.capture-hotkey(meta, ctrl, shift, alt, text); }
             reset-hotkey-to-default => { root.reset-hotkey-to-default(); }
+            cycle-alt-action-modifier => { root.cycle-alt-action-modifier(); }
             select-global => { root.select-global(); }
             recenter-window => { root.recenter-window(); }
             open-config-dir => { root.open-config-dir(); }

@@ -29,6 +29,12 @@ pub struct PluginResult {
     #[serde(default)]
     pub pinned: bool,
     pub action: Action,
+    /// Optional alternate action invoked when the user holds the modifier
+    /// configured in settings (default Alt) while pressing Enter or
+    /// clicking. `None` ⇒ the primary `action` is used regardless of
+    /// modifier state.
+    #[serde(default, rename = "altAction")]
+    pub alt_action: Option<Action>,
 }
 
 /// Variants of [`Action`] the host knows how to execute.
@@ -175,5 +181,23 @@ mod tests {
         assert!(parsed.subtitle.is_none());
         assert!(!parsed.pinned);
         assert!((parsed.weight - 0.0).abs() < f64::EPSILON);
+        // Absent `altAction` parses as `None` so the dispatch path can
+        // fall back to `action` unconditionally.
+        assert!(parsed.alt_action.is_none());
+    }
+
+    #[test]
+    fn result_parses_alt_action_when_present() {
+        let json = r#"{
+            "key":"k",
+            "title":"t",
+            "action":{"kind":"openUrl","url":"https://primary.example"},
+            "altAction":{"kind":"openUrl","url":"https://explain.example"}
+        }"#;
+        let parsed: PluginResult = serde_json::from_str(json).unwrap();
+        match parsed.alt_action {
+            Some(Action::OpenUrl { url }) => assert_eq!(url, "https://explain.example"),
+            other => panic!("expected Some(OpenUrl), got {other:?}"),
+        }
     }
 }

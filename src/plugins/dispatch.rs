@@ -162,6 +162,7 @@ mod tests {
                 icon: None,
                 weight,
                 pinned,
+                alt_action: None,
                 action: Action::Copy { text: key.into() },
             },
         }

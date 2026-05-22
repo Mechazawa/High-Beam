@@ -199,6 +199,15 @@ impl SettingsController {
             }
         });
 
+        let ctrl = self.clone();
+        let weak = window.as_weak();
+        window.on_cycle_alt_action_modifier(move || {
+            ctrl.cycle_alt_action_modifier();
+            if let Some(w) = weak.upgrade() {
+                ctrl.refresh_global(&w);
+            }
+        });
+
         let weak = window.as_weak();
         window.on_select_global(move || {
             // The Slint side already flipped `showing-global` to true; this
@@ -213,6 +222,7 @@ impl SettingsController {
     fn refresh_global(&self, window: &QueryWindow) {
         let settings = self.inner.settings.lock().expect("settings lock");
         window.set_hotkey_value(SharedString::from(settings.global().hotkey.as_str()));
+        window.set_alt_action_modifier(SharedString::from(settings.alt_action_modifier()));
     }
 
     fn set_hotkey(&self, value: &str) {
@@ -222,6 +232,22 @@ impl SettingsController {
         }
         if let Err(err) = self.persist() {
             tracing::warn!(%err, "settings: persist after hotkey-set failed");
+        }
+    }
+
+    fn cycle_alt_action_modifier(&self) {
+        {
+            let mut settings = self.inner.settings.lock().expect("settings lock");
+            let current = settings.alt_action_modifier();
+            let idx = crate::settings::ALT_ACTION_MODIFIER_CHOICES
+                .iter()
+                .position(|c| *c == current)
+                .unwrap_or(0);
+            let next_idx = (idx + 1) % crate::settings::ALT_ACTION_MODIFIER_CHOICES.len();
+            settings.set_alt_action_modifier(crate::settings::ALT_ACTION_MODIFIER_CHOICES[next_idx]);
+        }
+        if let Err(err) = self.persist() {
+            tracing::warn!(%err, "settings: persist after alt-action-modifier change failed");
         }
     }
 
@@ -237,6 +263,51 @@ impl SettingsController {
     pub fn launcher_position(&self) -> Option<WindowPosition> {
         let settings = self.inner.settings.lock().expect("settings lock");
         settings.global().launcher_position
+    }
+
+    /// Whether the configured alt-action modifier is set in the modifier
+    /// bitfield Slint hands us with an Enter / click event. `mods` follows
+    /// the same packing as the hotkey-capture path
+    /// (`MOD_META | MOD_CONTROL | …`), so callers OR the four Slint flags
+    /// into one byte at the callback boundary.
+    ///
+    /// Resolves the platform-specific Slint Cmd↔Ctrl swap (the same one
+    /// the hotkey formatter has to handle).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the settings mutex is poisoned. See
+    /// [`Self::launcher_position`] for the rationale.
+    #[must_use]
+    pub fn alt_modifier_held(&self, mods: u8) -> bool {
+        let settings = self.inner.settings.lock().expect("settings lock");
+        match settings.alt_action_modifier() {
+            "Alt" => mods & MOD_ALT != 0,
+            "Shift" => mods & MOD_SHIFT != 0,
+            // Slint reports the physical Cmd key as `control` on macOS;
+            // everywhere else, it's `meta` (Super / Win key).
+            "Cmd" => {
+                #[cfg(target_os = "macos")]
+                {
+                    mods & MOD_CONTROL != 0
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    mods & MOD_META != 0
+                }
+            }
+            "Ctrl" => {
+                #[cfg(target_os = "macos")]
+                {
+                    mods & MOD_META != 0
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    mods & MOD_CONTROL != 0
+                }
+            }
+            _ => false,
+        }
     }
 
     /// Current `query_history.max_entries` setting. Read on every history
@@ -480,10 +551,10 @@ fn next_choice(current: &str, choices: &[String]) -> String {
 /// `fn_params_excessive_bools` lints. Constructed via OR of the constants
 /// below at the call site.
 type KeyMods = u8;
-const MOD_META: KeyMods = 1 << 0;
-const MOD_CONTROL: KeyMods = 1 << 1;
-const MOD_SHIFT: KeyMods = 1 << 2;
-const MOD_ALT: KeyMods = 1 << 3;
+pub(crate) const MOD_META: KeyMods = 1 << 0;
+pub(crate) const MOD_CONTROL: KeyMods = 1 << 1;
+pub(crate) const MOD_SHIFT: KeyMods = 1 << 2;
+pub(crate) const MOD_ALT: KeyMods = 1 << 3;
 
 /// Turn a Slint key-pressed event into the `global_hotkey`-compatible
 /// spec string. Returns `None` for modifier-only / unprintable inputs the
@@ -906,6 +977,51 @@ mod tests {
         // F-keys are explicit shortcut keys; binding F12 alone is fine.
         let spec = format_hotkey_spec(0, "\u{f70f}").expect("bare F12");
         assert_eq!(spec, "F12");
+    }
+
+    #[test]
+    fn alt_modifier_held_follows_setting() {
+        let ctrl = SettingsController::new(Vec::new(), Settings::default());
+
+        // Default setting is "Alt" — only the alt flag triggers.
+        assert!(ctrl.alt_modifier_held(MOD_ALT));
+        assert!(!ctrl.alt_modifier_held(MOD_META));
+        assert!(!ctrl.alt_modifier_held(MOD_CONTROL));
+        assert!(!ctrl.alt_modifier_held(MOD_SHIFT));
+        assert!(!ctrl.alt_modifier_held(0));
+
+        // Switching the setting via cycle reaches each choice in turn.
+        ctrl.cycle_alt_action_modifier(); // Alt -> Shift
+        assert!(ctrl.alt_modifier_held(MOD_SHIFT));
+        assert!(!ctrl.alt_modifier_held(MOD_ALT));
+
+        ctrl.cycle_alt_action_modifier(); // Shift -> Cmd
+        #[cfg(target_os = "macos")]
+        {
+            // Slint reports physical Cmd as `control` on macOS.
+            assert!(ctrl.alt_modifier_held(MOD_CONTROL));
+            assert!(!ctrl.alt_modifier_held(MOD_META));
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            assert!(ctrl.alt_modifier_held(MOD_META));
+            assert!(!ctrl.alt_modifier_held(MOD_CONTROL));
+        }
+
+        ctrl.cycle_alt_action_modifier(); // Cmd -> Ctrl
+        #[cfg(target_os = "macos")]
+        {
+            assert!(ctrl.alt_modifier_held(MOD_META));
+            assert!(!ctrl.alt_modifier_held(MOD_CONTROL));
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            assert!(ctrl.alt_modifier_held(MOD_CONTROL));
+            assert!(!ctrl.alt_modifier_held(MOD_META));
+        }
+
+        ctrl.cycle_alt_action_modifier(); // Ctrl -> wraps back to Alt
+        assert!(ctrl.alt_modifier_held(MOD_ALT));
     }
 
     #[test]
