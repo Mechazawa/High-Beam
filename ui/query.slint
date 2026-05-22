@@ -258,6 +258,11 @@ export component QueryWindow inherits Window {
         // and `set-input-text()` regardless of which view is currently showing.
         launcher := LauncherView {
             visible: root.current-view == root.VIEW-QUERY;
+            // Components don't auto-fill their slot the way layouts do;
+            // pin to the panel's box so the results list spans the full
+            // launcher width.
+            width: parent.width;
+            height: parent.height;
 
             results <=> root.results;
             selected-index <=> root.selected-index;
@@ -286,6 +291,8 @@ export component QueryWindow inherits Window {
         // `show-settings()` which calls `settings.focus-rail()`.
         settings := SettingsView {
             visible: root.current-view == root.VIEW-SETTINGS;
+            width: parent.width;
+            height: parent.height;
 
             plugin-slots <=> root.plugin-slots;
             selected-plugin-index <=> root.selected-plugin-index;
@@ -326,6 +333,8 @@ export component QueryWindow inherits Window {
         // `show-confirm()` which calls `confirm.focus-confirm()`.
         confirm := ConfirmView {
             visible: root.current-view == root.VIEW-CONFIRM;
+            width: parent.width;
+            height: parent.height;
 
             confirm-plugin-name <=> root.confirm-plugin-name;
             confirm-display-name <=> root.confirm-display-name;
