@@ -168,12 +168,14 @@ export component QueryWindow inherits Window {
     // so text-input edits don't trigger the same write-back-to-the-
     // property dance (which yanks TextInput focus on every keystroke).
     callback cycle-option-enum(string, string);
-    // Global-pane callbacks. `capture-hotkey` fires when the user records a
-    // new combo (any non-Escape keypress while the hotkey field has focus);
-    // Rust formats the canonical spec string from the modifier flags + key.
+    // Global-pane callbacks. `capture-hotkey` fires on every keypress
+    // inside the hotkey FocusScope; Rust formats + validates the spec and
+    // returns `true` when it actually accepted (so Slint knows to exit
+    // capture mode) or `false` to keep listening (modifier-only press,
+    // bare key with no modifier, unmapped special key, etc.).
     // `reset-hotkey-to-default` fires on Escape inside capture mode.
     // `select-global` flips the rail selection to the global entry.
-    callback capture-hotkey(bool, bool, bool, bool, string);
+    callback capture-hotkey(bool, bool, bool, bool, string) -> bool;
     callback reset-hotkey-to-default();
     callback select-global();
     // Whether the hotkey field is currently listening for a key combo —
@@ -722,20 +724,18 @@ export component QueryWindow inherits Window {
                                             rail-focus.focus();
                                             return accept;
                                         }
-                                        // Slint fires key-pressed with an empty
-                                        // text when only a modifier is held; skip
-                                        // those and wait for a real key.
-                                        if (event.text == "") {
-                                            return accept;
-                                        }
-                                        root.capture-hotkey(
+                                        // Rust does the modifier-only /
+                                        // bare-key validation and returns
+                                        // true only when it actually accepted.
+                                        if (root.capture-hotkey(
                                             event.modifiers.meta,
                                             event.modifiers.control,
                                             event.modifiers.shift,
                                             event.modifiers.alt,
                                             event.text,
-                                        );
-                                        rail-focus.focus();
+                                        )) {
+                                            rail-focus.focus();
+                                        }
                                         return accept;
                                     }
                                     TouchArea {

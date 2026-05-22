@@ -173,19 +173,20 @@ impl SettingsController {
 
         let ctrl = self.clone();
         let weak = window.as_weak();
-        window.on_capture_hotkey(move |meta, control, shift, alt, key| {
+        window.on_capture_hotkey(move |meta, control, shift, alt, key| -> bool {
             let mods = (u8::from(meta) * MOD_META)
                 | (u8::from(control) * MOD_CONTROL)
                 | (u8::from(shift) * MOD_SHIFT)
                 | (u8::from(alt) * MOD_ALT);
             let Some(spec) = format_hotkey_spec(mods, key.as_str()) else {
-                return;
+                return false;
             };
             ctrl.set_hotkey(&spec);
             ctrl.reregister_hotkey(&spec);
             if let Some(w) = weak.upgrade() {
                 ctrl.refresh_global(&w);
             }
+            true
         });
 
         let ctrl = self.clone();
@@ -501,6 +502,15 @@ fn format_hotkey_spec(mods: KeyMods, key: &str) -> Option<String> {
     let meta_mod = "Super";
 
     let canonical = canonical_key(key)?;
+
+    // Require at least one modifier unless the key is a function key. F1–F24
+    // are explicit shortcut keys and reasonable to use bare; letting plain
+    // Space / a / Enter register would turn every typed key into a launcher
+    // trigger and lock the user out of the capture flow.
+    if mods == 0 && !is_function_key(&canonical) {
+        return None;
+    }
+
     let mut parts: Vec<&str> = Vec::with_capacity(5);
 
     if mods & MOD_META != 0 {
@@ -571,6 +581,16 @@ fn canonical_key(text: &str) -> Option<String> {
         _ if first.is_ascii_digit() => Some(first.to_string()),
         _ => None,
     }
+}
+
+/// Whether `name` is one of the F1..=F24 keys that `canonical_key`
+/// produces. Used by [`format_hotkey_spec`] to relax the "must have a
+/// modifier" rule for function keys, which are explicit shortcut keys.
+fn is_function_key(name: &str) -> bool {
+    let Some(rest) = name.strip_prefix('F') else {
+        return false;
+    };
+    !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit())
 }
 
 #[cfg(test)]
@@ -843,6 +863,34 @@ mod tests {
     fn format_hotkey_spec_rejects_unmapped_text() {
         assert_eq!(format_hotkey_spec(MOD_META, ""), None);
         assert_eq!(format_hotkey_spec(0, "ab"), None);
+    }
+
+    #[test]
+    fn format_hotkey_spec_rejects_bare_key_without_modifier() {
+        // Plain Space / a / Enter would catch the user every time they
+        // typed it — refuse unless a modifier is held.
+        assert_eq!(format_hotkey_spec(0, " "), None);
+        assert_eq!(format_hotkey_spec(0, "a"), None);
+        assert_eq!(format_hotkey_spec(0, "\u{0a}"), None);
+        assert_eq!(format_hotkey_spec(0, "1"), None);
+    }
+
+    #[test]
+    fn format_hotkey_spec_allows_bare_function_key() {
+        // F-keys are explicit shortcut keys; binding F12 alone is fine.
+        let spec = format_hotkey_spec(0, "\u{f70f}").expect("bare F12");
+        assert_eq!(spec, "F12");
+    }
+
+    #[test]
+    fn is_function_key_matches_only_f_keys() {
+        assert!(is_function_key("F1"));
+        assert!(is_function_key("F12"));
+        assert!(is_function_key("F24"));
+        assert!(!is_function_key("F"));
+        assert!(!is_function_key("Fa"));
+        assert!(!is_function_key("ArrowUp"));
+        assert!(!is_function_key("Space"));
     }
 
     #[test]
