@@ -215,10 +215,11 @@ function resolveUnit(token) {
     return null;
 }
 
-// `<number> <unit> to <unit>`. The number side accepts leading sign,
-// optional decimal point, and optional scientific notation. Unit tokens are
-// any non-whitespace run — resolution happens after the regex.
-const QUERY_RE = /^\s*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s+(\S+)\s+to\s+(\S+)\s*$/;
+// `<number> <unit> [to] <unit>`. Whitespace between the number and the
+// source unit is optional (`5kg to g`), and the literal `to` is optional
+// (`5 kg g` parses the same as `5 kg to g`) — units always sit on either
+// side of the source-to-target whitespace so dropping `to` is unambiguous.
+const QUERY_RE = /^\s*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*(\S+?)\s+(?:to\s+)?(\S+)\s*$/;
 
 function parseQuery(input) {
     const match = QUERY_RE.exec(input);

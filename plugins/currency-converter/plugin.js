@@ -19,10 +19,13 @@ const DIGIT_RE = /\d/;
 
 // `<amount> <from> to <to>` and `<amount> <from> <to>` and `<amount> <from>`.
 // Amount accepts leading sign, optional decimal, optional scientific. Commas
-// in the integer portion are normalised before parsing.
-const QUERY_RE_TO = /^\s*(-?[\d.,]+(?:[eE][+-]?\d+)?)\s+([A-Za-z]{3})\s+to\s+([A-Za-z]{3})\s*$/;
-const QUERY_RE_PAIR = /^\s*(-?[\d.,]+(?:[eE][+-]?\d+)?)\s+([A-Za-z]{3})\s+([A-Za-z]{3})\s*$/;
-const QUERY_RE_SOLO = /^\s*(-?[\d.,]+(?:[eE][+-]?\d+)?)\s+([A-Za-z]{3})\s*$/;
+// in the integer portion are normalised before parsing. Whitespace between
+// the amount and the source code is optional (`100USD EUR`) — two adjacent
+// 3-letter codes would still need a separator, so the source→target space
+// stays required.
+const QUERY_RE_TO = /^\s*(-?[\d.,]+(?:[eE][+-]?\d+)?)\s*([A-Za-z]{3})\s+to\s+([A-Za-z]{3})\s*$/;
+const QUERY_RE_PAIR = /^\s*(-?[\d.,]+(?:[eE][+-]?\d+)?)\s*([A-Za-z]{3})\s+([A-Za-z]{3})\s*$/;
+const QUERY_RE_SOLO = /^\s*(-?[\d.,]+(?:[eE][+-]?\d+)?)\s*([A-Za-z]{3})\s*$/;
 
 function configuredHomeCurrency() {
     const raw = getString("home_currency");
