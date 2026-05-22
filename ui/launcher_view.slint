@@ -246,14 +246,26 @@ export component LauncherView {
                                     text: root.alt-modifier-active && row.has-alt-title ? row.alt-title : row.title;
                                     color: root.foreground-color;
                                     font-size: root.font-size-title;
+                                    // Pin the height so swapping text content
+                                    // doesn't reflow the `alignment: center`
+                                    // parent. Generous multiplier keeps
+                                    // ascenders / descenders inside the box.
+                                    height: root.font-size-title * 1.4;
                                     overflow: elide;
                                 }
 
-                                if row.has-subtitle || (root.alt-modifier-active && row.has-alt-subtitle): Text {
+                                // Always reserve the subtitle slot so the
+                                // alt-modifier swap doesn't jiggle the row
+                                // when one of primary / alt is empty. We
+                                // hide the Text via `visible:` rather than
+                                // `if:` to keep the layout slot allocated.
+                                Text {
                                     text: root.alt-modifier-active && row.has-alt-subtitle ? row.alt-subtitle : row.subtitle;
                                     color: root.muted-color;
                                     font-size: root.font-size-subtitle;
+                                    height: root.font-size-subtitle * 1.4;
                                     overflow: elide;
+                                    visible: row.has-subtitle || (root.alt-modifier-active && row.has-alt-subtitle);
                                 }
                             }
                         }
