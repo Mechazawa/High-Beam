@@ -2,9 +2,9 @@
   "name": "xkcd",
   "displayName": "xkcd",
   "version": "0.1.0",
-  "description": "Find xkcd comics — `xkcd <num>`, `xkcd latest`, `xkcd random`, or `xkcd <text>` (title search)",
+  "description": "Find xkcd comics — `xkcd <num>`, `xkcd latest`, `xkcd random`, `xkcd <text>` (title search), or `xkcd index` to backfill the full archive.",
   "debounceMs": 200,
-  "timeoutMs": 5000,
+  "timeoutMs": 120000,
   "memoryMb": 32,
   "capabilities": [
     "actions",

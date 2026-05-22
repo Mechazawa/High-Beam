@@ -3,10 +3,15 @@
 //   - `xkcd random`     → uniformly random comic from 1..latest
 //   - `xkcd <number>`   → that comic by number (404 → no results)
 //   - `xkcd <text>`     → fuzzy title search against a cached index
+//   - `xkcd index`      → full archive rebuild from comic #1 (one-shot,
+//                         blocks for ~30–60s on the configured
+//                         concurrency)
 //
-// The title index is built lazily on the first text search and cached to
-// `fs.cache` as `xkcd-index.json`. We cap at the latest 500 comics for v1
-// to be polite to xkcd's CDN — see README.md.
+// The title index is cached to `fs.cache` as `xkcd-index.json`. First text
+// search bootstraps the latest 500 comics (~10s); subsequent refreshes
+// are incremental (just the gap between the cached `last_updated` and the
+// current latest); `xkcd index` backfills everything older than the
+// bootstrap window.
 
 import { openUrl } from "highbeam:actions";
 import { get } from "highbeam:http";
@@ -86,27 +91,63 @@ function indexIsFresh(index) {
     return Date.now() - index.last_updated < CACHE_TTL_MS;
 }
 
-// Build (or refresh) the title index by fetching the latest N comics in
-// bounded-concurrency batches. Returns the index object that was persisted.
-async function buildIndex(signal) {
+// Refresh the title index. Three modes:
+//   - bootstrap   (no cache yet): fetch the latest INDEX_SIZE comics
+//   - incremental (cache exists): fetch only comics newer than the
+//                                 highest `num` already cached — usually
+//                                 zero to a handful per day
+//   - full        (`xkcd index`): fetch every comic from #1 to latest,
+//                                 ignoring the existing cache
+// Returns the index object that was persisted.
+async function buildIndex(signal, { full = false } = {}) {
     const latest = await fetchLatest(signal);
     const max = latest.num;
-    const start = Math.max(1, max - INDEX_SIZE + 1);
+    const existing = full ? null : await readCachedIndex();
+    const existingMap = new Map(
+        (existing?.comics ?? []).map((c) => [c.num, c]),
+    );
+    const haveLast = existing?.comics?.length
+        ? existing.comics[existing.comics.length - 1].num
+        : 0;
+
+    let start;
+    if (full) {
+        start = 1;
+    } else if (haveLast > 0) {
+        start = haveLast + 1;
+    } else {
+        start = Math.max(1, max - INDEX_SIZE + 1);
+    }
+
+    if (start > max && existing) {
+        // Already up-to-date — bump last_updated so the TTL resets and we
+        // don't re-check the latest endpoint on every keystroke.
+        const refreshed = { ...existing, last_updated: Date.now() };
+        try {
+            await writeCache(CACHE_NAME, JSON.stringify(refreshed));
+        } catch {
+            // Non-fatal — see below.
+        }
+        cachedIndex = refreshed;
+        return refreshed;
+    }
 
     const nums = [];
     for (let n = start; n <= max; n++) {
         if (!KNOWN_MISSING.has(n)) nums.push(n);
     }
 
-    const comics = [];
+    const comics = full ? [] : Array.from(existingMap.values());
     // Always include the latest comic from the metadata we already fetched —
     // saves one round-trip and is the most likely target of a fresh search.
-    comics.push({
-        num: latest.num,
-        title: latest.title,
-        alt: latest.alt ?? "",
-    });
-    const skip = new Set([latest.num]);
+    if (!existingMap.has(latest.num)) {
+        comics.push({
+            num: latest.num,
+            title: latest.title,
+            alt: latest.alt ?? "",
+        });
+    }
+    const skip = new Set([latest.num, ...existingMap.keys()]);
 
     let cursor = 0;
     async function worker() {
@@ -163,6 +204,24 @@ export async function* query(input, signal) {
     if (/^latest$/i.test(arg)) {
         const comic = await fetchLatest(signal);
         yield resultFor(comic);
+        return;
+    }
+
+    // `xkcd index` — force a full rebuild of the title index from comic #1.
+    // The bootstrap path only fetches the latest INDEX_SIZE; this verb
+    // backfills the rest so title search covers the entire archive. Blocks
+    // for the duration of the build (~30–60s for ~3000 comics at the
+    // configured concurrency).
+    if (/^index$/i.test(arg)) {
+        const index = await buildIndex(signal, { full: true });
+        yield {
+            key: "xkcd-indexed",
+            title: `Indexed ${index.comics.length} xkcd comics`,
+            subtitle: "Title search now covers the full archive.",
+            weight: 100,
+            pinned: true,
+            action: { kind: "noop" },
+        };
         return;
     }
 
