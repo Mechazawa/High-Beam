@@ -1,0 +1,600 @@
+// Settings view. Shown when `current-view == VIEW-SETTINGS`.
+//
+// Contains the header bar (with Done button), the left plugin rail,
+// and the right pane that shows either the global settings or the
+// selected plugin's options.
+//
+// `rail-focus` and `hotkey-focus` element ids must be reachable from
+// `QueryWindow`'s `show-settings()` and `sync-rail-selection()` public
+// functions, which are forwarded through the `focus-rail` and
+// `sync-rail` public functions below.
+
+import { ScrollView } from "std-widgets.slint";
+import { PluginSlot, PluginOption } from "types.slint";
+
+export component SettingsView {
+    // Rail + plugin data
+    in-out property <[PluginSlot]> plugin-slots: [];
+    in-out property <int> selected-plugin-index: 0;
+    in-out property <[PluginOption]> plugin-options: [];
+    in-out property <string> selected-plugin-version: "";
+    in-out property <string> selected-plugin-description: "";
+    in-out property <bool> showing-global: true;
+    in-out property <int> rail-focus-index: 0;
+
+    // Global pane state
+    in-out property <string> hotkey-value: "Shift+Space";
+    in-out property <bool> capturing-hotkey: false;
+
+    // Theme tokens
+    in property <color> foreground-color;
+    in property <color> muted-color;
+    in property <color> highlight-color;
+    in property <color> selection-color;
+    in property <color> border-color;
+    in property <length> font-size-title;
+    in property <length> font-size-subtitle;
+
+    // Callbacks forwarded to the parent
+    callback close-settings();
+    callback show-query();
+    callback select-plugin(int);
+    callback toggle-plugin(string, bool);
+    callback set-option-string(string, string, string);
+    callback set-option-bool(string, string, bool);
+    callback set-option-int(string, string, int);
+    callback cycle-option-enum(string, string);
+    callback capture-hotkey(bool, bool, bool, bool, string) -> bool;
+    callback reset-hotkey-to-default();
+    callback select-global();
+    callback recenter-window();
+    callback open-config-dir();
+    callback sync-rail-selection();
+
+    // Called by QueryWindow.show-settings() to give the rail immediate focus.
+    public function focus-rail() {
+        rail-focus.focus();
+    }
+
+    VerticalLayout {
+        // Header bar.
+        Rectangle {
+            height: 48px;
+            background: transparent;
+            HorizontalLayout {
+                padding-left: 20px;
+                padding-right: 20px;
+                padding-top: 12px;
+                padding-bottom: 12px;
+                spacing: 12px;
+                alignment: space-between;
+
+                Text {
+                    text: "Settings";
+                    color: root.foreground-color;
+                    font-size: 18px;
+                    vertical-alignment: center;
+                }
+
+                // FocusScope so Tab traversal can land on Done; Enter/
+                // Space activates the same way clicking does. Mouse path
+                // is preserved via the inner TouchArea.
+                done-focus := FocusScope {
+                    width: 80px;
+                    height: 24px;
+                    key-pressed(event) => {
+                        if (event.text == Key.Return || event.text == " ") {
+                            root.close-settings();
+                            root.show-query();
+                            return accept;
+                        }
+                        if (event.text == Key.Escape) {
+                            root.close-settings();
+                            root.show-query();
+                            return accept;
+                        }
+                        reject
+                    }
+                    TouchArea {
+                        clicked => { root.close-settings(); root.show-query(); }
+                        Rectangle {
+                            background: root.selection-color;
+                            border-radius: 6px;
+                            border-width: done-focus.has-focus ? 1px : 0px;
+                            border-color: root.foreground-color;
+                            Text {
+                                text: "Done (Esc)";
+                                color: root.foreground-color;
+                                font-size: root.font-size-subtitle;
+                                vertical-alignment: center;
+                                horizontal-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: root.border-color;
+        }
+
+        // Body: split into left rail (plugin list) + right pane (options).
+        HorizontalLayout {
+            spacing: 0px;
+
+            // Left rail — "Global" entry followed by the plugin list.
+            Rectangle {
+                width: 260px;
+                background: transparent;
+                border-color: root.border-color;
+                rail-focus := FocusScope {
+                    key-pressed(event) => {
+                        if (event.text == Key.UpArrow) {
+                            if (root.rail-focus-index > 0) {
+                                root.rail-focus-index -= 1;
+                                root.sync-rail-selection();
+                            }
+                            return accept;
+                        }
+                        if (event.text == Key.DownArrow) {
+                            if (root.rail-focus-index < root.plugin-slots.length) {
+                                root.rail-focus-index += 1;
+                                root.sync-rail-selection();
+                            }
+                            return accept;
+                        }
+                        if (event.text == " " || event.text == Key.Return) {
+                            // Space/Enter on a plugin row flips its toggle.
+                            // The Global row has no toggle, so it's an explicit no-op there.
+                            if (root.rail-focus-index >= 1
+                                && root.rail-focus-index - 1 < root.plugin-slots.length) {
+                                root.toggle-plugin(
+                                    root.plugin-slots[root.rail-focus-index - 1].name,
+                                    !root.plugin-slots[root.rail-focus-index - 1].enabled
+                                );
+                            }
+                            return accept;
+                        }
+                        if (event.text == Key.Escape) {
+                            root.close-settings();
+                            root.show-query();
+                            return accept;
+                        }
+                        reject
+                    }
+                    ScrollView {
+                        VerticalLayout {
+                            spacing: 0px;
+                            // "Global" entry pinned at the top of the rail.
+                            TouchArea {
+                                height: 44px;
+                                clicked => {
+                                    root.rail-focus-index = 0;
+                                    root.sync-rail-selection();
+                                    rail-focus.focus();
+                                }
+                                Rectangle {
+                                    background: root.showing-global ? root.selection-color : transparent;
+                                    HorizontalLayout {
+                                        padding-left: 16px;
+                                        padding-right: 12px;
+                                        padding-top: 6px;
+                                        padding-bottom: 6px;
+                                        spacing: 8px;
+                                        alignment: start;
+                                        VerticalLayout {
+                                            alignment: center;
+                                            Text {
+                                                text: "Global";
+                                                color: root.foreground-color;
+                                                font-size: root.font-size-title;
+                                                overflow: elide;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            // Faint separator between Global and the plugin list.
+                            Rectangle {
+                                height: 1px;
+                                background: root.border-color;
+                            }
+                            for slot[i] in plugin-slots: TouchArea {
+                                height: 44px;
+                                clicked => {
+                                    root.rail-focus-index = i + 1;
+                                    root.sync-rail-selection();
+                                    rail-focus.focus();
+                                }
+                                Rectangle {
+                                    background: !root.showing-global && i == root.selected-plugin-index ? root.selection-color : transparent;
+                                    HorizontalLayout {
+                                        padding-left: 16px;
+                                        padding-right: 12px;
+                                        padding-top: 6px;
+                                        padding-bottom: 6px;
+                                        spacing: 8px;
+                                        alignment: space-between;
+                                        VerticalLayout {
+                                            alignment: center;
+                                            Text {
+                                                text: slot.display-name == "" ? slot.name : slot.display-name;
+                                                color: root.foreground-color;
+                                                font-size: root.font-size-title;
+                                                overflow: elide;
+                                            }
+                                        }
+                                        // Tiny enable/disable toggle: just a checkbox-style square.
+                                        TouchArea {
+                                            width: 44px;
+                                            height: 22px;
+                                            clicked => {
+                                                root.toggle-plugin(slot.name, !slot.enabled);
+                                            }
+                                            Rectangle {
+                                                background: slot.enabled ? root.highlight-color : root.muted-color.with-alpha(0.3);
+                                                border-radius: 11px;
+                                                Rectangle {
+                                                    x: slot.enabled ? parent.width - self.width - 2px : 2px;
+                                                    y: (parent.height - self.height) / 2;
+                                                    width: 18px;
+                                                    height: 18px;
+                                                    background: white;
+                                                    border-radius: 9px;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Vertical divider.
+            Rectangle {
+                width: 1px;
+                background: root.border-color;
+            }
+
+            // Right pane — either global settings or options for the
+            // selected plugin, depending on the rail selection.
+            Rectangle {
+                background: transparent;
+                // Global pane: hotkey input + restart-to-apply caption.
+                if root.showing-global: ScrollView {
+                    VerticalLayout {
+                        padding: 16px;
+                        spacing: 12px;
+
+                        Text {
+                            text: "Global";
+                            color: root.foreground-color;
+                            font-size: 16px;
+                        }
+
+                        VerticalLayout {
+                            spacing: 4px;
+                            Text {
+                                text: "Hotkey";
+                                color: root.foreground-color;
+                                font-size: root.font-size-title;
+                            }
+                            // Click to enter capture mode → next keypress is
+                            // recorded as the new hotkey. Esc inside capture
+                            // mode resets to the default (Shift+Space). Focus
+                            // loss exits capture mode silently.
+                            hotkey-focus := FocusScope {
+                                height: 28px;
+                                changed has-focus => {
+                                    root.capturing-hotkey = self.has-focus;
+                                }
+                                key-pressed(event) => {
+                                    if (event.text == Key.Escape) {
+                                        root.reset-hotkey-to-default();
+                                        rail-focus.focus();
+                                        return accept;
+                                    }
+                                    // Rust does the modifier-only / bare-key validation and
+                                    // returns true only when it actually accepted.
+                                    if (root.capture-hotkey(
+                                        event.modifiers.meta,
+                                        event.modifiers.control,
+                                        event.modifiers.shift,
+                                        event.modifiers.alt,
+                                        event.text,
+                                    )) {
+                                        rail-focus.focus();
+                                    }
+                                    return accept;
+                                }
+                                TouchArea {
+                                    clicked => {
+                                        hotkey-focus.focus();
+                                    }
+                                    Rectangle {
+                                        background: root.muted-color.with-alpha(0.08);
+                                        border-radius: 4px;
+                                        border-width: 1px;
+                                        border-color: root.capturing-hotkey ? root.highlight-color : root.border-color;
+                                        Text {
+                                            x: 8px;
+                                            width: parent.width - 16px;
+                                            height: parent.height;
+                                            text: root.capturing-hotkey ? "Press a hotkey… (Esc to reset)" : root.hotkey-value;
+                                            color: root.capturing-hotkey ? root.muted-color : root.foreground-color;
+                                            font-size: root.font-size-title;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                        }
+                                    }
+                                }
+                            }
+                            Text {
+                                text: "Click to record. Esc resets to the default (Shift+Space).";
+                                color: root.muted-color;
+                                font-size: root.font-size-subtitle;
+                                wrap: word-wrap;
+                            }
+                        }
+
+                        // Window position group.
+                        VerticalLayout {
+                            spacing: 4px;
+                            Text {
+                                text: "Window position";
+                                color: root.foreground-color;
+                                font-size: root.font-size-title;
+                            }
+                            TouchArea {
+                                width: 140px;
+                                height: 28px;
+                                clicked => {
+                                    root.recenter-window();
+                                }
+                                Rectangle {
+                                    background: root.selection-color;
+                                    border-radius: 4px;
+                                    Text {
+                                        text: "Recenter window";
+                                        color: root.foreground-color;
+                                        font-size: root.font-size-subtitle;
+                                        vertical-alignment: center;
+                                        horizontal-alignment: center;
+                                    }
+                                }
+                            }
+                            Text {
+                                text: "Forgets the saved drag position and re-centers the launcher. To do this manually, delete [global.launcher_position] from settings.toml.";
+                                color: root.muted-color;
+                                font-size: root.font-size-subtitle;
+                                wrap: word-wrap;
+                            }
+                        }
+
+                        // Config files group.
+                        VerticalLayout {
+                            spacing: 4px;
+                            Text {
+                                text: "Config files";
+                                color: root.foreground-color;
+                                font-size: root.font-size-title;
+                            }
+                            TouchArea {
+                                width: 180px;
+                                height: 28px;
+                                clicked => {
+                                    root.open-config-dir();
+                                }
+                                Rectangle {
+                                    background: root.selection-color;
+                                    border-radius: 4px;
+                                    Text {
+                                        text: "Open config directory";
+                                        color: root.foreground-color;
+                                        font-size: root.font-size-subtitle;
+                                        vertical-alignment: center;
+                                        horizontal-alignment: center;
+                                    }
+                                }
+                            }
+                            Text {
+                                text: "Opens the platform config dir in Finder. Holds settings.toml, theme.toml, and per-plugin overrides.";
+                                color: root.muted-color;
+                                font-size: root.font-size-subtitle;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+                }
+
+                // Plugin-options pane.
+                if !root.showing-global: ScrollView {
+                    VerticalLayout {
+                        padding: 16px;
+                        spacing: 12px;
+                        // Selected-plugin header: name + optional version.
+                        if plugin-slots.length > 0 && root.selected-plugin-index < plugin-slots.length: HorizontalLayout {
+                            spacing: 8px;
+                            alignment: space-between;
+                            Text {
+                                text: plugin-slots[root.selected-plugin-index].display-name == ""
+                                    ? plugin-slots[root.selected-plugin-index].name
+                                    : plugin-slots[root.selected-plugin-index].display-name;
+                                color: root.foreground-color;
+                                font-size: root.font-size-title;
+                                vertical-alignment: center;
+                            }
+                            if root.selected-plugin-version != "": Text {
+                                text: root.selected-plugin-version;
+                                color: root.muted-color;
+                                font-size: root.font-size-subtitle;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        // Plugin description — only shown when present.
+                        if root.selected-plugin-description != "": Text {
+                            text: root.selected-plugin-description;
+                            color: root.muted-color;
+                            font-size: root.font-size-subtitle;
+                            wrap: word-wrap;
+                        }
+
+                        if plugin-options.length == 0: Text {
+                            text: "This plugin has no configurable options.";
+                            color: root.muted-color;
+                            font-size: root.font-size-subtitle;
+                        }
+
+                        for opt in plugin-options: Rectangle {
+                            height: 56px;
+                            background: transparent;
+                            VerticalLayout {
+                                spacing: 4px;
+                                Text {
+                                    text: opt.label;
+                                    color: root.foreground-color;
+                                    font-size: root.font-size-title;
+                                }
+
+                                if opt.kind == "string": Rectangle {
+                                    height: 28px;
+                                    background: root.muted-color.with-alpha(0.08);
+                                    border-radius: 4px;
+                                    border-width: 1px;
+                                    border-color: root.border-color;
+                                    opt-string-input := TextInput {
+                                        x: 8px;
+                                        y: 0;
+                                        width: parent.width - 16px;
+                                        height: parent.height;
+                                        font-size: root.font-size-title;
+                                        color: root.foreground-color;
+                                        single-line: true;
+                                        vertical-alignment: center;
+                                        text: opt.value-string;
+                                        edited => {
+                                            root.set-option-string(opt.plugin-name, opt.key, self.text);
+                                        }
+                                        // Enter commit-and-blurs — same convention as the
+                                        // hotkey input. Escape bails out of settings.
+                                        accepted => {
+                                            root.set-option-string(opt.plugin-name, opt.key, self.text);
+                                            rail-focus.focus();
+                                        }
+                                        key-pressed(event) => {
+                                            if (event.text == Key.Escape) {
+                                                root.close-settings();
+                                                root.show-query();
+                                                return accept;
+                                            }
+                                            reject
+                                        }
+                                    }
+                                }
+
+                                if opt.kind == "bool": TouchArea {
+                                    width: 44px;
+                                    height: 22px;
+                                    clicked => {
+                                        root.set-option-bool(opt.plugin-name, opt.key, !opt.value-bool);
+                                    }
+                                    Rectangle {
+                                        background: opt.value-bool ? root.highlight-color : root.muted-color.with-alpha(0.3);
+                                        border-radius: 11px;
+                                        Rectangle {
+                                            x: opt.value-bool ? parent.width - self.width - 2px : 2px;
+                                            y: (parent.height - self.height) / 2;
+                                            width: 18px;
+                                            height: 18px;
+                                            background: white;
+                                            border-radius: 9px;
+                                        }
+                                    }
+                                }
+
+                                if opt.kind == "int": Rectangle {
+                                    height: 28px;
+                                    background: root.muted-color.with-alpha(0.08);
+                                    border-radius: 4px;
+                                    border-width: 1px;
+                                    border-color: root.border-color;
+                                    opt-int-input := TextInput {
+                                        x: 8px;
+                                        y: 0;
+                                        width: parent.width - 16px;
+                                        height: parent.height;
+                                        font-size: root.font-size-title;
+                                        color: root.foreground-color;
+                                        single-line: true;
+                                        input-type: number;
+                                        vertical-alignment: center;
+                                        text: opt.value-int;
+                                        edited => {
+                                            // Slint doesn't surface parsed int — pass the text
+                                            // through and let Rust validate / clamp.
+                                            root.set-option-string(opt.plugin-name, opt.key, self.text);
+                                        }
+                                        accepted => {
+                                            root.set-option-string(opt.plugin-name, opt.key, self.text);
+                                            rail-focus.focus();
+                                        }
+                                        key-pressed(event) => {
+                                            if (event.text == Key.Escape) {
+                                                root.close-settings();
+                                                root.show-query();
+                                                return accept;
+                                            }
+                                            reject
+                                        }
+                                    }
+                                }
+
+                                if opt.kind == "enum": Rectangle {
+                                    height: 28px;
+                                    background: root.muted-color.with-alpha(0.08);
+                                    border-radius: 4px;
+                                    border-width: 1px;
+                                    border-color: root.border-color;
+                                    // Minimal "cycle through choices on click" v1.
+                                    TouchArea {
+                                        clicked => {
+                                            root.cycle-option-enum(opt.plugin-name, opt.key);
+                                        }
+                                        Text {
+                                            x: 8px;
+                                            text: opt.value-string + "  (click to cycle: " + opt.enum-choices + ")";
+                                            color: root.foreground-color;
+                                            font-size: root.font-size-subtitle;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback Escape catcher — every individual focus target handles Esc
+        // itself, but this 0x0 catcher keeps the contract intact in case a
+        // future widget forgets to.
+        settings-fallback-focus := FocusScope {
+            width: 0px;
+            height: 0px;
+            key-pressed(event) => {
+                if (event.text == Key.Escape) {
+                    root.close-settings();
+                    root.show-query();
+                    return accept;
+                }
+                reject
+            }
+        }
+    }
+}

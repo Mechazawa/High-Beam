@@ -1,0 +1,51 @@
+// Shared struct definitions used by all view components.
+// Import this file from every .slint file that needs these types.
+
+// Wire shape sent across Rust -> Slint for each row. `key` is the composite
+// `<plugin>:<result_key>` so two plugins emitting the same `key` string don't
+// collide. Slint structs need fixed types, so "no icon" is encoded as the
+// empty image (`has-icon = false`), and the row paints a muted placeholder
+// square in that case to keep title columns aligned.
+export struct ResultRow {
+    key: string,
+    title: string,
+    subtitle: string,    // empty string when absent — Slint structs need fixed types
+    has-subtitle: bool,
+    icon: image,
+    has-icon: bool,
+}
+
+// One plugin slot in the settings sidebar.
+export struct PluginSlot {
+    name: string,
+    display-name: string,    // falls back to `name` when empty
+    enabled: bool,
+}
+
+// One capability row in the install-confirmation view.
+// `is-new` is true only during an update that introduces the cap.
+export struct ConfirmCapRow {
+    cap: string,
+    explanation: string,
+    is-new: bool,
+}
+
+// One option input in the settings detail pane. Option `kind` is one of:
+//   "string" | "bool" | "int" | "enum"
+// `value-*` columns are all populated; the matching one for `kind` is the
+// truth. `choices` is a CSV of enum choices (Slint structs can't carry
+// `[string]` directly without naming a model type).
+export struct PluginOption {
+    plugin-name: string,
+    key: string,
+    label: string,
+    kind: string,
+    value-string: string,
+    value-bool: bool,
+    value-int: int,
+    int-min: int,
+    int-max: int,
+    has-int-min: bool,
+    has-int-max: bool,
+    enum-choices: string,
+}

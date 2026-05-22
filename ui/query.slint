@@ -13,56 +13,10 @@
 // (row height, icon size, input padding) remain inline — theming layout is
 // out of scope for v1.
 
-import { ScrollView } from "std-widgets.slint";
-
-// Wire shape sent across Rust -> Slint for each row. `key` is the composite
-// `<plugin>:<result_key>` so two plugins emitting the same `key` string don't
-// collide. Slint structs need fixed types, so "no icon" is encoded as the
-// empty image (`has-icon = false`), and the row paints a muted placeholder
-// square in that case to keep title columns aligned.
-export struct ResultRow {
-    key: string,
-    title: string,
-    subtitle: string,    // empty string when absent — Slint structs need fixed types
-    has-subtitle: bool,
-    icon: image,
-    has-icon: bool,
-}
-
-// One plugin slot in the settings sidebar.
-export struct PluginSlot {
-    name: string,
-    display-name: string,    // falls back to `name` when empty
-    enabled: bool,
-}
-
-// One capability row in the install-confirmation view.
-// `is-new` is true only during an update that introduces the cap.
-export struct ConfirmCapRow {
-    cap: string,
-    explanation: string,
-    is-new: bool,
-}
-
-// One option input in the settings detail pane. Option `kind` is one of:
-//   "string" | "bool" | "int" | "enum"
-// `value-*` columns are all populated; the matching one for `kind` is the
-// truth. `choices` is a CSV of enum choices (Slint structs can't carry
-// `[string]` directly without naming a model type).
-export struct PluginOption {
-    plugin-name: string,
-    key: string,
-    label: string,
-    kind: string,
-    value-string: string,
-    value-bool: bool,
-    value-int: int,
-    int-min: int,
-    int-max: int,
-    has-int-min: bool,
-    has-int-max: bool,
-    enum-choices: string,
-}
+import { ResultRow, PluginSlot, PluginOption, ConfirmCapRow } from "types.slint";
+import { LauncherView } from "launcher_view.slint";
+import { SettingsView } from "settings_view.slint";
+import { ConfirmView } from "confirm_view.slint";
 
 export component QueryWindow inherits Window {
     title: "High Beam";
@@ -194,14 +148,15 @@ export component QueryWindow inherits Window {
     // theme.toml, and the per-plugin user-edited files.
     callback open-config-dir();
 
-    // forward-focus makes the input the focus target whenever the window
-    // itself is focused. Combined with the explicit `input.focus()` call in
-    // `focus-input()` (invoked from Rust after each show), this ensures the
-    // caret is live the moment the window appears, without needing a click.
-    forward-focus: input;
+    // Focus is managed explicitly via `focus-input()` which is invoked from
+    // Rust (both from `show()` and the winit `Focused(true)` handler). The
+    // original `forward-focus: input` kept the TextInput as the window-level
+    // focus target; with the launcher as a sub-component we rely on the winit
+    // handler in window.rs instead — it calls `invoke_focus_input()` on every
+    // `Focused(true)` event, which achieves the same result.
 
     public function focus-input() {
-        input.focus();
+        launcher.focus-input();
     }
 
     // Reset the input's own `text` directly. The binding `text: root.query-text`
@@ -211,10 +166,7 @@ export component QueryWindow inherits Window {
     // input. Assigning `input.text` here side-steps the broken binding so the
     // displayed content actually clears.
     public function clear-input() {
-        input.text = "";
-        root.query-text = "";
-        root.results = [];
-        root.selected-index = 0;
+        launcher.clear-input();
     }
 
     // Replace the visible input text with `text` without firing
@@ -222,8 +174,7 @@ export component QueryWindow inherits Window {
     // directly so it can keep the cycle cursor alive; if we re-entered via
     // `query-edited` the edit-while-cycling state machine would clobber it.
     public function set-input-text(text: string) {
-        input.text = text;
-        root.query-text = text;
+        launcher.set-input-text(text);
     }
 
     // Switch between launcher and settings views. Public so Rust can invoke
@@ -233,19 +184,19 @@ export component QueryWindow inherits Window {
         root.open-settings();
         // Land focus on the rail FocusScope so arrow-key nav is live the
         // moment the settings view appears.
-        rail-focus.focus();
+        settings.focus-rail();
     }
     public function show-query() {
         root.current-view = root.VIEW-QUERY;
-        input.focus();
+        launcher.focus-input();
     }
 
-    // Switch to the install-confirmation view.  Rust populates the
+    // Switch to the install-confirmation view. Rust populates the
     // `confirm-*` properties before calling this.
     public function show-confirm() {
         root.current-view = root.VIEW-CONFIRM;
         root.confirm-focus-index = 0;
-        confirm-focus.focus();
+        confirm.focus-confirm();
     }
 
     // Apply `rail-focus-index` to the visual selection + fire the matching
@@ -302,956 +253,98 @@ export component QueryWindow inherits Window {
         }
 
         // ---- Launcher view ----
-        // Visible-toggle (rather than `if`) keeps the `input` id in scope for
-        // `focus-input()` / `clear-input()` regardless of which view is up,
-        // which Slint requires because element ids only exist when the
-        // element itself is instantiated.
-        launcher-view := VerticalLayout {
+        // Instantiated with `visible:` (rather than `if:`) so the launcher's
+        // `input` element remains in scope for `focus-input()`, `clear-input()`,
+        // and `set-input-text()` regardless of which view is currently showing.
+        launcher := LauncherView {
             visible: root.current-view == root.VIEW-QUERY;
-            // Input area
-            Rectangle {
-                height: input-height;
-                input := TextInput {
-                    // Span the input area so vertical-alignment has room to
-                    // act on. Without an explicit height, the TextInput sizes
-                    // to its glyph metrics and the alignment property has
-                    // nothing to align against.
-                    x: 20px;
-                    y: 0;
-                    width: parent.width - 40px;
-                    height: parent.height;
-                    font-size: root.font-size-query;
-                    color: root.is-history-preview ? root.muted-color : root.foreground-color;
-                    single-line: true;
-                    vertical-alignment: center;
-                    text: root.query-text;
 
-                    edited => {
-                        root.query-text = self.text;
-                        root.query-edited(self.text);
-                    }
+            results <=> root.results;
+            selected-index <=> root.selected-index;
+            max-rows <=> root.max-rows;
+            query-text <=> root.query-text;
+            is-history-preview <=> root.is-history-preview;
 
-                    key-pressed(event) => {
-                        // Cmd+, (macOS) / Ctrl+, (Linux) opens the settings
-                        // view. Slint's event.modifiers struct surfaces both
-                        // — checking either lets the same binding work on
-                        // both platforms without #[cfg].
-                        if (event.text == "," && (event.modifiers.meta || event.modifiers.control)) {
-                            root.show-settings();
-                            return accept;
-                        }
-                        if (event.text == Key.Escape) {
-                            root.escape-pressed();
-                            return accept;
-                        }
-                        // Up cycles history when input is empty or already
-                        // previewing; otherwise it moves the selection up
-                        // the result list.
-                        if (event.text == Key.UpArrow) {
-                            if (self.text == "" || root.is-history-preview) {
-                                root.history-up();
-                                return accept;
-                            }
-                            if (root.selected-index > 0) {
-                                root.selected-index -= 1;
-                            }
-                            return accept;
-                        }
-                        // Down walks newer through history while previewing;
-                        // otherwise navigates results.
-                        if (event.text == Key.DownArrow) {
-                            if (root.is-history-preview) {
-                                root.history-down();
-                                return accept;
-                            }
-                            if (root.selected-index < root.results.length - 1) {
-                                root.selected-index += 1;
-                            }
-                            return accept;
-                        }
-                        if (event.text == Key.Return) {
-                            // While previewing, Enter commits the preview as
-                            // the live query (the Rust side fires the plugin
-                            // pipeline). Otherwise: invoke the selected row.
-                            if (root.is-history-preview) {
-                                root.query-edited(self.text);
-                                return accept;
-                            }
-                            if (root.results.length > 0) {
-                                root.invoke-selected();
-                            }
-                            return accept;
-                        }
-                        reject
-                    }
-                }
+            foreground-color: root.foreground-color;
+            muted-color: root.muted-color;
+            selection-color: root.selection-color;
+            border-color: root.border-color;
+            font-size-query: root.font-size-query;
+            font-size-title: root.font-size-title;
+            font-size-subtitle: root.font-size-subtitle;
 
-                // Faux placeholder: only visible when the input is empty.
-                Text {
-                    x: 20px;
-                    y: 0;
-                    width: parent.width - 40px;
-                    height: parent.height;
-                    text: "Query…";
-                    font-size: root.font-size-query;
-                    color: root.muted-color;
-                    vertical-alignment: center;
-                    visible: root.query-text == "";
-                }
-            }
-
-            // Separator line — only visible when there are results.
-            Rectangle {
-                height: results.length > 0 ? 1px : 0;
-                background: root.border-color;
-            }
-
-            // Result rows
-            Rectangle {
-                height: rows-height;
-                clip: true;
-                visible: results.length > 0;
-
-                VerticalLayout {
-                    spacing: 0px;
-                    for row[idx] in results: TouchArea {
-                        height: 56px;
-                        clicked => {
-                            root.selected-index = idx;
-                            root.invoke-selected();
-                        }
-                        Rectangle {
-                            background: idx == root.selected-index ? root.selection-color : transparent;
-                            HorizontalLayout {
-                                padding-left: 20px;
-                                padding-right: 20px;
-                                padding-top: 8px;
-                                padding-bottom: 8px;
-                                spacing: 12px;
-                                alignment: start;
-
-                                // Icon slot — fixed 36x36 regardless of whether the row has an
-                                // icon, so the title column lines up across rows. Image always
-                                // paints (defaults to a transparent empty image); the muted
-                                // outline behind it is what reads as "no icon" when present.
-                                Rectangle {
-                                    width: 36px;
-                                    height: 36px;
-                                    y: (parent.height - self.height) / 2;
-                                    border-radius: 4px;
-                                    border-width: row.has-icon ? 0px : 1px;
-                                    border-color: root.muted-color.with-alpha(0.25);
-                                    Image {
-                                        x: 0; y: 0;
-                                        width: parent.width;
-                                        height: parent.height;
-                                        source: row.icon;
-                                        image-fit: contain;
-                                    }
-                                }
-
-                                VerticalLayout {
-                                    spacing: 2px;
-                                    alignment: center;
-                                    Text {
-                                        text: row.title;
-                                        color: root.foreground-color;
-                                        font-size: root.font-size-title;
-                                        overflow: elide;
-                                    }
-
-                                    if row.has-subtitle: Text {
-                                        text: row.subtitle;
-                                        color: root.muted-color;
-                                        font-size: root.font-size-subtitle;
-                                        overflow: elide;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            query-edited(s) => { root.query-edited(s); }
+            escape-pressed => { root.escape-pressed(); }
+            invoke-selected => { root.invoke-selected(); }
+            history-up => { root.history-up(); }
+            history-down => { root.history-down(); }
+            show-settings => { root.show-settings(); }
         }
 
         // ---- Settings view ----
-        settings-view := VerticalLayout {
+        // Instantiated with `visible:` so `rail-focus` stays in scope for
+        // `show-settings()` which calls `settings.focus-rail()`.
+        settings := SettingsView {
             visible: root.current-view == root.VIEW-SETTINGS;
-            // Header bar.
-            Rectangle {
-                height: 48px;
-                background: transparent;
-                HorizontalLayout {
-                    padding-left: 20px;
-                    padding-right: 20px;
-                    padding-top: 12px;
-                    padding-bottom: 12px;
-                    spacing: 12px;
-                    alignment: space-between;
 
-                    Text {
-                        text: "Settings";
-                        color: root.foreground-color;
-                        font-size: 18px;
-                        vertical-alignment: center;
-                    }
+            plugin-slots <=> root.plugin-slots;
+            selected-plugin-index <=> root.selected-plugin-index;
+            plugin-options <=> root.plugin-options;
+            selected-plugin-version <=> root.selected-plugin-version;
+            selected-plugin-description <=> root.selected-plugin-description;
+            showing-global <=> root.showing-global;
+            rail-focus-index <=> root.rail-focus-index;
+            hotkey-value <=> root.hotkey-value;
+            capturing-hotkey <=> root.capturing-hotkey;
 
-                    // FocusScope so Tab traversal can land on Done; Enter/
-                    // Space activates the same way clicking does. Mouse path
-                    // is preserved via the inner TouchArea.
-                    done-focus := FocusScope {
-                        width: 80px;
-                        height: 24px;
-                        key-pressed(event) => {
-                            if (event.text == Key.Return || event.text == " ") {
-                                root.close-settings();
-                                root.show-query();
-                                return accept;
-                            }
-                            if (event.text == Key.Escape) {
-                                root.close-settings();
-                                root.show-query();
-                                return accept;
-                            }
-                            reject
-                        }
-                        TouchArea {
-                            clicked => { root.close-settings(); root.show-query(); }
-                            Rectangle {
-                                background: root.selection-color;
-                                border-radius: 6px;
-                                border-width: done-focus.has-focus ? 1px : 0px;
-                                border-color: root.foreground-color;
-                                Text {
-                                    text: "Done (Esc)";
-                                    color: root.foreground-color;
-                                    font-size: root.font-size-subtitle;
-                                    vertical-alignment: center;
-                                    horizontal-alignment: center;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            foreground-color: root.foreground-color;
+            muted-color: root.muted-color;
+            highlight-color: root.highlight-color;
+            selection-color: root.selection-color;
+            border-color: root.border-color;
+            font-size-title: root.font-size-title;
+            font-size-subtitle: root.font-size-subtitle;
 
-            Rectangle {
-                height: 1px;
-                background: root.border-color;
-            }
-
-            // Body: split into left rail (plugin list) + right pane (options).
-            HorizontalLayout {
-                spacing: 0px;
-
-                // Left rail — "Global" entry followed by the plugin list.
-                // Wrapped in a FocusScope so arrow keys + Space/Enter drive
-                // rail navigation when the focus lands here; Tab forwards
-                // into the right pane via the FocusScope's default chain.
-                Rectangle {
-                    width: 260px;
-                    background: transparent;
-                    border-color: root.border-color;
-                    rail-focus := FocusScope {
-                        key-pressed(event) => {
-                            if (event.text == Key.UpArrow) {
-                                if (root.rail-focus-index > 0) {
-                                    root.rail-focus-index -= 1;
-                                    root.sync-rail-selection();
-                                }
-                                return accept;
-                            }
-                            if (event.text == Key.DownArrow) {
-                                if (root.rail-focus-index < root.plugin-slots.length) {
-                                    root.rail-focus-index += 1;
-                                    root.sync-rail-selection();
-                                }
-                                return accept;
-                            }
-                            if (event.text == " " || event.text == Key.Return) {
-                                // Space/Enter on a plugin row flips its
-                                // toggle. The Global row has no toggle, so
-                                // it's an explicit no-op there.
-                                if (root.rail-focus-index >= 1
-                                    && root.rail-focus-index - 1 < root.plugin-slots.length) {
-                                    root.toggle-plugin(
-                                        root.plugin-slots[root.rail-focus-index - 1].name,
-                                        !root.plugin-slots[root.rail-focus-index - 1].enabled
-                                    );
-                                }
-                                return accept;
-                            }
-                            if (event.text == Key.Escape) {
-                                root.close-settings();
-                                root.show-query();
-                                return accept;
-                            }
-                            reject
-                        }
-                        ScrollView {
-                            VerticalLayout {
-                                spacing: 0px;
-                                // "Global" entry pinned at the top of the rail.
-                                TouchArea {
-                                    height: 44px;
-                                    clicked => {
-                                        root.rail-focus-index = 0;
-                                        root.sync-rail-selection();
-                                        rail-focus.focus();
-                                    }
-                                    Rectangle {
-                                        background: root.showing-global ? root.selection-color : transparent;
-                                        HorizontalLayout {
-                                            padding-left: 16px;
-                                            padding-right: 12px;
-                                            padding-top: 6px;
-                                            padding-bottom: 6px;
-                                            spacing: 8px;
-                                            alignment: start;
-                                            VerticalLayout {
-                                                alignment: center;
-                                                Text {
-                                                    text: "Global";
-                                                    color: root.foreground-color;
-                                                    font-size: root.font-size-title;
-                                                    overflow: elide;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                // Faint separator between Global and the plugin list.
-                                Rectangle {
-                                    height: 1px;
-                                    background: root.border-color;
-                                }
-                                for slot[i] in plugin-slots: TouchArea {
-                                    height: 44px;
-                                    clicked => {
-                                        root.rail-focus-index = i + 1;
-                                        root.sync-rail-selection();
-                                        rail-focus.focus();
-                                    }
-                                    Rectangle {
-                                        background: !root.showing-global && i == root.selected-plugin-index ? root.selection-color : transparent;
-                                        HorizontalLayout {
-                                            padding-left: 16px;
-                                            padding-right: 12px;
-                                            padding-top: 6px;
-                                            padding-bottom: 6px;
-                                            spacing: 8px;
-                                            alignment: space-between;
-                                            VerticalLayout {
-                                                alignment: center;
-                                                Text {
-                                                    text: slot.display-name == "" ? slot.name : slot.display-name;
-                                                    color: root.foreground-color;
-                                                    font-size: root.font-size-title;
-                                                    overflow: elide;
-                                                }
-                                            }
-                                            // Tiny enable/disable toggle: just a checkbox-style square.
-                                            TouchArea {
-                                                width: 44px;
-                                                height: 22px;
-                                                clicked => {
-                                                    root.toggle-plugin(slot.name, !slot.enabled);
-                                                }
-                                                Rectangle {
-                                                    background: slot.enabled ? root.highlight-color : root.muted-color.with-alpha(0.3);
-                                                    border-radius: 11px;
-                                                    Rectangle {
-                                                        x: slot.enabled ? parent.width - self.width - 2px : 2px;
-                                                        y: (parent.height - self.height) / 2;
-                                                        width: 18px;
-                                                        height: 18px;
-                                                        background: white;
-                                                        border-radius: 9px;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Vertical divider.
-                Rectangle {
-                    width: 1px;
-                    background: root.border-color;
-                }
-
-                // Right pane — either global settings or options for the
-                // selected plugin, depending on the rail selection.
-                Rectangle {
-                    background: transparent;
-                    // Global pane: hotkey input + restart-to-apply caption.
-                    // Hot-reload of the hotkey is out of scope for v1, so the
-                    // caption is the contract with the user.
-                    if root.showing-global: ScrollView {
-                        VerticalLayout {
-                            padding: 16px;
-                            spacing: 12px;
-
-                            Text {
-                                text: "Global";
-                                color: root.foreground-color;
-                                font-size: 16px;
-                            }
-
-                            VerticalLayout {
-                                spacing: 4px;
-                                Text {
-                                    text: "Hotkey";
-                                    color: root.foreground-color;
-                                    font-size: root.font-size-title;
-                                }
-                                // Click to enter capture mode → next keypress is
-                                // recorded as the new hotkey. Esc inside capture
-                                // mode resets to the default (Shift+Space). Focus
-                                // loss exits capture mode silently.
-                                hotkey-focus := FocusScope {
-                                    height: 28px;
-                                    changed has-focus => {
-                                        root.capturing-hotkey = self.has-focus;
-                                    }
-                                    key-pressed(event) => {
-                                        if (event.text == Key.Escape) {
-                                            root.reset-hotkey-to-default();
-                                            rail-focus.focus();
-                                            return accept;
-                                        }
-                                        // Rust does the modifier-only /
-                                        // bare-key validation and returns
-                                        // true only when it actually accepted.
-                                        if (root.capture-hotkey(
-                                            event.modifiers.meta,
-                                            event.modifiers.control,
-                                            event.modifiers.shift,
-                                            event.modifiers.alt,
-                                            event.text,
-                                        )) {
-                                            rail-focus.focus();
-                                        }
-                                        return accept;
-                                    }
-                                    TouchArea {
-                                        clicked => {
-                                            hotkey-focus.focus();
-                                        }
-                                        Rectangle {
-                                            background: root.muted-color.with-alpha(0.08);
-                                            border-radius: 4px;
-                                            border-width: 1px;
-                                            border-color: root.capturing-hotkey ? root.highlight-color : root.border-color;
-                                            Text {
-                                                x: 8px;
-                                                width: parent.width - 16px;
-                                                height: parent.height;
-                                                text: root.capturing-hotkey ? "Press a hotkey… (Esc to reset)" : root.hotkey-value;
-                                                color: root.capturing-hotkey ? root.muted-color : root.foreground-color;
-                                                font-size: root.font-size-title;
-                                                vertical-alignment: center;
-                                                overflow: elide;
-                                            }
-                                        }
-                                    }
-                                }
-                                Text {
-                                    text: "Click to record. Esc resets to the default (Shift+Space).";
-                                    color: root.muted-color;
-                                    font-size: root.font-size-subtitle;
-                                    wrap: word-wrap;
-                                }
-                            }
-
-                            // Window position group — only meaningful if the
-                            // user has dragged the launcher. We always show
-                            // the button (cheaper than a property round-trip
-                            // for the saved-or-not flag); clearing when
-                            // already-default is a no-op on disk.
-                            VerticalLayout {
-                                spacing: 4px;
-                                Text {
-                                    text: "Window position";
-                                    color: root.foreground-color;
-                                    font-size: root.font-size-title;
-                                }
-                                TouchArea {
-                                    width: 140px;
-                                    height: 28px;
-                                    clicked => {
-                                        root.recenter-window();
-                                    }
-                                    Rectangle {
-                                        background: root.selection-color;
-                                        border-radius: 4px;
-                                        Text {
-                                            text: "Recenter window";
-                                            color: root.foreground-color;
-                                            font-size: root.font-size-subtitle;
-                                            vertical-alignment: center;
-                                            horizontal-alignment: center;
-                                        }
-                                    }
-                                }
-                                Text {
-                                    text: "Forgets the saved drag position and re-centers the launcher. To do this manually, delete [global.launcher_position] from settings.toml.";
-                                    color: root.muted-color;
-                                    font-size: root.font-size-subtitle;
-                                    wrap: word-wrap;
-                                }
-                            }
-
-                            // Config files group — surfaces the on-disk
-                            // location for users who want to hand-edit
-                            // settings.toml / theme.toml / plugin data.
-                            VerticalLayout {
-                                spacing: 4px;
-                                Text {
-                                    text: "Config files";
-                                    color: root.foreground-color;
-                                    font-size: root.font-size-title;
-                                }
-                                TouchArea {
-                                    width: 180px;
-                                    height: 28px;
-                                    clicked => {
-                                        root.open-config-dir();
-                                    }
-                                    Rectangle {
-                                        background: root.selection-color;
-                                        border-radius: 4px;
-                                        Text {
-                                            text: "Open config directory";
-                                            color: root.foreground-color;
-                                            font-size: root.font-size-subtitle;
-                                            vertical-alignment: center;
-                                            horizontal-alignment: center;
-                                        }
-                                    }
-                                }
-                                Text {
-                                    text: "Opens the platform config dir in Finder. Holds settings.toml, theme.toml, and per-plugin overrides.";
-                                    color: root.muted-color;
-                                    font-size: root.font-size-subtitle;
-                                    wrap: word-wrap;
-                                }
-                            }
-                        }
-                    }
-
-                    // Plugin-options pane.
-                    if !root.showing-global: ScrollView {
-                        VerticalLayout {
-                            padding: 16px;
-                            spacing: 12px;
-                            // Selected-plugin header: name + optional version.
-                            if plugin-slots.length > 0 && root.selected-plugin-index < plugin-slots.length: HorizontalLayout {
-                                spacing: 8px;
-                                alignment: space-between;
-                                Text {
-                                    text: plugin-slots[root.selected-plugin-index].display-name == ""
-                                        ? plugin-slots[root.selected-plugin-index].name
-                                        : plugin-slots[root.selected-plugin-index].display-name;
-                                    color: root.foreground-color;
-                                    font-size: root.font-size-title;
-                                    vertical-alignment: center;
-                                }
-                                if root.selected-plugin-version != "": Text {
-                                    text: root.selected-plugin-version;
-                                    color: root.muted-color;
-                                    font-size: root.font-size-subtitle;
-                                    vertical-alignment: center;
-                                }
-                            }
-
-                            // Plugin description — only shown when present.
-                            if root.selected-plugin-description != "": Text {
-                                text: root.selected-plugin-description;
-                                color: root.muted-color;
-                                font-size: root.font-size-subtitle;
-                                wrap: word-wrap;
-                            }
-
-                            if plugin-options.length == 0: Text {
-                                text: "This plugin has no configurable options.";
-                                color: root.muted-color;
-                                font-size: root.font-size-subtitle;
-                            }
-
-                            for opt in plugin-options: Rectangle {
-                                height: 56px;
-                                background: transparent;
-                                VerticalLayout {
-                                    spacing: 4px;
-                                    Text {
-                                        text: opt.label;
-                                        color: root.foreground-color;
-                                        font-size: root.font-size-title;
-                                    }
-
-                                    if opt.kind == "string": Rectangle {
-                                        height: 28px;
-                                        background: root.muted-color.with-alpha(0.08);
-                                        border-radius: 4px;
-                                        border-width: 1px;
-                                        border-color: root.border-color;
-                                        opt-string-input := TextInput {
-                                            x: 8px;
-                                            y: 0;
-                                            width: parent.width - 16px;
-                                            height: parent.height;
-                                            font-size: root.font-size-title;
-                                            color: root.foreground-color;
-                                            single-line: true;
-                                            vertical-alignment: center;
-                                            text: opt.value-string;
-                                            edited => {
-                                                root.set-option-string(opt.plugin-name, opt.key, self.text);
-                                            }
-                                            // Enter commit-and-blurs — same convention as the
-                                            // hotkey input. Escape bails out of settings.
-                                            accepted => {
-                                                root.set-option-string(opt.plugin-name, opt.key, self.text);
-                                                rail-focus.focus();
-                                            }
-                                            key-pressed(event) => {
-                                                if (event.text == Key.Escape) {
-                                                    root.close-settings();
-                                                    root.show-query();
-                                                    return accept;
-                                                }
-                                                reject
-                                            }
-                                        }
-                                    }
-
-                                    if opt.kind == "bool": TouchArea {
-                                        width: 44px;
-                                        height: 22px;
-                                        clicked => {
-                                            root.set-option-bool(opt.plugin-name, opt.key, !opt.value-bool);
-                                        }
-                                        Rectangle {
-                                            background: opt.value-bool ? root.highlight-color : root.muted-color.with-alpha(0.3);
-                                            border-radius: 11px;
-                                            Rectangle {
-                                                x: opt.value-bool ? parent.width - self.width - 2px : 2px;
-                                                y: (parent.height - self.height) / 2;
-                                                width: 18px;
-                                                height: 18px;
-                                                background: white;
-                                                border-radius: 9px;
-                                            }
-                                        }
-                                    }
-
-                                    if opt.kind == "int": Rectangle {
-                                        height: 28px;
-                                        background: root.muted-color.with-alpha(0.08);
-                                        border-radius: 4px;
-                                        border-width: 1px;
-                                        border-color: root.border-color;
-                                        opt-int-input := TextInput {
-                                            x: 8px;
-                                            y: 0;
-                                            width: parent.width - 16px;
-                                            height: parent.height;
-                                            font-size: root.font-size-title;
-                                            color: root.foreground-color;
-                                            single-line: true;
-                                            input-type: number;
-                                            vertical-alignment: center;
-                                            text: opt.value-int;
-                                            edited => {
-                                                // Slint doesn't surface parsed int — pass the text
-                                                // through and let Rust validate / clamp.
-                                                root.set-option-string(opt.plugin-name, opt.key, self.text);
-                                            }
-                                            accepted => {
-                                                root.set-option-string(opt.plugin-name, opt.key, self.text);
-                                                rail-focus.focus();
-                                            }
-                                            key-pressed(event) => {
-                                                if (event.text == Key.Escape) {
-                                                    root.close-settings();
-                                                    root.show-query();
-                                                    return accept;
-                                                }
-                                                reject
-                                            }
-                                        }
-                                    }
-
-                                    if opt.kind == "enum": Rectangle {
-                                        height: 28px;
-                                        background: root.muted-color.with-alpha(0.08);
-                                        border-radius: 4px;
-                                        border-width: 1px;
-                                        border-color: root.border-color;
-                                        // Minimal "cycle through choices on click" v1 — proper
-                                        // dropdowns belong to a later iteration. Choices are
-                                        // CSV so we don't need a per-option model.
-                                        TouchArea {
-                                            clicked => {
-                                                root.cycle-option-enum(opt.plugin-name, opt.key);
-                                            }
-                                            Text {
-                                                x: 8px;
-                                                text: opt.value-string + "  (click to cycle: " + opt.enum-choices + ")";
-                                                color: root.foreground-color;
-                                                font-size: root.font-size-subtitle;
-                                                vertical-alignment: center;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Fallback Escape catcher — every individual focus target
-            // (rail, done, hotkey-input, plugin-option inputs) handles Esc
-            // itself, but this 0×0 catcher keeps the contract intact in case
-            // a future widget forgets to.
-            settings-fallback-focus := FocusScope {
-                width: 0px;
-                height: 0px;
-                key-pressed(event) => {
-                    if (event.text == Key.Escape) {
-                        root.close-settings();
-                        root.show-query();
-                        return accept;
-                    }
-                    reject
-                }
-            }
+            close-settings => { root.close-settings(); }
+            show-query => { root.show-query(); }
+            select-plugin(i) => { root.select-plugin(i); }
+            toggle-plugin(name, enabled) => { root.toggle-plugin(name, enabled); }
+            set-option-string(plugin, key, val) => { root.set-option-string(plugin, key, val); }
+            set-option-bool(plugin, key, val) => { root.set-option-bool(plugin, key, val); }
+            set-option-int(plugin, key, val) => { root.set-option-int(plugin, key, val); }
+            cycle-option-enum(plugin, key) => { root.cycle-option-enum(plugin, key); }
+            capture-hotkey(meta, ctrl, shift, alt, text) => { return root.capture-hotkey(meta, ctrl, shift, alt, text); }
+            reset-hotkey-to-default => { root.reset-hotkey-to-default(); }
+            select-global => { root.select-global(); }
+            recenter-window => { root.recenter-window(); }
+            open-config-dir => { root.open-config-dir(); }
+            sync-rail-selection => { root.sync-rail-selection(); }
         }
 
         // ---- Install-confirmation view ----
-        // Shown when `current-view == VIEW-CONFIRM`. Displays plugin metadata,
-        // capability list, and Install / Cancel buttons.  Enter confirms;
-        // Escape cancels.
-        confirm-view := VerticalLayout {
+        // Instantiated with `visible:` so `confirm-focus` stays in scope for
+        // `show-confirm()` which calls `confirm.focus-confirm()`.
+        confirm := ConfirmView {
             visible: root.current-view == root.VIEW-CONFIRM;
 
-            // Header bar.
-            Rectangle {
-                height: 48px;
-                background: transparent;
-                HorizontalLayout {
-                    padding-left: 20px;
-                    padding-right: 20px;
-                    padding-top: 12px;
-                    padding-bottom: 12px;
-                    Text {
-                        text: "Install Plugin";
-                        color: root.foreground-color;
-                        font-size: 18px;
-                        vertical-alignment: center;
-                    }
-                }
-            }
+            confirm-plugin-name <=> root.confirm-plugin-name;
+            confirm-display-name <=> root.confirm-display-name;
+            confirm-version <=> root.confirm-version;
+            confirm-description <=> root.confirm-description;
+            confirm-manifest-url <=> root.confirm-manifest-url;
+            confirm-capabilities <=> root.confirm-capabilities;
+            confirm-focus-index <=> root.confirm-focus-index;
 
-            Rectangle {
-                height: 1px;
-                background: root.border-color;
-            }
+            foreground-color: root.foreground-color;
+            muted-color: root.muted-color;
+            highlight-color: root.highlight-color;
+            selection-color: root.selection-color;
+            border-color: root.border-color;
+            font-size-title: root.font-size-title;
+            font-size-subtitle: root.font-size-subtitle;
 
-            // Body: scrollable plugin info + capability list.
-            ScrollView {
-                VerticalLayout {
-                    padding: 16px;
-                    spacing: 10px;
-
-                    // Plugin name + version.
-                    HorizontalLayout {
-                        spacing: 8px;
-                        alignment: start;
-                        Text {
-                            text: root.confirm-display-name;
-                            color: root.foreground-color;
-                            font-size: 16px;
-                            vertical-alignment: center;
-                        }
-                        if root.confirm-version != "": Text {
-                            text: "v" + root.confirm-version;
-                            color: root.muted-color;
-                            font-size: root.font-size-subtitle;
-                            vertical-alignment: center;
-                        }
-                    }
-
-                    // Description.
-                    if root.confirm-description != "": Text {
-                        text: root.confirm-description;
-                        color: root.muted-color;
-                        font-size: root.font-size-subtitle;
-                        wrap: word-wrap;
-                    }
-
-                    // Source URL.
-                    Text {
-                        text: root.confirm-manifest-url;
-                        color: root.muted-color;
-                        font-size: root.font-size-subtitle;
-                        overflow: elide;
-                    }
-
-                    // Capability list header.
-                    if root.confirm-capabilities.length > 0: Text {
-                        text: "Capabilities requested:";
-                        color: root.foreground-color;
-                        font-size: root.font-size-title;
-                    }
-
-                    // One row per capability.
-                    for cap-row in confirm-capabilities: Rectangle {
-                        height: 44px;
-                        background: cap-row.is-new
-                            ? root.highlight-color.with-alpha(0.08)
-                            : transparent;
-                        border-radius: 4px;
-                        HorizontalLayout {
-                            padding-left: 8px;
-                            padding-right: 8px;
-                            padding-top: 4px;
-                            padding-bottom: 4px;
-                            spacing: 8px;
-                            alignment: start;
-                            VerticalLayout {
-                                alignment: center;
-                                // "new" badge for caps that weren't in the
-                                // previously installed version.
-                                if cap-row.is-new: Text {
-                                    text: "+ new";
-                                    color: root.highlight-color;
-                                    font-size: root.font-size-subtitle;
-                                }
-                                Text {
-                                    text: cap-row.cap;
-                                    color: root.foreground-color;
-                                    font-size: root.font-size-title;
-                                }
-                                Text {
-                                    text: cap-row.explanation;
-                                    color: root.muted-color;
-                                    font-size: root.font-size-subtitle;
-                                    overflow: elide;
-                                }
-                            }
-                        }
-                    }
-
-                    if root.confirm-capabilities.length == 0: Text {
-                        text: "This plugin requests no capabilities.";
-                        color: root.muted-color;
-                        font-size: root.font-size-subtitle;
-                    }
-                }
-            }
-
-            Rectangle {
-                height: 1px;
-                background: root.border-color;
-            }
-
-            // Button row: Install (focused first) and Cancel.
-            // A single FocusScope captures keyboard so Enter / Escape
-            // work regardless of which button is visually highlighted.
-            confirm-focus := FocusScope {
-                height: 52px;
-
-                key-pressed(event) => {
-                    if (event.text == Key.Return) {
-                        if (root.confirm-focus-index == 0) {
-                            root.confirm-install();
-                        } else {
-                            root.confirm-cancel();
-                        }
-                        return accept;
-                    }
-                    if (event.text == Key.Escape) {
-                        root.confirm-cancel();
-                        return accept;
-                    }
-                    if (event.text == Key.LeftArrow || event.text == Key.UpArrow) {
-                        root.confirm-focus-index = 0;
-                        return accept;
-                    }
-                    if (event.text == Key.RightArrow || event.text == Key.DownArrow) {
-                        root.confirm-focus-index = 1;
-                        return accept;
-                    }
-                    reject
-                }
-
-                HorizontalLayout {
-                    padding-left: 16px;
-                    padding-right: 16px;
-                    padding-top: 10px;
-                    padding-bottom: 10px;
-                    spacing: 12px;
-                    alignment: end;
-
-                    // Cancel button.
-                    TouchArea {
-                        width: 90px;
-                        height: 32px;
-                        clicked => {
-                            root.confirm-focus-index = 1;
-                            root.confirm-cancel();
-                        }
-                        Rectangle {
-                            background: root.confirm-focus-index == 1
-                                ? root.muted-color.with-alpha(0.2)
-                                : root.muted-color.with-alpha(0.08);
-                            border-radius: 6px;
-                            border-width: root.confirm-focus-index == 1 ? 1px : 0px;
-                            border-color: root.foreground-color;
-                            Text {
-                                text: "Cancel";
-                                color: root.foreground-color;
-                                font-size: root.font-size-title;
-                                vertical-alignment: center;
-                                horizontal-alignment: center;
-                            }
-                        }
-                    }
-
-                    // Install button — receives initial focus.
-                    TouchArea {
-                        width: 90px;
-                        height: 32px;
-                        clicked => {
-                            root.confirm-focus-index = 0;
-                            root.confirm-install();
-                        }
-                        Rectangle {
-                            background: root.confirm-focus-index == 0
-                                ? root.highlight-color
-                                : root.highlight-color.with-alpha(0.7);
-                            border-radius: 6px;
-                            border-width: root.confirm-focus-index == 0 ? 1px : 0px;
-                            border-color: root.highlight-color;
-                            Text {
-                                text: "Install";
-                                color: white;
-                                font-size: root.font-size-title;
-                                vertical-alignment: center;
-                                horizontal-alignment: center;
-                            }
-                        }
-                    }
-                }
-            }
+            confirm-install => { root.confirm-install(); }
+            confirm-cancel => { root.confirm-cancel(); }
         }
     }
 }
-
