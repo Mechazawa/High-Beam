@@ -492,15 +492,6 @@ const MOD_ALT: KeyMods = 1 << 3;
 /// Slint encodes special keys as private-use Unicode codepoints — see
 /// [`canonical_key`] for the mapping table.
 fn format_hotkey_spec(mods: KeyMods, key: &str) -> Option<String> {
-    // `global_hotkey` accepts `Cmd` and `Super` for the meta modifier but
-    // rejects "Meta". Picking the platform-natural label keeps the settings
-    // field readable for the local user — both parse identically on either
-    // OS so a settings.toml carried across platforms still works.
-    #[cfg(target_os = "macos")]
-    let meta_mod = "Cmd";
-    #[cfg(not(target_os = "macos"))]
-    let meta_mod = "Super";
-
     let canonical = canonical_key(key)?;
 
     // Require at least one modifier unless the key is a function key. F1–F24
@@ -511,13 +502,24 @@ fn format_hotkey_spec(mods: KeyMods, key: &str) -> Option<String> {
         return None;
     }
 
+    // Slint's documented macOS quirk: it remaps the physical Command key
+    // onto `event.modifiers.control` and the physical Control key onto
+    // `event.modifiers.meta` so cross-platform code can read one flag for
+    // "the conventional shortcut modifier". The hotkey persistence layer
+    // wants the physical-key spec — un-swap here. On Linux + Windows the
+    // flags map straight through.
+    #[cfg(target_os = "macos")]
+    let (meta_label, control_label) = ("Control", "Cmd");
+    #[cfg(not(target_os = "macos"))]
+    let (meta_label, control_label) = ("Super", "Control");
+
     let mut parts: Vec<&str> = Vec::with_capacity(5);
 
     if mods & MOD_META != 0 {
-        parts.push(meta_mod);
+        parts.push(meta_label);
     }
     if mods & MOD_CONTROL != 0 {
-        parts.push("Control");
+        parts.push(control_label);
     }
     if mods & MOD_ALT != 0 {
         parts.push("Alt");
@@ -845,11 +847,35 @@ mod tests {
 
     #[test]
     fn format_hotkey_spec_uppercases_letters() {
+        // `MOD_META` is Slint's `meta` flag — physical Ctrl on macOS, the
+        // Win/Super key on Linux. Display labels follow the physical key.
         let spec = format_hotkey_spec(MOD_META, "k").expect("meta+k");
         assert!(spec.ends_with("+K"), "expected canonical key K, got {spec}");
-        // Modifier label is platform-dependent — `Cmd` on macOS, `Super` on
-        // Linux. Either way, `global_hotkey` accepts it.
-        assert!(spec == "Cmd+K" || spec == "Super+K", "unexpected meta label: {spec}");
+        assert!(
+            spec == "Control+K" || spec == "Super+K",
+            "unexpected meta label: {spec}"
+        );
+    }
+
+    #[test]
+    fn format_hotkey_spec_unswaps_macos_modifiers() {
+        // The bug being guarded: Slint maps physical Cmd onto its
+        // `modifiers.control` flag for cross-platform consistency. Our
+        // formatter un-swaps so the persisted spec reads as the user
+        // physically pressed it.
+        let cmd_press = format_hotkey_spec(MOD_CONTROL, "k").expect("control flag");
+        let ctrl_press = format_hotkey_spec(MOD_META, "k").expect("meta flag");
+
+        #[cfg(target_os = "macos")]
+        {
+            assert_eq!(cmd_press, "Cmd+K", "Slint control flag = physical Cmd on macOS");
+            assert_eq!(ctrl_press, "Control+K", "Slint meta flag = physical Ctrl on macOS");
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            assert_eq!(cmd_press, "Control+K");
+            assert_eq!(ctrl_press, "Super+K");
+        }
     }
 
     #[test]
