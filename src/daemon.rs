@@ -86,7 +86,16 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     spawn_ipc_listener(&options.socket_path, window.as_weak(), settings_controller.clone())?;
 
     #[cfg(target_os = "macos")]
-    let _hotkey_guard = spawn_hotkey_listener(window.as_weak(), &hotkey_spec, settings_controller.clone());
+    let _hotkey_guard = {
+        let reg = spawn_hotkey_listener(window.as_weak(), &hotkey_spec, settings_controller.clone());
+        if let Some(reg) = reg {
+            let shared = std::sync::Arc::new(reg);
+            settings_controller.attach_hotkey_registration(std::sync::Arc::clone(&shared));
+            Some(shared)
+        } else {
+            None
+        }
+    };
     // Suppress unused-variable warning on Linux where we don't register a
     // global hotkey (the WM handles it via `highbeam --open`).
     #[cfg(not(target_os = "macos"))]
@@ -152,12 +161,58 @@ fn parse_hotkey_or_default(spec: &str) -> global_hotkey::hotkey::HotKey {
     }
 }
 
+/// Owned handle for the live OS-level hotkey registration. Wraps the
+/// `GlobalHotKeyManager` together with the currently-registered `HotKey`,
+/// so the settings layer can swap the binding without a daemon restart.
+///
+/// Linux builds get a no-op variant: the WM owns the hotkey there via
+/// `highbeam --open`, so there's no OS handle for us to manage.
+#[cfg(target_os = "macos")]
+pub struct HotkeyRegistration {
+    manager: global_hotkey::GlobalHotKeyManager,
+    current: std::sync::Arc<std::sync::Mutex<global_hotkey::hotkey::HotKey>>,
+}
+
+#[cfg(not(target_os = "macos"))]
+pub struct HotkeyRegistration;
+
+#[cfg(target_os = "macos")]
+impl HotkeyRegistration {
+    /// Replace the live hotkey with the one parsed from `spec`. Bad specs
+    /// fall back to the daemon default. On register failure, the previous
+    /// binding is restored so the user is never left without a hotkey.
+    pub fn reregister(&self, spec: &str) {
+        let Ok(mut current) = self.current.lock() else {
+            tracing::error!("hotkey: registration mutex poisoned");
+            return;
+        };
+        let new = parse_hotkey_or_default(spec);
+        let _ = self.manager.unregister(*current);
+
+        if let Err(err) = self.manager.register(new) {
+            tracing::error!(%err, %spec, "hotkey: re-register failed; restoring previous");
+            let _ = self.manager.register(*current);
+            return;
+        }
+        *current = new;
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+impl HotkeyRegistration {
+    pub fn reregister(&self, _spec: &str) {
+        // No OS-level hotkey on Linux; settings still persist for next launch.
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn spawn_hotkey_listener(
     weak: slint::Weak<QueryWindow>,
     hotkey_spec: &str,
     settings: SettingsController,
-) -> Option<global_hotkey::GlobalHotKeyManager> {
+) -> Option<HotkeyRegistration> {
+    use std::sync::{Arc, Mutex};
+
     use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 
     // GlobalHotKeyManager has to be created and kept alive on the same thread
@@ -178,12 +233,17 @@ fn spawn_hotkey_listener(
         return None;
     }
 
-    let hotkey_id = hotkey.id();
+    let current = Arc::new(Mutex::new(hotkey));
+    let current_for_thread = Arc::clone(&current);
 
     if let Err(err) = thread::Builder::new().name("highbeam-hotkey".into()).spawn(move || {
         let receiver = GlobalHotKeyEvent::receiver();
         while let Ok(event) = receiver.recv() {
-            if event.id == hotkey_id && event.state == HotKeyState::Pressed {
+            // Resolve the live id on every event so re-registration takes
+            // effect immediately — the registration mutex is uncontended
+            // outside of the rare settings-driven swap.
+            let live_id = current_for_thread.lock().ok().map(|h| h.id());
+            if event.state == HotKeyState::Pressed && Some(event.id) == live_id {
                 let weak = weak.clone();
                 let settings = settings.clone();
                 let _ = slint::invoke_from_event_loop(move || {
@@ -198,7 +258,7 @@ fn spawn_hotkey_listener(
         return None;
     }
 
-    Some(manager)
+    Some(HotkeyRegistration { manager, current })
 }
 
 #[cfg(test)]

@@ -7,12 +7,13 @@
 //! pipeline; the settings view talks to the same `QueryWindow` but its
 //! state is independent of the query/results state.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use serde_json::Value as JsonValue;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::QueryWindow;
+use crate::daemon::HotkeyRegistration;
 use crate::plugins::manifest::{Manifest, OptionDef, OptionKind};
 use crate::settings::{Settings, WindowPosition};
 use crate::ui::{PluginOption, PluginSlot};
@@ -55,6 +56,12 @@ struct Inner {
     /// option) can fire from different Slint events; no concurrent writes
     /// in practice but the borrow checker doesn't care.
     settings: Mutex<Settings>,
+    /// Handle to the OS hotkey registration, plumbed in by `daemon::run`
+    /// after `spawn_hotkey_listener` succeeds. `None` until set (e.g.
+    /// during early init), and on Linux where the WM owns the binding.
+    /// `OnceLock` so the controller's already-wired callbacks see the
+    /// registration as soon as the daemon installs it.
+    hotkey_registration: OnceLock<Arc<HotkeyRegistration>>,
 }
 
 impl SettingsController {
@@ -65,7 +72,22 @@ impl SettingsController {
             inner: Arc::new(Inner {
                 manifests,
                 settings: Mutex::new(settings),
+                hotkey_registration: OnceLock::new(),
             }),
+        }
+    }
+
+    /// Wire the live OS hotkey registration so capture / reset paths can
+    /// re-bind without a daemon restart. Called by `daemon::run` after the
+    /// hotkey listener thread is up. Idempotent at the type level — the
+    /// `OnceLock` swallows a second set silently.
+    pub fn attach_hotkey_registration(&self, registration: Arc<HotkeyRegistration>) {
+        let _ = self.inner.hotkey_registration.set(registration);
+    }
+
+    fn reregister_hotkey(&self, spec: &str) {
+        if let Some(reg) = self.inner.hotkey_registration.get() {
+            reg.reregister(spec);
         }
     }
 
@@ -160,6 +182,7 @@ impl SettingsController {
                 return;
             };
             ctrl.set_hotkey(&spec);
+            ctrl.reregister_hotkey(&spec);
             if let Some(w) = weak.upgrade() {
                 ctrl.refresh_global(&w);
             }
@@ -169,6 +192,7 @@ impl SettingsController {
         let weak = window.as_weak();
         window.on_reset_hotkey_to_default(move || {
             ctrl.set_hotkey(crate::settings::DEFAULT_HOTKEY);
+            ctrl.reregister_hotkey(crate::settings::DEFAULT_HOTKEY);
             if let Some(w) = weak.upgrade() {
                 ctrl.refresh_global(&w);
             }
@@ -518,17 +542,31 @@ fn canonical_key(text: &str) -> Option<String> {
         return None;
     }
 
+    // Codepoint table mirrors `i-slint-common/key_codes.rs`. The W3C-shaped
+    // names on the right column are what `global_hotkey` accepts. Modifier-
+    // only presses (0x10-0x18) deliberately fall through to None so the
+    // capture handler waits for a real key.
     match first as u32 {
         0x1B => None, // Escape — handled in Slint
-        0x08 | 0x7F => Some("Backspace".into()),
+        0x08 => Some("Backspace".into()),
         0x09 => Some("Tab".into()),
         0x0A | 0x0D => Some("Enter".into()),
         0x20 => Some("Space".into()),
+        0x7F => Some("Delete".into()),
         0xF700 => Some("ArrowUp".into()),
         0xF701 => Some("ArrowDown".into()),
         0xF702 => Some("ArrowLeft".into()),
         0xF703 => Some("ArrowRight".into()),
-        c if (0xF704..=0xF70F).contains(&c) => Some(format!("F{}", c - 0xF703)),
+        // F1..=F24 — Slint allocates F1 at 0xF704, contiguous through F24.
+        c if (0xF704..=0xF71B).contains(&c) => Some(format!("F{}", c - 0xF703)),
+        0xF727 => Some("Insert".into()),
+        0xF729 => Some("Home".into()),
+        0xF72B => Some("End".into()),
+        0xF72C => Some("PageUp".into()),
+        0xF72D => Some("PageDown".into()),
+        0xF72F => Some("ScrollLock".into()),
+        0xF730 => Some("Pause".into()),
+        0xF735 => Some("ContextMenu".into()),
         _ if first.is_ascii_alphabetic() => Some(first.to_ascii_uppercase().to_string()),
         _ if first.is_ascii_digit() => Some(first.to_string()),
         _ => None,
@@ -812,8 +850,27 @@ mod tests {
         assert_eq!(canonical_key("\u{f700}").as_deref(), Some("ArrowUp"));
         assert_eq!(canonical_key("\u{f704}").as_deref(), Some("F1"));
         assert_eq!(canonical_key("\u{f70f}").as_deref(), Some("F12"));
+        assert_eq!(canonical_key("\u{f71b}").as_deref(), Some("F24"));
         assert_eq!(canonical_key(" ").as_deref(), Some("Space"));
         assert_eq!(canonical_key("\u{0a}").as_deref(), Some("Enter"));
         assert_eq!(canonical_key("\u{09}").as_deref(), Some("Tab"));
+        assert_eq!(canonical_key("\u{08}").as_deref(), Some("Backspace"));
+        assert_eq!(canonical_key("\u{7f}").as_deref(), Some("Delete"));
+        assert_eq!(canonical_key("\u{f727}").as_deref(), Some("Insert"));
+        assert_eq!(canonical_key("\u{f729}").as_deref(), Some("Home"));
+        assert_eq!(canonical_key("\u{f72b}").as_deref(), Some("End"));
+        assert_eq!(canonical_key("\u{f72c}").as_deref(), Some("PageUp"));
+        assert_eq!(canonical_key("\u{f72d}").as_deref(), Some("PageDown"));
+    }
+
+    #[test]
+    fn canonical_key_refuses_modifier_only_codepoints() {
+        // 0x10-0x18 are Slint's Shift/Control/Alt/AltGr/CapsLock/ShiftR/
+        // ControlR/Meta/MetaR — surface as None so the capture handler
+        // keeps listening for a real key.
+        for c in 0x10u32..=0x18 {
+            let raw = char::from_u32(c).unwrap().to_string();
+            assert_eq!(canonical_key(&raw), None, "codepoint {c:#x} should not map");
+        }
     }
 }
