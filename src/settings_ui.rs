@@ -150,8 +150,28 @@ impl SettingsController {
         });
 
         let ctrl = self.clone();
-        window.on_set_hotkey(move |value| {
-            ctrl.set_hotkey(value.as_str());
+        let weak = window.as_weak();
+        window.on_capture_hotkey(move |meta, control, shift, alt, key| {
+            let mods = (u8::from(meta) * MOD_META)
+                | (u8::from(control) * MOD_CONTROL)
+                | (u8::from(shift) * MOD_SHIFT)
+                | (u8::from(alt) * MOD_ALT);
+            let Some(spec) = format_hotkey_spec(mods, key.as_str()) else {
+                return;
+            };
+            ctrl.set_hotkey(&spec);
+            if let Some(w) = weak.upgrade() {
+                ctrl.refresh_global(&w);
+            }
+        });
+
+        let ctrl = self.clone();
+        let weak = window.as_weak();
+        window.on_reset_hotkey_to_default(move || {
+            ctrl.set_hotkey(crate::settings::DEFAULT_HOTKEY);
+            if let Some(w) = weak.upgrade() {
+                ctrl.refresh_global(&w);
+            }
         });
 
         let weak = window.as_weak();
@@ -429,6 +449,92 @@ fn next_choice(current: &str, choices: &[String]) -> String {
     choices.get(next).cloned().unwrap_or_else(|| current.to_owned())
 }
 
+/// Bitfield for the four keyboard modifier flags Slint surfaces on a key
+/// event. Packed into a `u8` so the formatter signature stays small and
+/// dodges pedantic clippy's `struct_excessive_bools` /
+/// `fn_params_excessive_bools` lints. Constructed via OR of the constants
+/// below at the call site.
+type KeyMods = u8;
+const MOD_META: KeyMods = 1 << 0;
+const MOD_CONTROL: KeyMods = 1 << 1;
+const MOD_SHIFT: KeyMods = 1 << 2;
+const MOD_ALT: KeyMods = 1 << 3;
+
+/// Turn a Slint key-pressed event into the `global_hotkey`-compatible
+/// spec string. Returns `None` for modifier-only / unprintable inputs the
+/// hotkey parser couldn't accept anyway.
+///
+/// Slint encodes special keys as private-use Unicode codepoints — see
+/// [`canonical_key`] for the mapping table.
+fn format_hotkey_spec(mods: KeyMods, key: &str) -> Option<String> {
+    // `global_hotkey` accepts `Cmd` and `Super` for the meta modifier but
+    // rejects "Meta". Picking the platform-natural label keeps the settings
+    // field readable for the local user — both parse identically on either
+    // OS so a settings.toml carried across platforms still works.
+    #[cfg(target_os = "macos")]
+    let meta_mod = "Cmd";
+    #[cfg(not(target_os = "macos"))]
+    let meta_mod = "Super";
+
+    let canonical = canonical_key(key)?;
+    let mut parts: Vec<&str> = Vec::with_capacity(5);
+
+    if mods & MOD_META != 0 {
+        parts.push(meta_mod);
+    }
+    if mods & MOD_CONTROL != 0 {
+        parts.push("Control");
+    }
+    if mods & MOD_ALT != 0 {
+        parts.push("Alt");
+    }
+    if mods & MOD_SHIFT != 0 {
+        parts.push("Shift");
+    }
+
+    let mut out = parts.join("+");
+
+    if !out.is_empty() {
+        out.push('+');
+    }
+    out.push_str(&canonical);
+    Some(out)
+}
+
+/// Map a Slint `event.text` string to the canonical key name
+/// `global_hotkey` parses. Returns `None` for the things we deliberately
+/// refuse to capture (Escape, raw modifier presses, multi-character text).
+fn canonical_key(text: &str) -> Option<String> {
+    if text.is_empty() {
+        return None;
+    }
+
+    let mut chars = text.chars();
+    let first = chars.next()?;
+
+    if chars.next().is_some() {
+        // Multi-character event.text — Slint's special-key codepoints are
+        // single chars; anything else is ambiguous and we'd rather refuse.
+        return None;
+    }
+
+    match first as u32 {
+        0x1B => None, // Escape — handled in Slint
+        0x08 | 0x7F => Some("Backspace".into()),
+        0x09 => Some("Tab".into()),
+        0x0A | 0x0D => Some("Enter".into()),
+        0x20 => Some("Space".into()),
+        0xF700 => Some("ArrowUp".into()),
+        0xF701 => Some("ArrowDown".into()),
+        0xF702 => Some("ArrowLeft".into()),
+        0xF703 => Some("ArrowRight".into()),
+        c if (0xF704..=0xF70F).contains(&c) => Some(format!("F{}", c - 0xF703)),
+        _ if first.is_ascii_alphabetic() => Some(first.to_ascii_uppercase().to_string()),
+        _ if first.is_ascii_digit() => Some(first.to_string()),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -643,5 +749,71 @@ mod tests {
         assert_eq!(opts.get("limit"), Some(&JsonValue::Number(20.into())));
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn format_hotkey_spec_round_trips_through_global_hotkey() {
+        // Whatever spec we produce must parse cleanly via the same path the
+        // daemon uses on startup — guards against drift between our
+        // formatter and `global_hotkey`'s parser, and against modifier-name
+        // mismatch (the parser rejects "Meta" but accepts "Cmd"/"Super").
+        use std::str::FromStr;
+
+        let specs = [
+            format_hotkey_spec(MOD_SHIFT, " ").expect("shift+space"),
+            format_hotkey_spec(MOD_META, "k").expect("meta+k"),
+            format_hotkey_spec(MOD_META | MOD_SHIFT, "K").expect("meta+shift+k"),
+            format_hotkey_spec(MOD_CONTROL | MOD_ALT, "5").expect("ctrl+alt+5"),
+            format_hotkey_spec(MOD_META | MOD_CONTROL | MOD_SHIFT | MOD_ALT, "f").expect("all-mods"),
+        ];
+
+        for spec in &specs {
+            global_hotkey::hotkey::HotKey::from_str(spec).unwrap_or_else(|err| {
+                panic!("global_hotkey rejected `{spec}`: {err}");
+            });
+        }
+    }
+
+    #[test]
+    fn format_hotkey_spec_matches_default() {
+        // The default-reset path writes `DEFAULT_HOTKEY` directly, so a
+        // Shift+Space capture must format to the same byte sequence — keeps
+        // the UI and the disk in agreement when the user later clears.
+        assert_eq!(
+            format_hotkey_spec(MOD_SHIFT, " ").as_deref(),
+            Some(crate::settings::DEFAULT_HOTKEY),
+        );
+    }
+
+    #[test]
+    fn format_hotkey_spec_uppercases_letters() {
+        let spec = format_hotkey_spec(MOD_META, "k").expect("meta+k");
+        assert!(spec.ends_with("+K"), "expected canonical key K, got {spec}");
+        // Modifier label is platform-dependent — `Cmd` on macOS, `Super` on
+        // Linux. Either way, `global_hotkey` accepts it.
+        assert!(spec == "Cmd+K" || spec == "Super+K", "unexpected meta label: {spec}");
+    }
+
+    #[test]
+    fn format_hotkey_spec_skips_escape() {
+        // 0x1B is Slint's Escape — Slint handles that path via the
+        // reset-to-default callback, so the formatter refuses.
+        assert_eq!(format_hotkey_spec(0, "\u{1b}"), None);
+    }
+
+    #[test]
+    fn format_hotkey_spec_rejects_unmapped_text() {
+        assert_eq!(format_hotkey_spec(MOD_META, ""), None);
+        assert_eq!(format_hotkey_spec(0, "ab"), None);
+    }
+
+    #[test]
+    fn canonical_key_maps_slint_special_codepoints() {
+        assert_eq!(canonical_key("\u{f700}").as_deref(), Some("ArrowUp"));
+        assert_eq!(canonical_key("\u{f704}").as_deref(), Some("F1"));
+        assert_eq!(canonical_key("\u{f70f}").as_deref(), Some("F12"));
+        assert_eq!(canonical_key(" ").as_deref(), Some("Space"));
+        assert_eq!(canonical_key("\u{0a}").as_deref(), Some("Enter"));
+        assert_eq!(canonical_key("\u{09}").as_deref(), Some("Tab"));
     }
 }

@@ -168,10 +168,17 @@ export component QueryWindow inherits Window {
     // so text-input edits don't trigger the same write-back-to-the-
     // property dance (which yanks TextInput focus on every keystroke).
     callback cycle-option-enum(string, string);
-    // Global-pane callbacks. `set-hotkey` fires on blur/commit of the hotkey
-    // input; `select-global` flips the rail selection to the global entry.
-    callback set-hotkey(string);
+    // Global-pane callbacks. `capture-hotkey` fires when the user records a
+    // new combo (any non-Escape keypress while the hotkey field has focus);
+    // Rust formats the canonical spec string from the modifier flags + key.
+    // `reset-hotkey-to-default` fires on Escape inside capture mode.
+    // `select-global` flips the rail selection to the global entry.
+    callback capture-hotkey(bool, bool, bool, bool, string);
+    callback reset-hotkey-to-default();
     callback select-global();
+    // Whether the hotkey field is currently listening for a key combo —
+    // drives the prompt text + highlighted border in the global pane.
+    in-out property <bool> capturing-hotkey: false;
     // Drag/position callbacks. Slint's frameless-window drag isn't built-in,
     // so we hand off to winit's `drag_window()` on the Rust side. The
     // launcher background fires `request-window-drag` on left-button-down;
@@ -700,43 +707,56 @@ export component QueryWindow inherits Window {
                                     color: root.foreground-color;
                                     font-size: root.font-size-title;
                                 }
-                                Rectangle {
+                                // Click to enter capture mode → next keypress is
+                                // recorded as the new hotkey. Esc inside capture
+                                // mode resets to the default (Shift+Space). Focus
+                                // loss exits capture mode silently.
+                                hotkey-focus := FocusScope {
                                     height: 28px;
-                                    background: root.muted-color.with-alpha(0.08);
-                                    border-radius: 4px;
-                                    border-width: 1px;
-                                    border-color: root.border-color;
-                                    hotkey-input := TextInput {
-                                        x: 8px;
-                                        y: 0;
-                                        width: parent.width - 16px;
-                                        height: parent.height;
-                                        font-size: root.font-size-title;
-                                        color: root.foreground-color;
-                                        single-line: true;
-                                        vertical-alignment: center;
-                                        text: root.hotkey-value;
-                                        // Commit on edit so the value persists without a
-                                        // blur/enter dance; the daemon snapshots at startup.
-                                        edited => {
-                                            root.set-hotkey(self.text);
-                                        }
-                                        // Enter commits-and-blurs by returning focus to
-                                        // the rail; the rail FocusScope is the natural
-                                        // "home" for keyboard nav in the settings view.
-                                        accepted => {
-                                            root.set-hotkey(self.text);
+                                    changed has-focus => {
+                                        root.capturing-hotkey = self.has-focus;
+                                    }
+                                    key-pressed(event) => {
+                                        if (event.text == Key.Escape) {
+                                            root.reset-hotkey-to-default();
                                             rail-focus.focus();
+                                            return accept;
                                         }
-                                        // Escape from a TextInput won't bubble to a
-                                        // parent FocusScope, so handle it here directly.
-                                        key-pressed(event) => {
-                                            if (event.text == Key.Escape) {
-                                                root.close-settings();
-                                                root.show-query();
-                                                return accept;
+                                        // Slint fires key-pressed with an empty
+                                        // text when only a modifier is held; skip
+                                        // those and wait for a real key.
+                                        if (event.text == "") {
+                                            return accept;
+                                        }
+                                        root.capture-hotkey(
+                                            event.modifiers.meta,
+                                            event.modifiers.control,
+                                            event.modifiers.shift,
+                                            event.modifiers.alt,
+                                            event.text,
+                                        );
+                                        rail-focus.focus();
+                                        return accept;
+                                    }
+                                    TouchArea {
+                                        clicked => {
+                                            hotkey-focus.focus();
+                                        }
+                                        Rectangle {
+                                            background: root.muted-color.with-alpha(0.08);
+                                            border-radius: 4px;
+                                            border-width: 1px;
+                                            border-color: root.capturing-hotkey ? root.highlight-color : root.border-color;
+                                            Text {
+                                                x: 8px;
+                                                width: parent.width - 16px;
+                                                height: parent.height;
+                                                text: root.capturing-hotkey ? "Press a hotkey… (Esc to reset)" : root.hotkey-value;
+                                                color: root.capturing-hotkey ? root.muted-color : root.foreground-color;
+                                                font-size: root.font-size-title;
+                                                vertical-alignment: center;
+                                                overflow: elide;
                                             }
-                                            reject
                                         }
                                     }
                                 }
