@@ -13,6 +13,13 @@ export struct ResultRow {
     has-subtitle: bool,
     icon: image,
     has-icon: bool,
+    // Plugin-supplied overrides shown while the alt-action modifier is
+    // held. Empty `alt-*` strings + `has-alt-* = false` mean "no
+    // override" — the row keeps its primary labels.
+    alt-title: string,
+    has-alt-title: bool,
+    alt-subtitle: string,
+    has-alt-subtitle: bool,
 }
 
 // One plugin slot in the settings sidebar.

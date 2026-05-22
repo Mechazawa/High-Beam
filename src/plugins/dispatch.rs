@@ -163,6 +163,8 @@ mod tests {
                 weight,
                 pinned,
                 alt_action: None,
+                alt_title: None,
+                alt_subtitle: None,
                 action: Action::Copy { text: key.into() },
             },
         }

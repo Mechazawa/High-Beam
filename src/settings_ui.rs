@@ -223,6 +223,9 @@ impl SettingsController {
         let settings = self.inner.settings.lock().expect("settings lock");
         window.set_hotkey_value(SharedString::from(settings.global().hotkey.as_str()));
         window.set_alt_action_modifier(SharedString::from(settings.alt_action_modifier()));
+        window.set_alt_action_modifier_flag(SharedString::from(slint_flag_for_modifier(
+            settings.alt_action_modifier(),
+        )));
     }
 
     fn set_hotkey(&self, value: &str) {
@@ -653,6 +656,40 @@ fn canonical_key(text: &str) -> Option<String> {
         _ if first.is_ascii_alphabetic() => Some(first.to_ascii_uppercase().to_string()),
         _ if first.is_ascii_digit() => Some(first.to_string()),
         _ => None,
+    }
+}
+
+/// Map a stored modifier choice (`"Alt"`, `"Shift"`, `"Cmd"`, `"Ctrl"`)
+/// onto the Slint flag name Slint reports for that physical key. The
+/// macOS swap (Slint reports physical Cmd as `control` and physical Ctrl
+/// as `meta`) is resolved here so the Slint side can branch on a stable
+/// `"alt"` / `"shift"` / `"control"` / `"meta"` string.
+fn slint_flag_for_modifier(setting: &str) -> &'static str {
+    match setting {
+        "Shift" => "shift",
+        "Cmd" => {
+            #[cfg(target_os = "macos")]
+            {
+                "control"
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                "meta"
+            }
+        }
+        "Ctrl" => {
+            #[cfg(target_os = "macos")]
+            {
+                "meta"
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                "control"
+            }
+        }
+        // "Alt" + any unknown value falls back to the default — the
+        // setting normalisation already canonicalises on load.
+        _ => "alt",
     }
 }
 

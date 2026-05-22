@@ -35,6 +35,15 @@ pub struct PluginResult {
     /// modifier state.
     #[serde(default, rename = "altAction")]
     pub alt_action: Option<Action>,
+    /// Optional title to render in place of `title` while the alt-action
+    /// modifier is held. `None` ⇒ the primary title stays put.
+    #[serde(default, rename = "altTitle")]
+    pub alt_title: Option<String>,
+    /// Optional subtitle to render in place of `subtitle` while the
+    /// alt-action modifier is held. Use this to surface the alt action
+    /// to the user without inventing a separate row.
+    #[serde(default, rename = "altSubtitle")]
+    pub alt_subtitle: Option<String>,
 }
 
 /// Variants of [`Action`] the host knows how to execute.

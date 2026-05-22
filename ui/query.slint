@@ -51,6 +51,31 @@ export component QueryWindow inherits Window {
     in-out property <bool> showing-global: true;
     in-out property <string> hotkey-value: "Shift+Space";
     in-out property <string> alt-action-modifier: "Alt";
+    // Resolved Slint-side flag name corresponding to the configured alt
+    // modifier, accounting for macOS's Cmd↔Ctrl flag swap. Rust pushes
+    // it via `set-alt-action-modifier-flag` whenever the setting changes.
+    // Values: "alt" | "shift" | "control" | "meta".
+    in-out property <string> alt-action-modifier-flag: "alt";
+    // True while the user is holding the configured alt-action modifier.
+    // Updated on every key event by `update-alt-modifier-state` below;
+    // forwarded into LauncherView so result rows can swap labels live.
+    in-out property <bool> alt-modifier-active: false;
+
+    // Recompute `alt-modifier-active` from a fresh modifier snapshot.
+    // Called from every place key state can change (TextInput key-pressed
+    // / key-released in the launcher view). Slint can't branch on the
+    // host OS, hence Rust hands us the resolved flag name.
+    public function update-alt-modifier-state(meta: bool, control: bool, shift: bool, alt: bool) {
+        if (root.alt-action-modifier-flag == "alt") {
+            root.alt-modifier-active = alt;
+        } else if (root.alt-action-modifier-flag == "shift") {
+            root.alt-modifier-active = shift;
+        } else if (root.alt-action-modifier-flag == "control") {
+            root.alt-modifier-active = control;
+        } else if (root.alt-action-modifier-flag == "meta") {
+            root.alt-modifier-active = meta;
+        }
+    }
     // Keyboard rail selection: 0 = Global, 1 = plugin[0], 2 = plugin[1], etc.
     // Distinct from `selected-plugin-index` so arrow-key nav can sit on Global
     // without mutating the plugin selection state behind it.
@@ -273,6 +298,7 @@ export component QueryWindow inherits Window {
             max-rows <=> root.max-rows;
             query-text <=> root.query-text;
             is-history-preview <=> root.is-history-preview;
+            alt-modifier-active <=> root.alt-modifier-active;
 
             foreground-color: root.foreground-color;
             muted-color: root.muted-color;
@@ -284,6 +310,9 @@ export component QueryWindow inherits Window {
 
             query-edited(s) => { root.query-edited(s); }
             escape-pressed => { root.escape-pressed(); }
+            key-state-changed(meta, ctrl, shift, alt) => {
+                root.update-alt-modifier-state(meta, ctrl, shift, alt);
+            }
             invoke-selected(meta, control, shift, alt) => { root.invoke-selected(meta, control, shift, alt); }
             history-up => { root.history-up(); }
             history-down => { root.history-down(); }

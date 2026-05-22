@@ -25,6 +25,14 @@ export interface Result {
      * so plugins can opt rows into a secondary verb individually.
      */
     altAction?: Action;
+    /**
+     * Title shown in place of `title` while the alt-action modifier is
+     * held. Surfacing this together with `altAction` is the cheapest way
+     * to telegraph "this row will do something different right now".
+     */
+    altTitle?: string;
+    /** Subtitle shown in place of `subtitle` while the alt-action modifier is held. */
+    altSubtitle?: string;
 }
 
 /** Tagged-union of actions the host knows how to execute. */

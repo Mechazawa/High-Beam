@@ -66,6 +66,7 @@ function resultFor(comic) {
         // Alt opens the explainxkcd page — separate plugin would be heavier
         // than just wiring the secondary verb here.
         altAction: openUrl(EXPLAIN_PAGE(comic.num)),
+        altSubtitle: "→ explainxkcd.com",
     };
 }
 
@@ -257,6 +258,7 @@ export async function* query(input, signal) {
             pinned: false,
             action: openUrl(COMIC_PAGE(item.num)),
             altAction: openUrl(EXPLAIN_PAGE(item.num)),
+            altSubtitle: "→ explainxkcd.com",
         };
     }
 }

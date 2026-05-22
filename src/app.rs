@@ -649,6 +649,10 @@ fn render_results(window: &QueryWindow, results: &[RankedResult]) {
                 has_subtitle: r.result.subtitle.is_some(),
                 icon: window::decode_icon(icon_spec),
                 has_icon,
+                alt_title: r.result.alt_title.clone().unwrap_or_default().into(),
+                has_alt_title: r.result.alt_title.is_some(),
+                alt_subtitle: r.result.alt_subtitle.clone().unwrap_or_default().into(),
+                has_alt_subtitle: r.result.alt_subtitle.is_some(),
             }
         })
         .collect();
@@ -719,6 +723,8 @@ impl ProgressEmitter {
                 pinned: true,
                 action,
                 alt_action: None,
+                alt_title: None,
+                alt_subtitle: None,
             },
             order: 0,
         };

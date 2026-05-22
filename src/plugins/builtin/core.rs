@@ -295,6 +295,8 @@ pub(crate) fn query(input: &str, plugin_names: &[&str]) -> Vec<StreamedResult> {
                     pinned: false,
                     action,
                     alt_action: None,
+                    alt_title: None,
+                    alt_subtitle: None,
                 },
             });
         }
@@ -427,6 +429,8 @@ fn row(key: String, title: String, subtitle: Option<&str>, weight: f64, action: 
             pinned: false,
             action,
             alt_action: None,
+            alt_title: None,
+            alt_subtitle: None,
         },
     }
 }
