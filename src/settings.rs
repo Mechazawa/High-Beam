@@ -170,6 +170,7 @@ impl Settings {
     /// Returns a human-readable error string if the TOML is malformed.
     pub fn from_toml(text: &str) -> Result<Self, String> {
         let raw: SettingsFile = toml::from_str(text).map_err(|e| e.to_string())?;
+
         let plugins = raw
             .plugins
             .into_iter()
@@ -232,6 +233,7 @@ impl Settings {
                 (name.clone(), raw)
             })
             .collect();
+
         // Skip the `[global]` section when it matches defaults so a
         // freshly-installed settings file stays minimal. All fields write
         // through unconditionally once we emit the section — `hotkey` so

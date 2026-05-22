@@ -158,6 +158,7 @@ pub async fn fetch_and_validate_manifest(url: &str) -> Result<Manifest, InstallE
         .send()
         .await
         .map_err(|e| InstallError::Fetch(e.to_string()))?;
+
     if !response.status().is_success() {
         return Err(InstallError::Fetch(format!(
             "{} {}",
@@ -165,6 +166,7 @@ pub async fn fetch_and_validate_manifest(url: &str) -> Result<Manifest, InstallE
             response.status().canonical_reason().unwrap_or(""),
         )));
     }
+
     let bytes = response.bytes().await.map_err(|e| InstallError::Fetch(e.to_string()))?;
     let manifest = Manifest::parse(&bytes).map_err(|e| InstallError::BadManifest(e.to_string()))?;
     require_installer_fields(&manifest)?;
@@ -177,9 +179,11 @@ fn require_installer_fields(manifest: &Manifest) -> Result<(), InstallError> {
     if manifest.name.is_empty() {
         return Err(InstallError::MissingField("name"));
     }
+
     if manifest.version.is_none() {
         return Err(InstallError::MissingField("version"));
     }
+
     // archiveUrl XOR entryUrl: a plugin chooses one distribution shape;
     // setting both is ambiguous, setting neither leaves nothing to install.
     match (manifest.archive_url.as_deref(), manifest.entry_url.as_deref()) {
@@ -205,6 +209,7 @@ pub async fn download_entry(url: &str) -> Result<Vec<u8>, InstallError> {
         .send()
         .await
         .map_err(|e| InstallError::Download(e.to_string()))?;
+
     if !response.status().is_success() {
         return Err(InstallError::Download(format!(
             "{} {}",
@@ -212,6 +217,7 @@ pub async fn download_entry(url: &str) -> Result<Vec<u8>, InstallError> {
             response.status().canonical_reason().unwrap_or(""),
         )));
     }
+
     let bytes = response
         .bytes()
         .await
@@ -234,6 +240,7 @@ pub async fn download_archive(url: &str) -> Result<(Vec<u8>, ArchiveFormat), Ins
         .send()
         .await
         .map_err(|e| InstallError::Download(e.to_string()))?;
+
     if !response.status().is_success() {
         return Err(InstallError::Download(format!(
             "{} {}",
@@ -241,6 +248,7 @@ pub async fn download_archive(url: &str) -> Result<(Vec<u8>, ArchiveFormat), Ins
             response.status().canonical_reason().unwrap_or(""),
         )));
     }
+
     let content_type = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
@@ -291,6 +299,7 @@ fn extract_zip(bytes: &[u8], target_dir: &Path) -> Result<(), InstallError> {
     let mut archive = zip::ZipArchive::new(reader).map_err(|e| InstallError::Extract(e.to_string()))?;
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).map_err(|e| InstallError::Extract(e.to_string()))?;
+
         // `enclosed_name` rejects `..` traversal and absolute paths.
         let Some(rel) = entry.enclosed_name() else {
             return Err(InstallError::Extract(format!(
@@ -298,14 +307,18 @@ fn extract_zip(bytes: &[u8], target_dir: &Path) -> Result<(), InstallError> {
                 entry.name()
             )));
         };
+
         let outpath = target_dir.join(rel);
+
         if entry.is_dir() {
             std::fs::create_dir_all(&outpath).map_err(|e| InstallError::Io(e.to_string()))?;
             continue;
         }
+
         if let Some(parent) = outpath.parent() {
             std::fs::create_dir_all(parent).map_err(|e| InstallError::Io(e.to_string()))?;
         }
+
         let mut out = std::fs::File::create(&outpath).map_err(|e| InstallError::Io(e.to_string()))?;
         std::io::copy(&mut entry, &mut out).map_err(|e| InstallError::Extract(e.to_string()))?;
     }
@@ -409,7 +422,9 @@ pub fn find_payload_root(extracted_dir: &Path) -> PathBuf {
 /// Returns [`InstallError::Io`] on any filesystem step.
 pub fn move_into_plugins_dir(payload_root: &Path, plugins_dir: &Path, name: &str) -> Result<PathBuf, InstallError> {
     std::fs::create_dir_all(plugins_dir).map_err(|e| InstallError::Io(e.to_string()))?;
+
     let destination = plugins_dir.join(name);
+
     if destination.exists() {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -418,6 +433,7 @@ pub fn move_into_plugins_dir(payload_root: &Path, plugins_dir: &Path, name: &str
         let backup = plugins_dir.join(format!("{name}.backup.{now}"));
         std::fs::rename(&destination, &backup).map_err(|e| InstallError::Io(e.to_string()))?;
     }
+
     // `rename` works for cross-directory moves within one filesystem; for
     // cross-fs we fall back to copy + remove.
     if let Err(err) = std::fs::rename(payload_root, &destination) {
@@ -428,6 +444,7 @@ pub fn move_into_plugins_dir(payload_root: &Path, plugins_dir: &Path, name: &str
             return Err(InstallError::Io(err.to_string()));
         }
     }
+
     Ok(destination)
 }
 

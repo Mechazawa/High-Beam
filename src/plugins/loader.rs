@@ -209,6 +209,7 @@ async fn load_one(plugin_dir: &Path, settings: &Settings) -> Result<LoadedPlugin
         let reason = manifest
             .platform_skip_reason()
             .unwrap_or_else(|| "platform gate".to_owned());
+
         return Err(LoadError::Skipped {
             name: manifest.name,
             reason,
@@ -401,7 +402,7 @@ mod tests {
             !names.contains(&"echo"),
             "echo should be skipped when disabled, got {names:?}",
         );
-        assert!(names.contains(&"keep"), "keep should still load, got {names:?}",);
+        assert!(names.contains(&"keep"), "keep should still load, got {names:?}");
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -439,7 +440,7 @@ mod tests {
             !names.contains(&"vault"),
             "vault should be skipped (defaultEnabled: false, no user override), got {names:?}",
         );
-        assert!(names.contains(&"keep"), "keep should still load, got {names:?}",);
+        assert!(names.contains(&"keep"), "keep should still load, got {names:?}");
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -495,7 +496,7 @@ mod tests {
             .expect("tokio rt")
             .block_on(load_all(&opts, &Settings::default()));
 
-        assert!(plugins.is_empty(), "empty platforms must disable the plugin everywhere",);
+        assert!(plugins.is_empty(), "empty platforms must disable the plugin everywhere");
 
         let _ = std::fs::remove_dir_all(&root);
     }

@@ -383,6 +383,7 @@ fn invoke_selected(
     history_state: &Arc<Mutex<QueryHistoryState>>,
 ) {
     let Some(w) = weak.upgrade() else { return };
+
     let idx = usize::try_from(w.get_selected_index().max(0)).unwrap_or(0);
     let query_text = w.get_query_text().to_string();
     let snapshot = match latest.lock() {
@@ -395,6 +396,7 @@ fn invoke_selected(
     let Some(picked) = snapshot.get(idx) else {
         return;
     };
+
     let action = picked.result.action.clone();
     let plugin_name = picked.plugin_name.clone();
     let result_key = picked.result.key.clone();
@@ -1098,6 +1100,7 @@ async fn finalize_install(ctx: FinalizeCtx<'_>) -> Option<String> {
             return None;
         }
     };
+
     // The payload root's parent is the staging tmpdir — best-effort wipe.
     if let Some(staging_parent) = staging_payload_root.parent() {
         cleanup_staging(staging_parent);
@@ -1111,6 +1114,7 @@ async fn finalize_install(ctx: FinalizeCtx<'_>) -> Option<String> {
     );
 
     let settings = Settings::load_or_default();
+
     match loader::load_one_for_reload(&installed_path, &settings).await {
         Ok(loaded) => {
             registry.install(loaded).await;
@@ -1162,6 +1166,7 @@ async fn run_update_all(
     let mut updated = 0usize;
     let mut up_to_date = 0usize;
     let mut failed = 0usize;
+
     for plugin in plugins {
         let local_version = plugin.manifest.version.clone().unwrap_or_default();
         let installed_caps = plugin.manifest.capabilities.clone();
@@ -1175,6 +1180,7 @@ async fn run_update_all(
             );
             continue;
         };
+
         let name = plugin.manifest.name.clone();
         let key = format!("update-{name}");
         progress.emit(
@@ -1183,6 +1189,7 @@ async fn run_update_all(
             Some(manifest_url.clone()),
             plugins::result::Action::Noop,
         );
+
         let remote = match plugins::install::fetch_and_validate_manifest(&manifest_url).await {
             Ok(m) => m,
             Err(err) => {
@@ -1196,7 +1203,9 @@ async fn run_update_all(
                 continue;
             }
         };
+
         let remote_version = remote.version.clone().unwrap_or_default();
+
         if !plugins::manifest::is_newer_version(&remote_version, &local_version) {
             up_to_date += 1;
             progress.emit(
@@ -1207,6 +1216,7 @@ async fn run_update_all(
             );
             continue;
         }
+
         progress.emit(
             &key,
             format!("Updating {name} v{local_version} → v{remote_version}…"),

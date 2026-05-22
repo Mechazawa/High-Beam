@@ -103,6 +103,7 @@ pub(crate) fn merge_into_live(
     };
     *next_order += 1;
     live.push(entry);
+
     // Nine rows max — per-yield re-sort is cheaper than maintaining a heap.
     live.sort_by(|a, b| {
         b.result

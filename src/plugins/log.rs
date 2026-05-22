@@ -212,7 +212,7 @@ mod tests {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_nanos());
-        let p = std::env::temp_dir().join(format!("high-beam-pluginlog-{tag}-{}-{nanos}", std::process::id(),));
+        let p = std::env::temp_dir().join(format!("high-beam-pluginlog-{tag}-{}-{nanos}", std::process::id()));
         std::fs::create_dir_all(&p).expect("mk tmp");
         p
     }

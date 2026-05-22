@@ -415,6 +415,7 @@ fn log_query_outcome(
     let Err(err) = outcome else {
         return;
     };
+
     // Timeout wins over Cancelled — the host-driven cancel that flips on
     // a timeout is the cause the user wants to see.
     if timed_out || matches!(err, PluginError::Timeout) {
@@ -424,10 +425,13 @@ fn log_query_outcome(
         );
         return;
     }
+
     if matches!(err, PluginError::Cancelled) {
         return;
     }
+
     let msg = err.to_string();
+
     if msg.to_ascii_lowercase().contains("out of memory") {
         log.write(
             LogLevel::Error,
@@ -435,6 +439,7 @@ fn log_query_outcome(
         );
         return;
     }
+
     log.write(LogLevel::Error, &format!("query threw: {msg}; input: {input:?}"));
 }
 
@@ -492,6 +497,7 @@ async fn stream_query<'js>(
             let _ = abort.cancel(&ctx);
             return Err(PluginError::Cancelled);
         }
+
         let step_promise: Promise<'js> = next
             .call((This(iter_obj.clone()),))
             .catch(&ctx)
@@ -513,9 +519,11 @@ async fn stream_query<'js>(
             .get("done")
             .catch(&ctx)
             .map_err(|err| PluginError::Js(format!("read step.done: {err}")))?;
+
         if done {
             return Ok(());
         }
+
         let value: Value<'js> = step
             .get("value")
             .catch(&ctx)
@@ -526,6 +534,7 @@ async fn stream_query<'js>(
             .map_err(|err| PluginError::Js(format!("JSON.stringify yielded value: {err}")))?;
         let parsed: PluginResult =
             serde_json::from_str(&json_str).map_err(|err| PluginError::InvalidResult(format!("{err}: {json_str}")))?;
+
         if tx.send(parsed).is_err() {
             // Receiver dropped — treat as a cancel.
             let _ = abort.cancel(&ctx);

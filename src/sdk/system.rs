@@ -234,7 +234,7 @@ async fn run_command(
 /// branch into a single line per stream.
 async fn read_capped_opt<R: AsyncReadExt + Unpin>(reader: Option<&mut R>) -> std::io::Result<Vec<u8>> {
     match reader {
-        Some(r) => read_capped(r).await,
+        Some(r) => Box::pin(read_capped(r)).await,
         None => Ok(Vec::new()),
     }
 }

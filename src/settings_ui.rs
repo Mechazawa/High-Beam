@@ -344,6 +344,7 @@ impl SettingsController {
             // literal raw string preserved (same as the `String` case).
             OptionKind::String { .. } | OptionKind::Bool { .. } => JsonValue::String(raw.to_owned()),
         };
+
         self.set_option(plugin, key, value);
     }
 

@@ -200,7 +200,7 @@ fn parse_option(raw: &JsonValue) -> Result<OptionDef, String> {
                 .and_then(JsonValue::as_str)
                 .map_or_else(|| choices[0].clone(), str::to_owned);
             if !choices.contains(&default) {
-                return Err(format!("enum default {default:?} not present in choices {choices:?}",));
+                return Err(format!("enum default {default:?} not present in choices {choices:?}"));
             }
             OptionKind::Enum { default, choices }
         }
@@ -418,7 +418,7 @@ mod tests {
 
     #[test]
     fn platforms_matching_current_os_supports() {
-        let json = format!(r#"{{ "name": "matched", "platforms": ["{}"] }}"#, std::env::consts::OS,);
+        let json = format!(r#"{{ "name": "matched", "platforms": ["{}"] }}"#, std::env::consts::OS);
         let m = Manifest::parse(json.as_bytes()).unwrap();
         assert!(m.supports_current_platform());
     }

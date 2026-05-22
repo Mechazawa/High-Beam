@@ -93,7 +93,7 @@ export async function* query(input, _signal) {
     let body = read_log(&dir);
     assert_well_formed_lines(&body);
     assert!(body.contains("[INFO ] hello world"), "got:\n{body}");
-    assert!(body.contains(r#"[WARN ] warned about {"count":2}"#), "got:\n{body}",);
+    assert!(body.contains(r#"[WARN ] warned about {"count":2}"#), "got:\n{body}");
     assert!(body.contains("[ERROR] boom"), "got:\n{body}");
     assert!(body.contains("[DEBUG] noisy detail"), "got:\n{body}");
 
@@ -246,7 +246,7 @@ export async function* query(input, _signal) {
     let runtime = rt();
     let settings = high_beam::settings::Settings::default();
     let plugins = runtime.block_on(high_beam::plugins::loader::load_all(&opts, &settings));
-    assert!(plugins.is_empty(), "plugin missing the http capability must not load",);
+    assert!(plugins.is_empty(), "plugin missing the http capability must not load");
 
     let body = read_log(&plugin_dir);
     assert_well_formed_lines(&body);

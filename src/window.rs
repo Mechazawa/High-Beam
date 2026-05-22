@@ -171,7 +171,9 @@ fn apply_saved_or_centered_position(window: &QueryWindow, settings: &SettingsCon
         center_on_focused_display(window);
         return;
     };
+
     let rects = monitor_rects(window);
+
     if !position_visible_on_any_monitor(saved, window_size(window), &rects) {
         tracing::info!(
             x = saved.x,
@@ -181,6 +183,7 @@ fn apply_saved_or_centered_position(window: &QueryWindow, settings: &SettingsCon
         center_on_focused_display(window);
         return;
     }
+
     set_outer_position(window, saved);
 }
 
@@ -307,7 +310,6 @@ fn center_on_focused_display(window: &QueryWindow) {
     let monitor_h = i32::try_from(monitor_size.height).unwrap_or(i32::MAX);
     let win_w = i32::try_from(window_size.width).unwrap_or(i32::MAX);
     let win_h = i32::try_from(window_size.height).unwrap_or(i32::MAX);
-
     let x = monitor_pos.x + (monitor_w - win_w) / 2;
     // Top of the window at ~1/3 of screen height — that sits above center the
     // way Spotlight does, regardless of window height.

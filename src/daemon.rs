@@ -71,6 +71,7 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     // we register with the OS.
     let hotkey_spec = settings_for_ui.global().hotkey.clone();
     let settings_controller = SettingsController::new(manifests, settings_for_ui);
+
     settings_controller.wire(&window);
 
     // Configure the window only after the settings controller exists —
@@ -145,6 +146,7 @@ fn parse_hotkey_or_default(spec: &str) -> global_hotkey::hotkey::HotKey {
                 %err,
                 "settings: hotkey string did not parse; falling back to default",
             );
+
             HotKey::from_str(crate::settings::DEFAULT_HOTKEY).expect("DEFAULT_HOTKEY is a constant the parser knows")
         }
     }
@@ -170,10 +172,12 @@ fn spawn_hotkey_listener(
     };
 
     let hotkey = parse_hotkey_or_default(hotkey_spec);
+
     if let Err(err) = manager.register(hotkey) {
         tracing::error!(%err, spec = %hotkey_spec, "failed to register global hotkey");
         return None;
     }
+
     let hotkey_id = hotkey.id();
 
     if let Err(err) = thread::Builder::new().name("highbeam-hotkey".into()).spawn(move || {
