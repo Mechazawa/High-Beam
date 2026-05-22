@@ -21,3 +21,9 @@ function emptyResponse() {
 
 export const get = vi.fn(async (_url, _opts) => emptyResponse());
 export const post = vi.fn(async (_url, _body, _opts) => emptyResponse());
+export const put = vi.fn(async (_url, _body, _opts) => emptyResponse());
+export const patch = vi.fn(async (_url, _body, _opts) => emptyResponse());
+
+// `delete` is a JS reserved word — bind under another name and re-export.
+const deleteImpl = vi.fn(async (_url, _body, _opts) => emptyResponse());
+export { deleteImpl as delete };

@@ -19,7 +19,7 @@ use high_beam::sdk::system::SystemModule;
 fn expected_for(name: &str) -> &'static [&'static str] {
     match name {
         "highbeam:actions" => &["openUrl", "copy", "exec", "reveal"],
-        "highbeam:http" => &["get", "post"],
+        "highbeam:http" => &["get", "post", "put", "patch", "delete"],
         "highbeam:clipboard" => &["read", "write"],
         "highbeam:fs" => &["readDir", "readFile", "readText", "readCache", "writeCache"],
         "highbeam:icons" => &["forPath"],

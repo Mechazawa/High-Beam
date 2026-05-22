@@ -38,6 +38,9 @@ impl ModuleDef for HttpModule {
     fn declare(decl: &rquickjs::module::Declarations<'_>) -> JsResult<()> {
         decl.declare("get")?;
         decl.declare("post")?;
+        decl.declare("put")?;
+        decl.declare("patch")?;
+        decl.declare("delete")?;
         Ok(())
     }
 
@@ -48,16 +51,21 @@ impl ModuleDef for HttpModule {
                 |ctx: Ctx<'js>, url: String, opts: Value<'js>| async move { request(ctx, "GET", url, None, opts).await },
             ),
         )?;
-        let post_fn = Function::new(
-            ctx.clone(),
-            Async(
-                |ctx: Ctx<'js>, url: String, body: Value<'js>, opts: Value<'js>| async move {
-                    request(ctx, "POST", url, Some(body), opts).await
-                },
-            ),
-        )?;
+        let body_method = |method: &'static str| {
+            Function::new(
+                ctx.clone(),
+                Async(
+                    move |ctx: Ctx<'js>, url: String, body: Value<'js>, opts: Value<'js>| async move {
+                        request(ctx, method, url, Some(body), opts).await
+                    },
+                ),
+            )
+        };
         exports.export("get", get_fn)?;
-        exports.export("post", post_fn)?;
+        exports.export("post", body_method("POST")?)?;
+        exports.export("put", body_method("PUT")?)?;
+        exports.export("patch", body_method("PATCH")?)?;
+        exports.export("delete", body_method("DELETE")?)?;
         Ok(())
     }
 }

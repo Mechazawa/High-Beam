@@ -162,7 +162,10 @@ selected.
 Async HTTP client. Built on a shared reqwest client.
 
 ```js
-import { get, post } from 'highbeam:http';
+import { get, post, put, patch } from 'highbeam:http';
+// `delete` is a JS reserved word — rename on import, or use the
+// namespace form: `import * as http from 'highbeam:http';`.
+import { delete as del } from 'highbeam:http';
 ```
 
 **Capability:** `http`.
@@ -179,6 +182,9 @@ Resolves to an `HttpResponse` regardless of HTTP status. Check `.ok` or
 `.status` to detect errors. Non-2xx does not throw.
 
 ### `post(url: string, body?: string | object, opts?: HttpOpts): Promise<HttpResponse>`
+### `put(url: string, body?: string | object, opts?: HttpOpts): Promise<HttpResponse>`
+### `patch(url: string, body?: string | object, opts?: HttpOpts): Promise<HttpResponse>`
+### `delete(url: string, body?: string | object, opts?: HttpOpts): Promise<HttpResponse>`
 
 ```js
 const res = await post('https://api.example.com/items', { name: 'x' }, {
@@ -188,11 +194,16 @@ const res = await post('https://api.example.com/items', { name: 'x' }, {
 });
 ```
 
-`body` semantics:
+All four share the same shape — verbatim string body, JSON-stringified
+object body, or no body. `body` semantics:
 
 - `undefined` — empty body, no `Content-Type` set.
 - `string` — sent verbatim, no `Content-Type` set.
 - `object` — JSON-stringified, `Content-Type: application/json` injected.
+
+`delete` is exposed under its conventional name on the module; consumers
+must rename on import to dodge the JS reserved word (see the import block
+above).
 
 ### Behavior notes
 
@@ -620,7 +631,7 @@ to control a system app (Finder, System Events, etc.). Grant once.
 | Capability             | Grants                                              |
 |------------------------|-----------------------------------------------------|
 | `actions`              | `highbeam:actions`                                  |
-| `http`                 | `highbeam:http.get` / `.post`                       |
+| `http`                 | `highbeam:http.get` / `.post` / `.put` / `.patch` / `.delete` |
 | `clipboard.read`       | `highbeam:clipboard.read`                           |
 | `clipboard.write`      | `highbeam:clipboard.write`                          |
 | `fs.read`              | `highbeam:fs.readDir` / `.readFile` / `.readText`   |
