@@ -234,18 +234,22 @@ async fn run_command(
 /// branch into a single line per stream.
 async fn read_capped_opt<R: AsyncReadExt + Unpin>(reader: Option<&mut R>) -> std::io::Result<Vec<u8>> {
     match reader {
-        Some(r) => Box::pin(read_capped(r)).await,
+        Some(r) => read_capped(r).await,
         None => Ok(Vec::new()),
     }
 }
 
 async fn read_capped<R: AsyncReadExt + Unpin>(reader: &mut R) -> std::io::Result<Vec<u8>> {
+    // 4 KiB buffers keep the `tokio::join!`'d pair of these futures under
+    // clippy's `large_futures` 16 KiB threshold without needing a Box::pin
+    // detour. Matches the default macOS / Linux pipe buffer size — bigger
+    // chunks wouldn't help throughput against the pipe.
     let mut buf = Vec::new();
-    let mut chunk = [0u8; 8192];
+    let mut chunk = [0u8; 4096];
     loop {
         if buf.len() >= MAX_CAPTURE_BYTES {
             // Drain to EOF so the child doesn't block on a full pipe.
-            let mut sink = [0u8; 8192];
+            let mut sink = [0u8; 4096];
             loop {
                 let n = reader.read(&mut sink).await?;
                 if n == 0 {
