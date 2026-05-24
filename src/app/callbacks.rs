@@ -66,6 +66,7 @@ pub(super) fn wire_window_callbacks(
             w.set_is_history_preview(false);
         }
         let id = latest_id_for_main.fetch_add(1, Ordering::Relaxed) + 1;
+
         if tx_for_edit.send(HostMessage::Query { id, input: text.into() }).is_err() {
             tracing::error!("plugins: runtime thread exited; query dropped");
         }
@@ -127,6 +128,7 @@ fn wire_history_callbacks(
             return;
         };
         let current = w.get_query_text();
+
         if let Ok(mut hs) = history_state_for_up.lock()
             && let InputAction::SetTo(text) = hs.history_up(&current)
         {
@@ -141,6 +143,7 @@ fn wire_history_callbacks(
         let Some(w) = weak_for_down.upgrade() else {
             return;
         };
+
         if let Ok(mut hs) = history_state_for_down.lock()
             && let InputAction::SetTo(text) = hs.history_down()
         {
@@ -162,6 +165,7 @@ fn wire_history_callbacks(
         if text.is_empty() {
             return;
         }
+
         if let Ok(hs) = history_state_for_dismiss.lock()
             && hs.is_preview()
         {
@@ -196,6 +200,7 @@ fn send_confirm_decision(state: &ConfirmState, decision: bool, weak: &slint::Wea
             return;
         }
     };
+
     if let Some(tx) = maybe_tx {
         let _ = tx.send(decision);
     }
@@ -265,6 +270,7 @@ fn invoke_selected(
             if let Some(db) = frecency_db {
                 spawn_pick_bump(db, plugin_name, result_key);
             }
+
             match outcome {
                 actions::ActionOutcome::HideWindow => {
                     // Persisting on every hide keeps drag-then-pick paths
@@ -287,6 +293,7 @@ fn invoke_selected(
                     w.invoke_clear_input();
                     w.set_results(ModelRc::new(VecModel::from(Vec::<ResultRow>::new())));
                     w.set_selected_index(0);
+
                     if host_tx.send(HostMessage::Task(task)).is_err() {
                         tracing::error!("plugins: runtime thread exited; host task dropped",);
                     }
@@ -314,11 +321,13 @@ fn push_history(
     if query.is_empty() {
         return;
     }
+
     if let Some(db) = history_db
         && let Err(err) = db.push(query, max_entries)
     {
         tracing::warn!(%err, "query_history: push failed");
     }
+
     if let Ok(mut hs) = history_state.lock() {
         hs.on_submit(query, max_entries);
     }
@@ -331,6 +340,7 @@ fn spawn_pick_bump(db: &FrecencyDb, plugin_name: String, result_key: String) {
     let db = db.clone();
     let plugin_name_for_log = plugin_name.clone();
     let result_key_for_log = result_key.clone();
+
     if let Err(err) = thread::Builder::new()
         .name("highbeam-frecency-bump".into())
         .spawn(move || {

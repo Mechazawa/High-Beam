@@ -104,6 +104,7 @@ impl FrecencyDb {
             Ok((plugin_name, result_key, PickRow { picks, last_picked_at }))
         });
         let mut map: HashMap<String, HashMap<String, PickRow>> = HashMap::new();
+
         match rows {
             Ok(iter) => {
                 for row in iter {
@@ -205,6 +206,7 @@ impl Snapshot {
     #[must_use]
     pub(crate) fn from_rows(rows: Vec<(String, String, PickRow)>) -> Self {
         let mut picks: HashMap<String, HashMap<String, PickRow>> = HashMap::new();
+
         for (plugin, key, row) in rows {
             picks.entry(plugin).or_default().insert(key, row);
         }

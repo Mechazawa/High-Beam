@@ -24,14 +24,17 @@ pub fn install_default_plugins_if_needed() {
     let Some(bundled) = bundled_plugins_dir() else {
         // Running unbundled (cargo run) — not an error.
         tracing::debug!("bundle-install: no bundled resources; running unbundled");
+
         return;
     };
+
     match user_dir_needs_seeding(&user_dir) {
         Ok(false) => {
             tracing::debug!(
                 plugins_dir = %user_dir.display(),
                 "bundle-install: user plugin dir already populated"
             );
+
             return;
         }
         Ok(true) => {}
@@ -41,17 +44,21 @@ pub fn install_default_plugins_if_needed() {
                 %err,
                 "bundle-install: could not stat user plugin dir; skipping install",
             );
+
             return;
         }
     }
+
     if let Err(err) = fs::create_dir_all(&user_dir) {
         tracing::warn!(
             plugins_dir = %user_dir.display(),
             %err,
             "bundle-install: failed to create user plugin dir",
         );
+
         return;
     }
+
     match copy_dir_recursive(&bundled, &user_dir) {
         Ok(()) => tracing::info!(
             plugins_dir = %user_dir.display(),
@@ -106,12 +113,14 @@ fn user_dir_needs_seeding(dir: &Path) -> io::Result<bool> {
 /// `.app` after the user updates High Beam.
 fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
     fs::create_dir_all(dst)?;
+
     for entry in fs::read_dir(src)? {
         let entry = entry?;
         let from = entry.path();
         let to = dst.join(entry.file_name());
         // `fs::metadata` follows symlinks; that's deliberate (see fn docs).
         let meta = fs::metadata(&from)?;
+
         if meta.is_dir() {
             copy_dir_recursive(&from, &to)?;
         } else if meta.is_file() {

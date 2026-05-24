@@ -39,18 +39,18 @@ impl Command {
 
     fn parse(line: &str) -> Result<Self, ParseError> {
         let trimmed = line.trim();
+
         if trimmed == "open" {
             return Ok(Self::Open { activation_token: None });
         }
+
         if let Some(rest) = trimmed.strip_prefix("open ") {
             let token = rest.trim();
-            if token.is_empty() {
-                return Ok(Self::Open { activation_token: None });
-            }
             return Ok(Self::Open {
-                activation_token: Some(token.to_owned()),
+                activation_token: (!token.is_empty()).then(|| token.to_owned()),
             });
         }
+
         Err(ParseError::Unknown(trimmed.to_owned()))
     }
 }
@@ -119,9 +119,11 @@ impl Server {
             let stream = stream?;
             let mut reader = BufReader::new(stream);
             let mut line = String::new();
+
             if reader.read_line(&mut line)? == 0 {
                 continue;
             }
+
             match Command::parse(&line) {
                 Ok(cmd) => handler(cmd),
                 Err(err) => tracing::warn!(%err, "ipc: rejecting unknown command"),

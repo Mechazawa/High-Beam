@@ -120,6 +120,7 @@ fn extract_icon_bytes(path: &str, size: u32) -> Option<Vec<u8>> {
     use std::process::Command;
 
     let target = Path::new(path);
+
     if !target.exists() {
         return None;
     }
@@ -142,6 +143,7 @@ fn extract_icon_bytes(path: &str, size: u32) -> Option<Vec<u8>> {
         .arg(&tmp)
         .output()
         .ok()?;
+
     if !out.status.success() {
         let _ = std::fs::remove_file(&tmp);
         return None;
@@ -154,10 +156,12 @@ fn extract_icon_bytes(path: &str, size: u32) -> Option<Vec<u8>> {
 #[cfg(target_os = "macos")]
 fn resolve_macos_icon_source(target: &Path) -> Option<std::path::PathBuf> {
     let resources = target.join("Contents/Resources");
+
     if !resources.is_dir() {
         return None;
     }
     let info_plist = target.join("Contents/Info.plist");
+
     if let Ok(out) = std::process::Command::new("/usr/bin/defaults")
         .args(["read"])
         .arg(info_plist.with_extension(""))
@@ -166,6 +170,7 @@ fn resolve_macos_icon_source(target: &Path) -> Option<std::path::PathBuf> {
         && out.status.success()
     {
         let name = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+
         if !name.is_empty() {
             let with_ext = if std::path::Path::new(&name)
                 .extension()
@@ -176,6 +181,7 @@ fn resolve_macos_icon_source(target: &Path) -> Option<std::path::PathBuf> {
                 format!("{name}.icns")
             };
             let candidate = resources.join(with_ext);
+
             if candidate.exists() {
                 return Some(candidate);
             }

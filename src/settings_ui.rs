@@ -134,6 +134,7 @@ impl SettingsController {
         let weak = window.as_weak();
         window.on_toggle_plugin(move |name, enabled| {
             ctrl.set_enabled(&name, enabled);
+
             if let Some(w) = weak.upgrade() {
                 ctrl.refresh_slots(&w);
             }
@@ -166,6 +167,7 @@ impl SettingsController {
         let weak = window.as_weak();
         window.on_cycle_option_enum(move |plugin, key| {
             ctrl.set_option_for_kind(&plugin, &key, "");
+
             if let Some(w) = weak.upgrade() {
                 ctrl.refresh_options(&w);
             }
@@ -183,6 +185,7 @@ impl SettingsController {
             };
             ctrl.set_hotkey(&spec);
             ctrl.reregister_hotkey(&spec);
+
             if let Some(w) = weak.upgrade() {
                 ctrl.refresh_global(&w);
             }
@@ -194,6 +197,7 @@ impl SettingsController {
         window.on_reset_hotkey_to_default(move || {
             ctrl.set_hotkey(crate::settings::DEFAULT_HOTKEY);
             ctrl.reregister_hotkey(crate::settings::DEFAULT_HOTKEY);
+
             if let Some(w) = weak.upgrade() {
                 ctrl.refresh_global(&w);
             }
@@ -203,6 +207,7 @@ impl SettingsController {
         let weak = window.as_weak();
         window.on_cycle_alt_action_modifier(move || {
             ctrl.cycle_alt_action_modifier();
+
             if let Some(w) = weak.upgrade() {
                 ctrl.refresh_global(&w);
             }
@@ -233,6 +238,7 @@ impl SettingsController {
             let mut settings = self.inner.settings.lock().expect("settings lock");
             settings.set_hotkey(value);
         }
+
         if let Err(err) = self.persist() {
             tracing::warn!(%err, "settings: persist after hotkey-set failed");
         }
@@ -249,6 +255,7 @@ impl SettingsController {
             let next_idx = (idx + 1) % crate::settings::ALT_ACTION_MODIFIER_CHOICES.len();
             settings.set_alt_action_modifier(crate::settings::ALT_ACTION_MODIFIER_CHOICES[next_idx]);
         }
+
         if let Err(err) = self.persist() {
             tracing::warn!(%err, "settings: persist after alt-action-modifier change failed");
         }
@@ -284,6 +291,7 @@ impl SettingsController {
     #[must_use]
     pub fn alt_modifier_held(&self, mods: u8) -> bool {
         let settings = self.inner.settings.lock().expect("settings lock");
+
         match settings.alt_action_modifier() {
             "Alt" => mods & MOD_ALT != 0,
             "Shift" => mods & MOD_SHIFT != 0,
@@ -356,11 +364,13 @@ impl SettingsController {
         }
         let result = {
             let mut s = self.inner.settings.lock().expect("settings lock");
+
             for (name, version) in entries {
                 s.set_last_loaded_version(name, version.clone());
             }
             s.save()
         };
+
         if let Err(err) = result {
             tracing::warn!(%err, "settings: could not persist last_loaded_version after lifecycle dispatch");
         }
@@ -380,6 +390,7 @@ impl SettingsController {
             let mut settings = self.inner.settings.lock().expect("settings lock");
             settings.set_launcher_position(position);
         }
+
         if let Err(err) = self.persist() {
             tracing::warn!(%err, "settings: persist after launcher-position-set failed");
         }
@@ -397,6 +408,7 @@ impl SettingsController {
             let mut settings = self.inner.settings.lock().expect("settings lock");
             settings.clear_launcher_position();
         }
+
         if let Err(err) = self.persist() {
             tracing::warn!(%err, "settings: persist after launcher-position-clear failed");
         }
@@ -423,6 +435,7 @@ impl SettingsController {
             window.set_plugin_options(ModelRc::new(VecModel::from(Vec::<PluginOption>::new())));
             window.set_selected_plugin_version(SharedString::default());
             window.set_selected_plugin_description(SharedString::default());
+
             return;
         };
 
@@ -451,6 +464,7 @@ impl SettingsController {
             let mut settings = self.inner.settings.lock().expect("settings lock");
             settings.set_plugin_enabled(plugin, enabled);
         }
+
         if let Err(err) = self.persist() {
             tracing::warn!(plugin, %err, "settings: persist after toggle failed");
         }
@@ -461,6 +475,7 @@ impl SettingsController {
             let mut settings = self.inner.settings.lock().expect("settings lock");
             settings.set_plugin_option(plugin, key, value);
         }
+
         if let Err(err) = self.persist() {
             tracing::warn!(plugin, key, %err, "settings: persist after option-set failed");
         }
@@ -485,9 +500,11 @@ impl SettingsController {
                 // manifest schema doesn't forbid the inversion, so clamp
                 // each bound separately instead.
                 let mut clamped = parsed;
+
                 if let Some(lo) = *min {
                     clamped = clamped.max(lo);
                 }
+
                 if let Some(hi) = *max {
                     clamped = clamped.min(hi);
                 }

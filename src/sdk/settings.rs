@@ -64,6 +64,7 @@ impl ModuleDef for SettingsModule {
 /// Propagates JS errors from object construction or global assignment.
 pub fn install<S: BuildHasher>(ctx: &Ctx<'_>, merged: &HashMap<String, JsonValue, S>) -> JsResult<()> {
     let bag = Object::new(ctx.clone())?;
+
     for (key, value) in merged {
         bag.set(key.as_str(), json_to_js(ctx, value)?)?;
     }
@@ -89,6 +90,7 @@ fn read_value<'js>(ctx: &Ctx<'js>, key: &str, want: ValueKind) -> Value<'js> {
     let Ok(value): JsResult<Value<'js>> = bag.get(key) else {
         return Value::new_undefined(ctx.clone());
     };
+
     if value.is_undefined() || value.is_null() {
         return Value::new_undefined(ctx.clone());
     }
@@ -101,6 +103,7 @@ fn read_value<'js>(ctx: &Ctx<'js>, key: &str, want: ValueKind) -> Value<'js> {
         // through here would be a host bug, not a plugin one.
         ValueKind::Int => value.is_number(),
     };
+
     if matches {
         value
     } else {
@@ -134,6 +137,7 @@ fn json_to_js<'js>(ctx: &Ctx<'js>, value: &JsonValue) -> JsResult<Value<'js>> {
         JsonValue::String(s) => s.as_str().into_js(ctx),
         JsonValue::Array(arr) => {
             let out = rquickjs::Array::new(ctx.clone())?;
+
             for (idx, item) in arr.iter().enumerate() {
                 out.set(idx, json_to_js(ctx, item)?)?;
             }
@@ -141,6 +145,7 @@ fn json_to_js<'js>(ctx: &Ctx<'js>, value: &JsonValue) -> JsResult<Value<'js>> {
         }
         JsonValue::Object(obj) => {
             let out = Object::new(ctx.clone())?;
+
             for (k, v) in obj {
                 out.set(k.as_str(), json_to_js(ctx, v)?)?;
             }

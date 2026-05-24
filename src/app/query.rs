@@ -48,6 +48,7 @@ pub(super) fn handle_query(
     tokio::spawn(async move {
         let mut live: Vec<RankedResult> = Vec::new();
         let mut order: usize = 0;
+
         loop {
             tokio::select! {
                 () = cancel_for_recv.cancelled() => break,
@@ -63,6 +64,7 @@ pub(super) fn handle_query(
                             frecency_snapshot.as_ref(),
                             frecency::now_seconds(),
                         );
+
                         if let Ok(mut slot) = latest.lock() {
                             slot.clone_from(&live);
                         }
@@ -112,6 +114,7 @@ pub(super) fn render_results(window: &QueryWindow, results: &[RankedResult]) {
         .collect();
     let row_count = i32::try_from(rows.len()).unwrap_or(i32::MAX);
     window.set_results(ModelRc::new(VecModel::from(rows)));
+
     if previously_selected >= row_count || previously_selected < 0 {
         window.set_selected_index(0);
     }

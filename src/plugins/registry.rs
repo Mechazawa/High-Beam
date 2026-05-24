@@ -76,6 +76,7 @@ impl PluginRegistry {
             let mut guard = self.inner.plugins.write().await;
             std::mem::replace(&mut *guard, fresh)
         };
+
         // Fire onDisable on every plugin we just displaced. Fire-and-forget;
         // the task keeps the old plugin alive via its cloned AsyncContext
         // until the hook finishes (or the shutdown token fires on Drop).
@@ -114,6 +115,7 @@ impl PluginRegistry {
             })?;
         let displaced = {
             let mut guard = self.inner.plugins.write().await;
+
             if let Some(slot) = guard.get_mut(idx) {
                 Some(std::mem::replace(slot, Arc::clone(&fresh.plugin)))
             } else {
@@ -121,6 +123,7 @@ impl PluginRegistry {
                 None
             }
         };
+
         if let Some(old) = displaced {
             drop(old.run_lifecycle_hook(HookKind::Disable, LifecycleReason::Reload));
         }
@@ -138,6 +141,7 @@ impl PluginRegistry {
         let name = plugin.manifest.name.clone();
         let displaced = {
             let mut guard = self.inner.plugins.write().await;
+
             if let Some(idx) = guard.iter().position(|p| p.manifest.name == name) {
                 Some(std::mem::replace(&mut guard[idx], plugin))
             } else {
@@ -145,6 +149,7 @@ impl PluginRegistry {
                 None
             }
         };
+
         if let Some(old) = displaced {
             drop(old.run_lifecycle_hook(HookKind::Disable, LifecycleReason::Update));
         }
@@ -215,6 +220,7 @@ mod tests {
             .build()
             .expect("rt")
             .block_on(reg.reload_one("nope", &Settings::default()));
+
         match result {
             Err(ReloadError::NotFound(name)) => assert_eq!(name, "nope"),
             Err(other) => panic!("expected NotFound, got {other:?}"),

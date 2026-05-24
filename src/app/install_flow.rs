@@ -171,6 +171,7 @@ async fn install_pipeline(
 
     // Gate on user confirmation before downloading anything.
     let confirmed = request_confirmation(&manifest, url, installed_caps, confirm_state, weak).await;
+
     if !confirmed {
         progress.emit(progress_key, format!("Install {} cancelled", manifest.name), None);
         return None;
@@ -270,6 +271,7 @@ async fn stage_payload(
                 &plugin_name,
                 &format!("create staging dir: {err}"),
             );
+
             return None;
         }
     };
@@ -308,6 +310,7 @@ async fn stage_payload(
                 &plugin_name,
                 "manifest declares both archiveUrl and entryUrl — pick one",
             );
+
             return None;
         }
         (None, None) => {
@@ -318,6 +321,7 @@ async fn stage_payload(
                 &plugin_name,
                 "manifest missing archiveUrl or entryUrl",
             );
+
             return None;
         }
     };
@@ -327,9 +331,11 @@ async fn stage_payload(
     let write_result =
         tokio::task::spawn_blocking(move || plugins::install::write_manifest_json(&payload_root_for_write, &writeable))
             .await;
+
     if let Err(err) = unwrap_spawn_blocking(write_result, "write_manifest_json") {
         cleanup_staging(&staging);
         emit_install_failure(progress, progress_key, &plugin_name, &err);
+
         return None;
     }
     Some(payload_root)
@@ -356,6 +362,7 @@ async fn stage_from_archive(
         Err(err) => {
             cleanup_staging(staging);
             emit_install_failure(progress, progress_key, plugin_name, &err.to_string());
+
             return None;
         }
     };
@@ -363,15 +370,19 @@ async fn stage_from_archive(
     let extract_result =
         tokio::task::spawn_blocking(move || plugins::install::extract_archive(&bytes, format, &staging_for_extract))
             .await;
+
     if let Err(err) = unwrap_spawn_blocking(extract_result, "extract") {
         cleanup_staging(staging);
         emit_install_failure(progress, progress_key, plugin_name, &err);
+
         return None;
     }
     let payload_root = plugins::install::find_payload_root(staging);
+
     if let Err(err) = plugins::install::cross_check_embedded(&payload_root, manifest, install_url) {
         cleanup_staging(staging);
         emit_install_failure(progress, progress_key, plugin_name, &err.to_string());
+
         return None;
     }
     Some(payload_root)
@@ -397,6 +408,7 @@ async fn stage_from_entry(
         Err(err) => {
             cleanup_staging(staging);
             emit_install_failure(progress, progress_key, plugin_name, &err.to_string());
+
             return None;
         }
     };
@@ -411,9 +423,11 @@ async fn stage_from_entry(
         std::fs::write(payload_root_for_write.join(&entry_filename), &bytes)
     })
     .await;
+
     if let Err(err) = unwrap_spawn_blocking(write_result, "write_entry") {
         cleanup_staging(staging);
         emit_install_failure(progress, progress_key, plugin_name, &err);
+
         return None;
     }
     Some(payload_root)
@@ -470,6 +484,7 @@ async fn finalize_install(ctx: FinalizeCtx<'_>) -> Option<String> {
         Err(err) => {
             cleanup_staging(staging_payload_root);
             emit_install_failure(progress, progress_key, plugin_name, &err);
+
             return None;
         }
     };
@@ -531,12 +546,14 @@ async fn run_update_all(
     settings: &SettingsController,
 ) {
     let plugins = registry.snapshot().await;
+
     if plugins.is_empty() {
         progress.emit(
             "update-summary",
             "No plugins loaded".to_owned(),
             Some("nothing to update".to_owned()),
         );
+
         return;
     }
     let mut updated = 0usize;
@@ -553,6 +570,7 @@ async fn run_update_all(
                 format!("Skipped {}", plugin.manifest.name),
                 Some("no manifestUrl — plugin opts out of updates".to_owned()),
             );
+
             continue;
         };
 
@@ -565,6 +583,7 @@ async fn run_update_all(
             Err(err) => {
                 failed += 1;
                 progress.emit(&key, format!("Update check failed: {name}"), Some(err.to_string()));
+
                 continue;
             }
         };
@@ -574,6 +593,7 @@ async fn run_update_all(
         if !plugins::manifest::is_newer_version(&remote_version, &local_version) {
             up_to_date += 1;
             progress.emit(&key, format!("Up to date: {name} v{local_version}"), None);
+
             continue;
         }
 
@@ -585,7 +605,7 @@ async fn run_update_all(
 
         // Only prompt if the update introduces new capabilities.
         let needs_prompt = crate::confirm::update_needs_prompt(&remote.capabilities, &installed_caps);
-        let caps_arg: Option<&[String]> = if needs_prompt { Some(&installed_caps) } else { None };
+        let caps_arg: Option<&[String]> = needs_prompt.then_some(&installed_caps);
 
         if install_pipeline(
             &manifest_url,
@@ -632,6 +652,7 @@ async fn run_reload(
     settings: &SettingsController,
 ) {
     let settings_snapshot = settings.snapshot();
+
     match name {
         None => {
             progress.emit("reload-all", "Reloading all plugins…".to_owned(), None);
@@ -654,6 +675,7 @@ async fn run_reload(
         Some(target) => {
             let key = format!("reload-{target}");
             progress.emit(&key, format!("Reloading {target}…"), None);
+
             match registry.reload_one(&target, &settings_snapshot).await {
                 Ok(plugin) => {
                     let version = plugin.manifest.version.clone();
@@ -690,6 +712,7 @@ fn persist_versions_and_fire(outcomes: &[LoadOutcome], reason: LifecycleReason, 
         })
         .collect();
     settings.record_loaded_versions(&entries);
+
     // Bookkeeping persists before the hook fires so a crash mid-hook
     // doesn't replay the work on next boot.
     for outcome in outcomes {
@@ -714,6 +737,7 @@ pub(super) fn fire_enable_hooks(outcomes: &[LoadOutcome], settings: &SettingsCon
         })
         .collect();
     settings.record_loaded_versions(&entries);
+
     // Bookkeeping persists before the hook fires so a crash mid-hook
     // doesn't replay the work on next boot.
     for outcome in outcomes {

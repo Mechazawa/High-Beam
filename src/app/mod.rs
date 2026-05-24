@@ -137,6 +137,7 @@ fn spawn_runtime_thread(
             runtime.block_on(async move {
                 let opts = LoaderOptions::resolve(plugins_override);
                 let outcomes = loader::load_all(&opts, &settings.snapshot()).await;
+
                 if outcomes.is_empty() {
                     tracing::warn!(
                         plugins_dir = %opts.plugins_dir.display(),
@@ -158,6 +159,7 @@ fn spawn_runtime_thread(
                             if id < latest_id.load(Ordering::Relaxed) {
                                 continue;
                             }
+
                             if let Some(prev) = current_cancel.take() {
                                 prev.cancel();
                             }
@@ -202,6 +204,7 @@ fn spawn_runtime_thread(
                             if let Some(prev) = current_cancel.take() {
                                 prev.cancel();
                             }
+
                             break;
                         }
                     }
@@ -218,6 +221,7 @@ fn open_query_history_db() -> Option<QueryHistoryDb> {
         tracing::warn!("query_history: could not resolve data dir; running without history");
         return None;
     };
+
     match QueryHistoryDb::open(&path) {
         Ok(db) => Some(db),
         Err(err) => {
@@ -238,6 +242,7 @@ fn open_frecency_db() -> Option<FrecencyDb> {
         tracing::warn!("frecency: could not resolve data dir; running without frecency");
         return None;
     };
+
     match FrecencyDb::open(&path) {
         Ok(db) => Some(db),
         Err(err) => {

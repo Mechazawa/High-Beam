@@ -138,6 +138,7 @@ mod tests {
         // accidentally dropped.
         let json = r#"{"kind":"exec","cmd":"/usr/bin/true"}"#;
         let parsed: Action = serde_json::from_str(json).unwrap();
+
         match parsed {
             Action::Exec { args, .. } => assert!(args.is_empty()),
             other => panic!("expected Exec, got {other:?}"),

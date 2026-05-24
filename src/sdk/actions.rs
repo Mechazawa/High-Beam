@@ -37,6 +37,7 @@ impl ModuleDef for ActionsModule {
             let obj = Object::new(ctx.clone())?;
             obj.set("kind", "exec")?;
             obj.set("cmd", cmd)?;
+
             // Treat undefined as `[]`; pass arrays through and let serde
             // reject malformed shapes at deserialize time.
             if args.is_undefined() || args.is_null() {

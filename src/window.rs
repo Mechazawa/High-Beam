@@ -107,6 +107,7 @@ pub(crate) fn configure(window: &QueryWindow, settings: SettingsController) {
     let settings_for_recenter = settings.clone();
     window.on_recenter_window(move || {
         settings_for_recenter.clear_launcher_position();
+
         if let Some(w) = weak_for_recenter.upgrade() {
             center_on_focused_display(&w);
         }
@@ -154,6 +155,7 @@ pub(crate) fn configure(window: &QueryWindow, settings: SettingsController) {
                 if ms_since_show() < BLUR_GRACE_MS {
                     return EventResult::Propagate;
                 }
+
                 if let Some(w) = weak_for_focus.upgrade() {
                     // Settings and confirm views own modal-ish work — a
                     // native drag transiently steals focus on every platform
@@ -226,6 +228,7 @@ pub(crate) fn show(window: &QueryWindow, settings: &SettingsController, activati
         let _ = activation_token; // unused on macOS; NSApp.activate covers it
         macos::activate_and_make_key(window);
     }
+
     #[cfg(target_os = "linux")]
     if let Some(token) = activation_token {
         crate::window_wayland::activate_with_token(window, token);
@@ -255,6 +258,7 @@ pub(crate) fn hide(window: &QueryWindow) {
     {
         window.set_is_hidden(true);
     }
+
     #[cfg(not(target_os = "linux"))]
     if let Err(err) = window.hide() {
         tracing::error!(%err, "failed to hide window");
@@ -280,6 +284,7 @@ pub(crate) fn hide_and_persist_position(window: &QueryWindow, settings: &Setting
             settings.set_launcher_position(pos);
         } else {
             let settings = settings.clone();
+
             if let Err(err) = thread::Builder::new()
                 .name("highbeam-settings-position".into())
                 .spawn(move || {
@@ -313,6 +318,7 @@ fn apply_saved_or_centered_position(window: &QueryWindow, settings: &SettingsCon
             "settings: saved launcher position is off-screen, recentering",
         );
         center_on_focused_display(window);
+
         return;
     }
 

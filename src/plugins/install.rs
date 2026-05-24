@@ -67,6 +67,7 @@ impl ArchiveFormat {
     pub fn from_content_type(content_type: &str) -> Option<Self> {
         let lower = content_type.to_ascii_lowercase();
         let bare = lower.split(';').next().unwrap_or(&lower).trim();
+
         match bare {
             "application/gzip" | "application/x-gzip" | "application/x-tar+gzip" => Some(Self::TarGz),
             "application/x-tar" => Some(Self::Tar),
@@ -277,6 +278,7 @@ pub async fn download_archive(url: &str) -> Result<(Vec<u8>, ArchiveFormat), Ins
 /// Returns [`InstallError::Extract`] on any byte-stream / I/O problem.
 pub fn extract_archive(bytes: &[u8], format: ArchiveFormat, target_dir: &Path) -> Result<(), InstallError> {
     std::fs::create_dir_all(target_dir).map_err(|e| InstallError::Io(e.to_string()))?;
+
     match format {
         ArchiveFormat::TarGz => extract_tar(flate2::read::GzDecoder::new(bytes), target_dir),
         ArchiveFormat::Tar => extract_tar(bytes, target_dir),
@@ -297,6 +299,7 @@ fn extract_tar<R: std::io::Read>(reader: R, target_dir: &Path) -> Result<(), Ins
 fn extract_zip(bytes: &[u8], target_dir: &Path) -> Result<(), InstallError> {
     let reader = std::io::Cursor::new(bytes);
     let mut archive = zip::ZipArchive::new(reader).map_err(|e| InstallError::Extract(e.to_string()))?;
+
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).map_err(|e| InstallError::Extract(e.to_string()))?;
 
@@ -354,12 +357,14 @@ pub fn cross_check_embedded(
         .as_deref()
         .ok_or(InstallError::MissingField("version"))?;
     let embedded_version = embedded.version.as_deref().unwrap_or("");
+
     if embedded_version != expected_version {
         return Err(InstallError::EmbeddedMismatch {
             field: "version",
             detail: format!("embedded={embedded_version}, expected={expected_version}"),
         });
     }
+
     if let Some(embedded_url) = embedded.manifest_url.as_deref()
         && embedded_url != install_url
     {
@@ -376,14 +381,18 @@ pub fn cross_check_embedded(
 /// don't. Either layout is accepted.
 fn find_embedded_manifest(extracted_dir: &Path) -> Option<PathBuf> {
     let direct = extracted_dir.join("manifest.json");
+
     if direct.exists() {
         return Some(direct);
     }
     let entries = std::fs::read_dir(extracted_dir).ok()?;
+
     for entry in entries.flatten() {
         let path = entry.path();
+
         if path.is_dir() {
             let candidate = path.join("manifest.json");
+
             if candidate.exists() {
                 return Some(candidate);
             }
@@ -401,8 +410,10 @@ pub fn find_payload_root(extracted_dir: &Path) -> PathBuf {
     if extracted_dir.join("manifest.json").exists() {
         return extracted_dir.to_path_buf();
     }
+
     if let Ok(entries) = std::fs::read_dir(extracted_dir) {
         let mut dirs = entries.flatten().map(|e| e.path()).filter(|p| p.is_dir());
+
         if let Some(single) = dirs.next()
             && dirs.next().is_none()
         {
@@ -460,11 +471,13 @@ pub fn move_into_plugins_dir(payload_root: &Path, plugins_dir: &Path, name: &str
 /// what keeps the user-dir copy self-contained.
 fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dst)?;
+
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
         let from = entry.path();
         let to = dst.join(entry.file_name());
         let meta = entry.file_type()?;
+
         if meta.is_dir() {
             copy_dir_recursive(&from, &to)?;
         } else if meta.is_file() {
@@ -556,6 +569,7 @@ mod tests {
         let gz_buf = Vec::new();
         let encoder = GzEncoder::new(gz_buf, Compression::default());
         let mut tar_builder = tar::Builder::new(encoder);
+
         for (path, body) in entries {
             let mut header = tar::Header::new_gnu();
             header.set_size(body.len() as u64);
@@ -573,6 +587,7 @@ mod tests {
         let cursor = std::io::Cursor::new(buf);
         let mut writer = zip::ZipWriter::new(cursor);
         let opts: SimpleFileOptions = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
         for (path, body) in entries {
             writer.start_file(*path, opts).expect("start_file");
             writer.write_all(body).expect("write body");
@@ -612,6 +627,7 @@ mod tests {
     #[test]
     fn require_installer_fields_rejects_missing_archive_url() {
         let m = Manifest::parse(br#"{ "name": "x", "version": "1.0.0" }"#).unwrap();
+
         match require_installer_fields(&m) {
             Err(InstallError::MissingField(name)) => {
                 assert_eq!(name, "archiveUrl|entryUrl");
@@ -730,6 +746,7 @@ mod tests {
         )
         .unwrap();
         let err = cross_check_embedded(&root, &expected, "https://example.com/h/manifest.json").expect_err("mismatch");
+
         match err {
             InstallError::EmbeddedMismatch { field, .. } => assert_eq!(field, "version"),
             other => panic!("expected EmbeddedMismatch(version), got {other:?}"),
@@ -760,6 +777,7 @@ mod tests {
         )
         .unwrap();
         let err = cross_check_embedded(&root, &expected, "https://example.com/h/manifest.json").expect_err("mismatch");
+
         match err {
             InstallError::EmbeddedMismatch { field, .. } => assert_eq!(field, "manifestUrl"),
             other => panic!("expected EmbeddedMismatch(manifestUrl), got {other:?}"),

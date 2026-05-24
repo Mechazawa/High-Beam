@@ -39,11 +39,13 @@ pub(crate) fn dispatch_streaming(
     // borrow of the plugin name list rather than cloning N owned `String`s
     // per keystroke — `core::query` only needs to read them.
     let plugin_names: Vec<&str> = plugins.iter().map(|p| p.manifest.name.as_str()).collect();
+
     for result in crate::plugins::builtin::core::query(input, &plugin_names) {
         if tx.send(result).is_err() {
             return;
         }
     }
+
     for plugin in plugins {
         let plugin_name = plugin.manifest.name.clone();
         let debounce = clamp_debounce(plugin.manifest.debounce_ms);
@@ -62,6 +64,7 @@ pub(crate) fn dispatch_streaming(
                 }
             }
             let mut rx_inner = plugin_arc.run_query_stream(&plugin_input, plugin_cancel);
+
             while let Some(result) = rx_inner.recv().await {
                 if tx_clone
                     .send(StreamedResult {
@@ -122,6 +125,7 @@ pub(crate) fn merge_into_live(
 /// the frecency modifier folded in.
 fn score_for(entry: &RankedResult, frecency: Option<&Snapshot>, now: i64) -> f64 {
     let weight = entry.result.weight;
+
     if entry.result.pinned {
         return weight;
     }
@@ -166,6 +170,7 @@ mod tests {
     fn merge_all_with(items: Vec<StreamedResult>, snapshot: Option<&Snapshot>, now: i64) -> Vec<String> {
         let mut live = Vec::new();
         let mut order = 0usize;
+
         for it in items {
             merge_into_live(&mut live, &mut order, it, snapshot, now);
         }
@@ -291,6 +296,7 @@ mod tests {
         )]);
         let mut live = Vec::new();
         let mut order = 0usize;
+
         for it in [
             streamed_from("b", "x", 50.0, false),
             streamed_from("a", "x", 50.0, false),

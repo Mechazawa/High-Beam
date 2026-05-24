@@ -154,6 +154,7 @@ fn parse_option(raw: &JsonValue) -> Result<OptionDef, String> {
         .and_then(JsonValue::as_str)
         .ok_or_else(|| "missing or non-string `key`".to_owned())?
         .to_owned();
+
     if key.is_empty() {
         return Err("`key` must be non-empty".to_owned());
     }
@@ -192,6 +193,7 @@ fn parse_option(raw: &JsonValue) -> Result<OptionDef, String> {
                 .filter_map(JsonValue::as_str)
                 .map(str::to_owned)
                 .collect();
+
             if choices.is_empty() {
                 return Err("enum option needs at least one string in `choices`".to_owned());
             }
@@ -202,6 +204,7 @@ fn parse_option(raw: &JsonValue) -> Result<OptionDef, String> {
                 .get("default")
                 .and_then(JsonValue::as_str)
                 .map_or_else(|| choices[0].clone(), str::to_owned);
+
             if !choices.contains(&default) {
                 return Err(format!("enum default {default:?} not present in choices {choices:?}"));
             }
@@ -272,6 +275,7 @@ impl Manifest {
         self.parsed_options_cache.get_or_init(|| {
             let mut defs = Vec::new();
             let mut warnings = Vec::new();
+
             for (idx, raw) in self.options.iter().enumerate() {
                 match parse_option(raw) {
                     Ok(def) => defs.push(def),

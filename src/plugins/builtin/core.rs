@@ -271,6 +271,7 @@ fn empty_trash_action() -> Action {
 #[must_use]
 pub(crate) fn query(input: &str, plugin_names: &[&str]) -> Vec<StreamedResult> {
     let q = input.trim();
+
     if q.is_empty() {
         return Vec::new();
     }
@@ -278,12 +279,14 @@ pub(crate) fn query(input: &str, plugin_names: &[&str]) -> Vec<StreamedResult> {
 
     let mut out = Vec::new();
     let version_label = format!("version v{VERSION}");
+
     for kw in KEYWORDS.iter() {
         let (label, action, subtitle) = if kw.label == "__version_placeholder__" {
             (version_label.as_str(), Action::Noop, Some("running build"))
         } else {
             (kw.label, (kw.make_action)(), kw.subtitle)
         };
+
         if let Some(weight) = match_weight(&q_lower, label) {
             out.push(StreamedResult {
                 plugin_name: NAME.to_owned(),
@@ -317,6 +320,7 @@ fn install_rows(q_lower: &str, q: &str) -> Vec<StreamedResult> {
         return verb_only_row(q_lower, INSTALL_VERB, "type a manifest URL after `install`");
     };
     let trimmed = rest.trim();
+
     if trimmed.is_empty() {
         return verb_only_row(q_lower, INSTALL_VERB, "type a manifest URL after `install`");
     }
@@ -352,6 +356,7 @@ fn reload_rows(q_lower: &str, q: &str, plugin_names: &[&str]) -> Vec<StreamedRes
         Action::ReloadPlugin { name: None },
     )];
     let target = trimmed.to_ascii_lowercase();
+
     for name in plugin_names {
         if !target.is_empty() && !name.to_ascii_lowercase().starts_with(&target) {
             continue;
@@ -391,9 +396,11 @@ fn update_rows(q_lower: &str) -> Vec<StreamedResult> {
 /// start, case-insensitive.
 fn strip_verb<'a>(input: &'a str, verb: &str) -> Option<&'a str> {
     let lower = input.to_ascii_lowercase();
+
     if lower == verb {
         return Some("");
     }
+
     if let Some(rest) = lower.strip_prefix(verb)
         && rest.starts_with(char::is_whitespace)
     {
@@ -438,6 +445,7 @@ fn row(key: String, title: String, subtitle: Option<&str>, weight: f64, action: 
 
 fn match_weight(query_lower: &str, label: &str) -> Option<f64> {
     let label_lower = label.to_lowercase();
+
     if !label_lower.starts_with(query_lower) {
         return None;
     }
@@ -546,6 +554,7 @@ mod tests {
             .find(|r| r.result.title == "shutdown")
             .expect("shutdown result")
             .result;
+
         match &r.action {
             Action::Exec { cmd, .. } => {
                 #[cfg(target_os = "macos")]
@@ -567,6 +576,7 @@ mod tests {
             .into_iter()
             .find(|r| r.result.title == "reboot")
             .expect("reboot result");
+
         // Same Action shape — different labels, identical command + args.
         match (restart.result.action, reboot.result.action) {
             (Action::Exec { cmd: c1, args: a1 }, Action::Exec { cmd: c2, args: a2 }) => {
@@ -610,6 +620,7 @@ mod tests {
             .iter()
             .find(|r| r.result.title == "eject")
             .expect("eject result on macOS");
+
         match &r.result.action {
             Action::Exec { cmd, args } => {
                 assert_eq!(cmd, "/usr/bin/osascript");
@@ -658,6 +669,7 @@ mod tests {
             .iter()
             .find(|r| r.result.title == "Reload echo")
             .expect("Reload echo row");
+
         match &echo.result.action {
             Action::ReloadPlugin { name } => assert_eq!(name.as_deref(), Some("echo")),
             other => panic!("expected ReloadPlugin, got {other:?}"),
@@ -681,6 +693,7 @@ mod tests {
             .iter()
             .find(|r| r.result.title.starts_with("install https://"))
             .expect("install row");
+
         match &row.result.action {
             Action::InstallPlugin { url } => {
                 assert_eq!(url, "https://example.com/p/manifest.json");

@@ -104,6 +104,7 @@ impl PluginLog {
     /// not the file.
     pub fn write(&self, level: LogLevel, message: &str) {
         let line = format_line(level, message);
+
         if let Ok(guard) = self.tx.lock()
             && let Some(tx) = guard.as_ref()
         {
@@ -123,11 +124,13 @@ impl PluginLog {
             let Ok(guard) = self.tx.lock() else {
                 return;
             };
+
             match guard.as_ref() {
                 Some(tx) => tx.send(LogMsg::Flush(ack_tx)).is_ok(),
                 None => false,
             }
         };
+
         if sent {
             // Sentinel travels FIFO with every prior `Line`, so by the time
             // the writer answers the ack every earlier write is on disk.
@@ -143,6 +146,7 @@ impl Drop for PluginLog {
         // guaranteeing every buffered line lands on disk before this Arc's
         // resources are released.
         drop(self.tx.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take());
+
         if let Some(handle) = self
             .writer
             .lock()
@@ -158,6 +162,7 @@ impl Drop for PluginLog {
 /// deferred to the first `Line` so plugins that never log leave no file.
 fn run_writer(path: &Path, rx: &std_mpsc::Receiver<LogMsg>) {
     let mut file: Option<File> = None;
+
     while let Ok(msg) = rx.recv() {
         match msg {
             LogMsg::Line(line) => {
@@ -170,6 +175,7 @@ fn run_writer(path: &Path, rx: &std_mpsc::Receiver<LogMsg>) {
                         }
                     }
                 }
+
                 if let Some(f) = file.as_mut()
                     && let Err(err) = f.write_all(line.as_bytes())
                 {
@@ -193,11 +199,13 @@ fn format_line(level: LogLevel, message: &str) -> String {
     let timestamp = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
     let mut out = String::with_capacity(message.len() + 48);
     let mut lines = message.split('\n');
+
     if let Some(first) = lines.next() {
         let _ = writeln!(out, "[{timestamp}] [{}] {first}", level.padded());
     } else {
         let _ = writeln!(out, "[{timestamp}] [{}]", level.padded());
     }
+
     for rest in lines {
         let _ = writeln!(out, "    {rest}");
     }

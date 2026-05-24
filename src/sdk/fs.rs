@@ -35,6 +35,7 @@ impl ModuleDef for FsModule {
 
     fn evaluate<'js>(ctx: &Ctx<'js>, exports: &rquickjs::module::Exports<'js>) -> JsResult<()> {
         let globals = ctx.globals();
+
         for (export_name, global_name, cap) in [
             ("readDir", READ_DIR_GLOBAL, "fs.read"),
             ("readFile", READ_FILE_GLOBAL, "fs.read"),
@@ -45,6 +46,7 @@ impl ModuleDef for FsModule {
             let val: Value<'js> = globals
                 .get(global_name)
                 .unwrap_or_else(|_| Value::new_undefined(ctx.clone()));
+
             if let Some(f) = val.into_function() {
                 exports.export(export_name, f)?;
             } else {
@@ -203,6 +205,7 @@ fn build_dir_async_iterator<'js>(ctx: &Ctx<'js>, path: &Path, opts: &Value<'js>)
                 })
                 .await
                 .map_err(|e| throw_io(&ctx, &e.to_string()))?;
+
                 match entry {
                     Some(Ok(e)) => Ok(e.to_js(&ctx)?),
                     Some(Err(err)) => Err(throw_io(&ctx, &err.to_string())),
@@ -239,6 +242,7 @@ impl Iterator for DirWalker {
         loop {
             if self.current.is_none() {
                 let dir = self.stack.pop()?;
+
                 match std::fs::read_dir(&dir) {
                     Ok(rd) => self.current = Some(rd),
                     // SIP-protected dirs (`/Library/PreferencePanes` etc.)
@@ -248,6 +252,7 @@ impl Iterator for DirWalker {
                 }
             }
             let current = self.current.as_mut()?;
+
             match current.next() {
                 None => {
                     self.current = None;
@@ -261,10 +266,12 @@ impl Iterator for DirWalker {
                     };
                     let is_dir = metadata.is_dir();
                     let is_file = metadata.is_file();
+
                     if self.recursive && is_dir {
                         self.stack.push(path.clone());
                     }
                     let name = entry.file_name().to_string_lossy().into_owned();
+
                     return Some(Ok(DirEntryOut {
                         name,
                         path,
@@ -325,6 +332,7 @@ async fn read_text_impl<'js>(ctx: Ctx<'js>, path: PathBuf, opts: Value<'js>) -> 
 /// `readText('./bundled.json')` works regardless of the daemon's cwd.
 fn resolve_plugin_path(plugin_dir: &Path, path: &str) -> PathBuf {
     let p = Path::new(path);
+
     if p.is_absolute() {
         p.to_path_buf()
     } else {
@@ -340,6 +348,7 @@ async fn read_cache_impl(ctx: Ctx<'_>, name: String, cache_dir: PathBuf) -> JsRe
     let result = tokio::task::spawn_blocking(move || std::fs::read(&path))
         .await
         .map_err(|e| throw_io(&ctx, &e.to_string()))?;
+
     match result {
         Ok(bytes) => Ok(TypedArray::new(ctx, bytes)?.into_value()),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Value::new_null(ctx)),
@@ -369,6 +378,7 @@ fn coerce_data_to_bytes<'js>(ctx: &Ctx<'js>, data: Value<'js>) -> JsResult<Vec<u
     if let Some(s) = data.clone().into_string() {
         return Ok(s.to_string()?.into_bytes());
     }
+
     if let Ok(ta) = TypedArray::<u8>::from_value(data) {
         let bytes: &[u8] = ta.as_ref();
         return Ok(bytes.to_vec());
@@ -393,18 +403,23 @@ fn resolve_cache_path(cache_dir: &Path, name: &str) -> Result<PathBuf, &'static 
     if name.is_empty() {
         return Err("cache name must not be empty");
     }
+
     if name.len() > 255 {
         return Err("cache name must be 255 chars or fewer");
     }
+
     if name.starts_with('.') {
         return Err("cache name must not start with '.'");
     }
+
     if name.contains('/') || name.contains('\\') {
         return Err("cache name must not contain path separators");
     }
+
     if name == ".." || name.contains("..") {
         return Err("cache name must not contain '..'");
     }
+
     for c in name.chars() {
         if c == '\0' || c.is_control() {
             return Err("cache name must not contain control characters");

@@ -105,14 +105,17 @@ impl QueryHistoryState {
     /// preview cursor.
     pub(crate) fn on_submit(&mut self, query: &str, max_entries: usize) {
         self.cursor = None;
+
         if query.is_empty() {
             return;
         }
         let last_matches = self.entries.last().map(String::as_str) == Some(query);
+
         if !last_matches {
             self.entries.push(query.to_owned());
         }
         let excess = self.entries.len().saturating_sub(max_entries);
+
         if excess > 0 {
             self.entries.drain(..excess);
         }

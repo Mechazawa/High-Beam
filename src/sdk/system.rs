@@ -128,8 +128,10 @@ fn coerce_args<'js>(args: &Value<'js>) -> JsResult<Vec<String>> {
         return Ok(Vec::new());
     };
     let mut out = Vec::with_capacity(arr.len());
+
     for v in arr.iter::<Value<'js>>() {
         let v = v?;
+
         if let Some(s) = v.into_string() {
             out.push(s.to_string()?);
         }
@@ -177,6 +179,7 @@ async fn run_command(
         .stderr(Stdio::piped())
         .stdin(Stdio::null())
         .kill_on_drop(true);
+
     if let Some(dir) = cwd {
         command.current_dir(dir);
     }
@@ -212,6 +215,7 @@ async fn run_command(
     let obj = Object::new(ctx.clone())?;
     obj.set("stdout", String::from_utf8_lossy(&stdout_bytes).into_owned())?;
     obj.set("stderr", String::from_utf8_lossy(&stderr_bytes).into_owned())?;
+
     match status.code() {
         Some(c) => obj.set("code", c)?,
         None => obj.set("code", Value::new_null(ctx))?,
@@ -236,19 +240,24 @@ async fn read_capped<R: AsyncReadExt + Unpin>(reader: &mut R) -> std::io::Result
     // chunks wouldn't help throughput against the pipe.
     let mut buf = Vec::new();
     let mut chunk = [0u8; 4096];
+
     loop {
         if buf.len() >= MAX_CAPTURE_BYTES {
             // Drain to EOF so the child doesn't block on a full pipe.
             let mut sink = [0u8; 4096];
+
             loop {
                 let n = reader.read(&mut sink).await?;
+
                 if n == 0 {
                     break;
                 }
             }
+
             break;
         }
         let n = reader.read(&mut chunk).await?;
+
         if n == 0 {
             break;
         }

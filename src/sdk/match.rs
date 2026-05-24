@@ -56,6 +56,7 @@ fn fuzzy_impl<'js>(ctx: &Ctx<'js>, items: &Array<'js>, query: &str, opts: &Value
     // Pull (item, haystack) pairs out of the JS array once so we don't call
     // back into JS for every score round.
     let mut prepared: Vec<(Value<'js>, String)> = Vec::with_capacity(items.len());
+
     for item_res in items.iter::<Value<'js>>() {
         let item = item_res?;
         let key = if let Some(key_fn) = &key_fn {
@@ -72,9 +73,11 @@ fn fuzzy_impl<'js>(ctx: &Ctx<'js>, items: &Array<'js>, query: &str, opts: &Value
     }
 
     let mut scored: Vec<(Value<'js>, u32, Vec<u32>, String)> = Vec::with_capacity(prepared.len());
+
     for (item, key) in prepared {
         let haystack = Utf32String::from(key.as_str());
         let mut indices: Vec<u32> = Vec::new();
+
         if let Some(score) = pattern.indices(haystack.slice(..), &mut matcher, &mut indices) {
             if score == 0 {
                 continue;
@@ -86,6 +89,7 @@ fn fuzzy_impl<'js>(ctx: &Ctx<'js>, items: &Array<'js>, query: &str, opts: &Value
     }
 
     scored.sort_by_key(|s| std::cmp::Reverse(s.1));
+
     if let Some(n) = limit {
         scored.truncate(n);
     }
@@ -96,9 +100,11 @@ fn fuzzy_impl<'js>(ctx: &Ctx<'js>, items: &Array<'js>, query: &str, opts: &Value
     #[allow(clippy::explicit_counter_loop)]
     {
         let mut out_idx = 0usize;
+
         for (item, score, indices, key) in scored {
             let normalized = f64::from(score) / SCORE_CEILING;
             let normalized = normalized.min(1.0);
+
             if normalized < threshold {
                 continue;
             }
@@ -118,11 +124,13 @@ fn fuzzy_impl<'js>(ctx: &Ctx<'js>, items: &Array<'js>, query: &str, opts: &Value
 /// directly.
 fn highlights_from_indices<'js>(ctx: &Ctx<'js>, indices: &[u32], haystack: &str) -> JsResult<Array<'js>> {
     let out = Array::new(ctx.clone())?;
+
     if indices.is_empty() {
         return Ok(out);
     }
 
     let mut char_to_byte: Vec<usize> = Vec::with_capacity(haystack.chars().count() + 1);
+
     for (byte_idx, _) in haystack.char_indices() {
         char_to_byte.push(byte_idx);
     }
@@ -131,8 +139,10 @@ fn highlights_from_indices<'js>(ctx: &Ctx<'js>, indices: &[u32], haystack: &str)
     let mut ranges: Vec<(usize, usize)> = Vec::new();
     let mut start = indices[0] as usize;
     let mut end = start;
+
     for &idx in &indices[1..] {
         let idx = idx as usize;
+
         if idx == end + 1 {
             end = idx;
         } else {

@@ -1,3 +1,4 @@
+use std::env;
 use std::process::ExitCode;
 
 use clap::Parser;
@@ -42,6 +43,7 @@ fn main() -> ExitCode {
         let cmd = Command::Open {
             activation_token: activation_token.clone(),
         };
+
         if ipc::send(&socket_path, &cmd).is_ok() {
             return ExitCode::SUCCESS;
         }
@@ -73,15 +75,15 @@ fn consume_activation_token() -> Option<String> {
     // cross-protocol launcher (e.g., XWayland app launching us). The
     // variable name is opaque to the daemon — it just forwards whichever
     // it got.
-    let token = std::env::var("XDG_ACTIVATION_TOKEN")
+    let token = env::var("XDG_ACTIVATION_TOKEN")
         .ok()
-        .or_else(|| std::env::var("DESKTOP_STARTUP_ID").ok());
+        .or_else(|| env::var("DESKTOP_STARTUP_ID").ok());
     // SAFETY: documented as the canonical consume-and-clear pattern for
     // these vars; running synchronously in `main` before any threads spawn
     // means no other thread can observe a torn read.
     unsafe {
-        std::env::remove_var("XDG_ACTIVATION_TOKEN");
-        std::env::remove_var("DESKTOP_STARTUP_ID");
+        env::remove_var("XDG_ACTIVATION_TOKEN");
+        env::remove_var("DESKTOP_STARTUP_ID");
     }
     token.filter(|s| !s.is_empty())
 }

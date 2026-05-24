@@ -50,12 +50,15 @@ pub fn format_hotkey_spec(mods: KeyMods, key: &str) -> Option<String> {
     if mods & MOD_META != 0 {
         parts.push(meta_label);
     }
+
     if mods & MOD_CONTROL != 0 {
         parts.push(control_label);
     }
+
     if mods & MOD_ALT != 0 {
         parts.push("Alt");
     }
+
     if mods & MOD_SHIFT != 0 {
         parts.push("Shift");
     }
@@ -65,6 +68,7 @@ pub fn format_hotkey_spec(mods: KeyMods, key: &str) -> Option<String> {
     if !out.is_empty() {
         out.push('+');
     }
+
     out.push_str(&canonical);
     Some(out)
 }

@@ -52,6 +52,7 @@ impl LoaderOptions {
             return Self { plugins_dir: p };
         }
         let dev = PathBuf::from("plugins");
+
         if dev.is_dir() {
             return Self { plugins_dir: dev };
         }
@@ -71,8 +72,10 @@ pub fn scan_manifests(options: &LoaderOptions) -> Vec<Manifest> {
         return Vec::new();
     };
     let mut out = Vec::new();
+
     for entry in entries.filter_map(Result::ok) {
         let path = entry.path();
+
         if !path.is_dir() {
             continue;
         }
@@ -80,6 +83,7 @@ pub fn scan_manifests(options: &LoaderOptions) -> Vec<Manifest> {
         let Ok(bytes) = std::fs::read(&manifest_path) else {
             continue;
         };
+
         if let Ok(manifest) = Manifest::parse(&bytes) {
             out.push(manifest);
         }
@@ -119,6 +123,7 @@ pub async fn load_all(options: &LoaderOptions, settings: &Settings) -> Vec<LoadO
                 %err,
                 "plugins: failed to read plugins directory",
             );
+
             return Vec::new();
         }
         Err(join_err) => {
@@ -127,11 +132,13 @@ pub async fn load_all(options: &LoaderOptions, settings: &Settings) -> Vec<LoadO
                 %join_err,
                 "plugins: scan task panicked",
             );
+
             return Vec::new();
         }
     };
 
     let mut plugins = Vec::new();
+
     for path in dirs {
         match load_one(&path, settings).await {
             Ok((plugin, reason)) => {
@@ -188,6 +195,7 @@ pub async fn load_one_for_reload(plugin_dir: &Path, settings: &Settings) -> Resu
 /// manifest version vs. what we previously recorded for this plugin.
 fn detect_reason(manifest_version: Option<&str>, recorded: Option<&str>) -> Option<LifecycleReason> {
     let current = manifest_version?;
+
     match recorded {
         None => Some(LifecycleReason::Install),
         Some(prev) if prev != current => Some(LifecycleReason::Update),

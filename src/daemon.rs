@@ -2,8 +2,11 @@
 //! IPC socket. Cross-thread work routes through `slint::invoke_from_event_loop`
 //! so UI work stays on the main thread.
 
+use std::error::Error;
 use std::io;
 use std::path::{Path, PathBuf};
+#[cfg(target_os = "macos")]
+use std::sync::Arc;
 use std::thread;
 
 use slint::ComponentHandle;
@@ -50,7 +53,7 @@ pub struct Options {
 // reason: `Options` is a config struct created by the caller and consumed
 // here; by-value is more ergonomic than forcing the caller to keep it alive.
 #[allow(clippy::needless_pass_by_value)]
-pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
     logging::try_init();
 
     // Run before the plugin loader picks a directory: when launched from
@@ -115,9 +118,10 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
         None
     } else {
         let reg = spawn_hotkey_listener(window.as_weak(), &hotkey_spec, settings_controller.clone());
+
         if let Some(reg) = reg {
-            let shared = std::sync::Arc::new(reg);
-            settings_controller.attach_hotkey_registration(std::sync::Arc::clone(&shared));
+            let shared = Arc::new(reg);
+            settings_controller.attach_hotkey_registration(Arc::clone(&shared));
             Some(shared)
         } else {
             None
@@ -157,6 +161,7 @@ fn spawn_ipc_listener(
                 });
             }
         });
+
         if let Err(err) = result {
             tracing::error!(%err, "ipc server exited");
         }
@@ -197,7 +202,7 @@ fn parse_hotkey_or_default(spec: &str) -> global_hotkey::hotkey::HotKey {
 #[cfg(target_os = "macos")]
 pub struct HotkeyRegistration {
     manager: global_hotkey::GlobalHotKeyManager,
-    current: std::sync::Arc<std::sync::Mutex<global_hotkey::hotkey::HotKey>>,
+    current: Arc<std::sync::Mutex<global_hotkey::hotkey::HotKey>>,
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -219,6 +224,7 @@ impl HotkeyRegistration {
         if let Err(err) = self.manager.register(new) {
             tracing::error!(%err, %spec, "hotkey: re-register failed; restoring previous");
             let _ = self.manager.register(*current);
+
             return;
         }
         *current = new;
@@ -238,7 +244,7 @@ fn spawn_hotkey_listener(
     hotkey_spec: &str,
     settings: SettingsController,
 ) -> Option<HotkeyRegistration> {
-    use std::sync::{Arc, Mutex};
+    use std::sync::Mutex;
 
     use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 
@@ -265,11 +271,13 @@ fn spawn_hotkey_listener(
 
     if let Err(err) = thread::Builder::new().name("highbeam-hotkey".into()).spawn(move || {
         let receiver = GlobalHotKeyEvent::receiver();
+
         while let Ok(event) = receiver.recv() {
             // Resolve the live id on every event so re-registration takes
             // effect immediately — the registration mutex is uncontended
             // outside of the rare settings-driven swap.
             let live_id = current_for_thread.lock().ok().map(|h| h.id());
+
             if event.state == HotKeyState::Pressed && Some(event.id) == live_id {
                 let weak = weak.clone();
                 let settings = settings.clone();

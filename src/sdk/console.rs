@@ -21,6 +21,7 @@ use crate::plugins::log::{LogLevel, PluginLog};
 /// the global.
 pub fn install<'js>(ctx: &Ctx<'js>, log: &Arc<PluginLog>) -> JsResult<()> {
     let console = Object::new(ctx.clone())?;
+
     for (method, level) in [
         ("log", LogLevel::Info),
         ("info", LogLevel::Info),
@@ -44,6 +45,7 @@ fn format_args<'js>(ctx: &Ctx<'js>, args: &[Value<'js>]) -> String {
         return String::from("[console: JSON.stringify unavailable]");
     };
     let mut parts = Vec::with_capacity(args.len());
+
     for value in args {
         parts.push(render_one(ctx, value, &stringify));
     }
@@ -59,9 +61,11 @@ fn render_one<'js>(ctx: &Ctx<'js>, value: &Value<'js>, stringify: &Function<'js>
     if value.is_null() {
         return String::from("null");
     }
+
     if value.is_undefined() {
         return String::from("undefined");
     }
+
     if value.is_object() || value.is_array() {
         match stringify.call::<_, String>((value.clone(),)) {
             Ok(s) => return s,

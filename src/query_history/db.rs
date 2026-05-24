@@ -77,6 +77,7 @@ impl QueryHistoryDb {
                 row.get(0)
             })
             .ok();
+
         if last.as_deref() == Some(query) {
             return Ok(());
         }
@@ -88,6 +89,7 @@ impl QueryHistoryDb {
         // Trim oldest entries so the table stays at most `max_entries` rows.
         let count: i64 = guard.query_row("SELECT COUNT(*) FROM query_history", [], |row| row.get(0))?;
         let excess = count - i64::try_from(max_entries).unwrap_or(i64::MAX);
+
         if excess > 0 {
             guard.execute(
                 "DELETE FROM query_history WHERE id IN \
@@ -117,6 +119,7 @@ impl QueryHistoryDb {
             return Vec::new();
         };
         let rows = stmt.query_map(params![limit_i64], |row| row.get::<_, String>(0));
+
         match rows {
             Ok(iter) => iter.filter_map(Result::ok).collect(),
             Err(_) => Vec::new(),
@@ -182,6 +185,7 @@ mod tests {
     #[test]
     fn load_recent_returns_chronological_order() {
         let db = QueryHistoryDb::open_in_memory().expect("open");
+
         for q in &["first", "second", "third"] {
             db.push(q, 100).unwrap();
         }
@@ -192,6 +196,7 @@ mod tests {
     #[test]
     fn push_trims_to_max_entries() {
         let db = QueryHistoryDb::open_in_memory().expect("open");
+
         for i in 0..5u32 {
             db.push(&format!("query-{i}"), 3).unwrap();
         }
@@ -204,6 +209,7 @@ mod tests {
     #[test]
     fn load_recent_respects_limit() {
         let db = QueryHistoryDb::open_in_memory().expect("open");
+
         for i in 0..5u32 {
             db.push(&format!("q{i}"), 100).unwrap();
         }

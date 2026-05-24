@@ -94,6 +94,7 @@ fn try_activate(window: &QueryWindow, token: &str) -> Result<(), Box<dyn std::er
                 let _ = event_queue.dispatch_pending(&mut ActivateState);
                 Ok(())
             });
+
     match result {
         Some(Ok(())) => Ok(()),
         Some(Err(err)) => Err(err),

@@ -82,6 +82,7 @@ fn parse_opts<'js>(opts: &Value<'js>) -> HttpOpts<'js> {
         timeout: None,
         signal: None,
     };
+
     if opts.is_undefined() || opts.is_null() {
         return empty;
     }
@@ -90,9 +91,11 @@ fn parse_opts<'js>(opts: &Value<'js>) -> HttpOpts<'js> {
     };
 
     let mut headers = Vec::new();
+
     if let Ok(h) = o.get::<_, Object<'js>>("headers") {
         for prop in h.props::<String, Value<'js>>().flatten() {
             let (k, v) = prop;
+
             if let Some(vs) = v.into_string()
                 && let Ok(s) = vs.to_string()
             {
@@ -145,6 +148,7 @@ async fn request<'js>(
     for (k, v) in headers {
         builder = builder.header(k, v);
     }
+
     if let Some(t) = timeout {
         builder = builder.timeout(t);
     }
@@ -214,6 +218,7 @@ fn coerce_body<'js>(ctx: &Ctx<'js>, value: Value<'js>) -> JsResult<Option<BodySh
     if value.is_undefined() || value.is_null() {
         return Ok(None);
     }
+
     if let Some(js_str) = value.clone().into_string() {
         return Ok(Some(BodyShape::Text(js_str.to_string()?)));
     }
@@ -234,6 +239,7 @@ fn build_response<'js>(
     obj.set("status", status)?;
     obj.set("statusText", status_text.to_owned())?;
     let header_obj = Object::new(ctx.clone())?;
+
     for (k, v) in headers {
         header_obj.set(k, v.clone())?;
     }

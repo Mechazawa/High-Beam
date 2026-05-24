@@ -361,6 +361,7 @@ impl LoadedPlugin {
         tokio::task::spawn_blocking(move || {
             const TICK: Duration = Duration::from_millis(10);
             let start = std::time::Instant::now();
+
             while start.elapsed() < timeout {
                 if cancel_for_timer.is_cancelled() {
                     flag_for_timer.store(true, Ordering::Relaxed);
@@ -556,6 +557,7 @@ fn log_query_outcome(
             LogLevel::Warn,
             &format!("query timed out after {timeout_ms}ms (manifest budget: {timeout_ms}ms); input: {input:?}"),
         );
+
         return;
     }
 
@@ -570,6 +572,7 @@ fn log_query_outcome(
             LogLevel::Error,
             &format!("out of memory; memory limit {memory_mb}mb exceeded; input: {input:?}"),
         );
+
         return;
     }
 
@@ -618,6 +621,7 @@ async fn run_hook<'js>(
             .catch(ctx)
             .map_err(|err| PluginError::Js(format!("await {label}(): {err}", label = kind.label()))),
     };
+
     // Cancel paths already disposed via `abort.cancel`; release only on
     // the natural-completion arm. Either way the JS controller is now out
     // of the registry.
@@ -638,6 +642,7 @@ fn log_hook_outcome(
 ) {
     let label = kind.label();
     let reason_str = reason.as_js_str();
+
     match outcome {
         Ok(()) => log.write(
             LogLevel::Info,
@@ -705,6 +710,7 @@ async fn stream_query<'js>(
         if cancel.is_cancelled() {
             // Fire JS-side listeners so plugin code can clean up.
             let _ = abort.cancel(&ctx);
+
             return Err(PluginError::Cancelled);
         }
 
@@ -735,6 +741,7 @@ async fn stream_query<'js>(
             // registry doesn't accumulate one entry per query over the
             // plugin context's lifetime.
             let _ = abort.release(&ctx);
+
             return Ok(());
         }
 
@@ -752,6 +759,7 @@ async fn stream_query<'js>(
         if tx.send(parsed).is_err() {
             // Receiver dropped — treat as a cancel.
             let _ = abort.cancel(&ctx);
+
             return Err(PluginError::Cancelled);
         }
     }
@@ -831,6 +839,7 @@ impl Loader for HighbeamLoader {
                     format!("`{name}` is not a recognised highbeam module"),
                 ));
             };
+
             if !capability::grants_any(&self.capabilities, module_cap.any_of) {
                 return Err(JsError::new_loading_message(
                     name,

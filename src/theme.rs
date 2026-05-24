@@ -95,6 +95,7 @@ impl Theme {
             tracing::warn!("theme: could not resolve config dir; using default");
             return Self::default();
         };
+
         match fs::read_to_string(&path) {
             Ok(text) => Self::from_toml_or_default(&text, &path),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Self::default(),

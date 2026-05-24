@@ -132,6 +132,7 @@ pub fn install_global_controller(ctx: &Ctx<'_>) -> Result<(), JsError> {
 pub fn token_from_js_signal<'js>(ctx: &Ctx<'js>, signal: &Object<'js>) -> Result<CancellationToken, JsError> {
     let aborted: bool = signal.get::<_, bool>("aborted").unwrap_or(false);
     let token = CancellationToken::new();
+
     if aborted {
         token.cancel();
         return Ok(token);

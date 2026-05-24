@@ -51,6 +51,7 @@ fn detect_os_version() -> String {
             && out.status.success()
         {
             let s = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+
             if !s.is_empty() {
                 return s;
             }
@@ -64,6 +65,7 @@ fn detect_os_version() -> String {
             && out.status.success()
         {
             let s = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+
             if !s.is_empty() {
                 return s;
             }
