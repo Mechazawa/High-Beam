@@ -181,9 +181,10 @@ Full details in [docs/platform.md](docs/platform.md).
 
 ## Architecture
 
-[docs/architecture.md](docs/architecture.md) is the contributor's tour —
-stack, module map, threading model, the cancellation contract, and the
-Slint integration gotchas worth knowing before touching the UI layer.
+[docs/internals.md](docs/internals.md) is the contributor's tour — stack
+rationale, threading model, the cancellation contract, and the Slint
+integration gotchas worth knowing before touching the UI layer. For the
+module layout, `src/lib.rs` is the source of truth.
 
 ## Roadmap
 

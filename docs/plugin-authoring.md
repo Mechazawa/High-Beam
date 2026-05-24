@@ -14,7 +14,7 @@ sibling docs:
 | [plugin-cookbook.md](./plugin-cookbook.md)     | Find a copy-pasteable recipe for a specific pattern           |
 
 For the host's internals — query dispatch, threading, cancellation — see
-[architecture.md](./architecture.md).
+[internals.md](./internals.md).
 
 ## At a glance
 

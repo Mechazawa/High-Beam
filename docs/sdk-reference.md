@@ -6,7 +6,7 @@ Complete reference for every `highbeam:*` module. Mirrors the `.d.ts` files in
 document stay accurate.
 
 For runtime mechanics — how queries dispatch, how cancellation cascades, how
-results merge across plugins — see [architecture.md](./architecture.md). For
+results merge across plugins — see [internals.md](./internals.md). For
 a step-by-step build, see [plugin-tutorial.md](./plugin-tutorial.md). For
 copy-pasteable patterns, see [plugin-cookbook.md](./plugin-cookbook.md).
 
