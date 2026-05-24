@@ -1,7 +1,7 @@
 //! Host implementation of the `highbeam:http` module. Requires the `http`
 //! capability.
 //!
-//! Cancellation: a plugin-supplied `signal` becomes a [`CancellationToken`]
+//! Cancellation: a plugin-supplied `signal` becomes a `CancellationToken`
 //! via [`abort::token_from_js_signal`]; the send/body futures race that
 //! token. UTF-8 only — binary responses are lossy-decoded for v1.
 

@@ -46,8 +46,9 @@ pub struct Manifest {
     pub memory_mb: u32,
     /// Per-plugin debounce in milliseconds — the dispatcher waits this long
     /// after the latest keystroke before invoking `query()`. `0` dispatches
-    /// every keystroke immediately. Effective value capped at
-    /// [`crate::plugins::dispatch::MAX_DEBOUNCE_MS`].
+    /// every keystroke immediately. The dispatcher caps the effective
+    /// value at a small hard limit so a pathological plugin can't hold up
+    /// the UI; see `crate::plugins::dispatch` for the current ceiling.
     #[serde(default = "default_debounce_ms")]
     pub debounce_ms: u64,
     #[serde(default)]

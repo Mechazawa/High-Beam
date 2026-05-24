@@ -1,8 +1,8 @@
 //! Host implementation of the `highbeam:system` module.
 //!
 //! `exec` (cap `system.exec`) captures stdout/stderr/code; capture is
-//! truncated at [`MAX_CAPTURE_BYTES`]. `AbortSignal` is honored — the child
-//! is killed on abort via `kill_on_drop`.
+//! truncated at the per-stream cap defined below. `AbortSignal` is honored
+//! — the child is killed on abort via `kill_on_drop`.
 //!
 //! `applescript` (cap `system.applescript`) resolves with `null` on
 //! non-macOS, never throws — plugins can call it without gating every site.

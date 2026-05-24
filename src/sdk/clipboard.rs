@@ -54,8 +54,9 @@ impl ModuleDef for ClipboardModule {
 }
 
 /// Build per-plugin `read`/`write` and stash them on globalThis under
-/// [`READ_GLOBAL`]/[`WRITE_GLOBAL`]. Must run BEFORE the plugin's entry
-/// module evaluates.
+/// reserved slot names. Must run BEFORE the plugin's entry module
+/// evaluates so `import { read, write } from 'highbeam:clipboard'`
+/// picks up the cap-gated bindings instead of the fallback throwers.
 ///
 /// # Errors
 ///

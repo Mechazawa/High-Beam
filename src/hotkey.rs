@@ -20,8 +20,8 @@ pub const MOD_ALT: KeyMods = 1 << 3;
 /// spec string. Returns `None` for modifier-only / unprintable inputs the
 /// hotkey parser couldn't accept anyway.
 ///
-/// Slint encodes special keys as private-use Unicode codepoints — see
-/// [`canonical_key`] for the mapping table.
+/// Slint encodes special keys as private-use Unicode codepoints — see the
+/// private `canonical_key` mapping table below.
 #[must_use]
 pub fn format_hotkey_spec(mods: KeyMods, key: &str) -> Option<String> {
     let canonical = canonical_key(key)?;

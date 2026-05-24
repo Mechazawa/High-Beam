@@ -1,7 +1,7 @@
 //! Frecency tracking: persist `(plugin_name, result_key)` pick history and
 //! bias the dispatcher's sort so recently-picked results bubble up.
 //!
-//! `db` handles `SQLite` open/schema/upsert + per-query [`db::Snapshot`];
+//! `db` handles `SQLite` open/schema/upsert + per-query `Snapshot`;
 //! `score` is the pure modifier function `merge_into_live` consumes.
 
 mod db;

@@ -41,8 +41,9 @@ pub const ALT_ACTION_MODIFIER_CHOICES: &[&str] = &["Alt", "Shift", "Cmd", "Ctrl"
 
 /// User-edited launcher state.
 ///
-/// The on-disk shape is the [`SettingsFile`] TOML schema; this is the in-memory
-/// projection the rest of the host reads/writes through.
+/// The on-disk shape is the `SettingsFile` TOML schema (private, below);
+/// this is the in-memory projection the rest of the host reads/writes
+/// through.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Settings {
     /// Path the settings were loaded from / will be written back to. `None`

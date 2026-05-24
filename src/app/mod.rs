@@ -7,9 +7,9 @@
 //! are filtered by a monotonic `query_id`.
 //!
 //! Submodules:
-//! - [`callbacks`] — Slint window-callback wiring.
-//! - [`query`] — per-keystroke streaming dispatch + result rendering.
-//! - [`install_flow`] — install / update / reload host-task pipeline.
+//! - `callbacks` — Slint window-callback wiring.
+//! - `query` — per-keystroke streaming dispatch + result rendering.
+//! - `install_flow` — install / update / reload host-task pipeline.
 
 mod callbacks;
 mod install_flow;
