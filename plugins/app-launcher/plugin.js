@@ -106,17 +106,17 @@ async function collectLinuxApps() {
                 if (!fields.Exec) continue;
                 const command = stripExecPlaceholders(fields.Exec);
                 if (!command) continue;
-                // XDG icon-theme lookup is post-v1; only absolute paths work.
-                const iconPath =
-                    fields.Icon && fields.Icon.startsWith("/")
-                        ? fields.Icon
-                        : null;
+                // Either an absolute path or a bare XDG icon name — the host's
+                // `forPath` resolver branches on the leading slash and walks
+                // the active GTK theme for names.
+                const iconSpec = fields.Icon || null;
+
                 apps.push({
                     kind: "linux",
                     path: entry.path,
                     appName: fields.Name,
                     command,
-                    iconPath,
+                    iconSpec,
                 });
             }
         } catch {
@@ -143,8 +143,8 @@ async function resolveIcon(app) {
     if (app.kind === "mac") {
         return forPath(app.path);
     }
-    if (app.kind === "linux" && app.iconPath) {
-        return forPath(app.iconPath);
+    if (app.kind === "linux" && app.iconSpec) {
+        return forPath(app.iconSpec);
     }
     return undefined;
 }

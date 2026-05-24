@@ -170,8 +170,8 @@ describe('app-launcher Linux', () => {
         });
     });
 
-    test('Icon with absolute path becomes data URI; bare name yields no icon', async () => {
-        const { plugin } = await loadPlugin({ platform: 'linux' });
+    test('forwards both absolute Icon paths and bare XDG names to forPath', async () => {
+        const { plugin, icons } = await loadPlugin({ platform: 'linux' });
         const results = await collect(
             plugin.query('gimp', { aborted: false }),
         );
@@ -180,6 +180,7 @@ describe('app-launcher Linux', () => {
         );
         expect(gimp).toBeDefined();
         expect(gimp.icon).toBe(ICON_SENTINEL);
+        expect(icons.forPath).toHaveBeenCalledWith('/usr/share/pixmaps/gimp.png');
 
         const fireResults = await collect(
             plugin.query('firefox', { aborted: false }),
@@ -187,9 +188,11 @@ describe('app-launcher Linux', () => {
         const firefox = fireResults.find((r) =>
             /firefox/i.test(r.title.replace(/<[^>]+>/g, '')),
         );
-        // Bare icon name `firefox` falls outside XDG lookup support; UI handles
-        // a missing icon gracefully so the plugin omits the field entirely.
-        expect(firefox.icon).toBeUndefined();
+        // Bare XDG names now resolve via the host's freedesktop-icons lookup;
+        // the plugin hands the raw spec to `forPath` and lets the host walk
+        // the active GTK theme.
+        expect(firefox.icon).toBe(ICON_SENTINEL);
+        expect(icons.forPath).toHaveBeenCalledWith('firefox');
     });
 
     test('NoDisplay=true apps are skipped', async () => {

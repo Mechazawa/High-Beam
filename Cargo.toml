@@ -264,6 +264,12 @@ wayland-backend = { version = "0.3", features = ["client_system"] }
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 raw-window-handle = "0.6"
 
+# XDG icon-theme lookup for `.desktop` Icon= names. Walks the active GTK
+# theme → parents → hicolor → /usr/share/pixmaps and returns the best file
+# match for a requested size. Light deps (xdg, dirs, ini_core) and no async
+# runtime — we call it from `spawn_blocking` since lookups touch the disk.
+freedesktop-icons = "0.4"
+
 [build-dependencies]
 slint-build = "1.16"
 
