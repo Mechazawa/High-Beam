@@ -34,13 +34,20 @@ pub fn set_once_mode(once: bool) {
 }
 
 fn quit_if_once() {
-    if ONCE_MODE.load(Ordering::Relaxed) {
-        // `Err` here means the event loop wasn't running, which would be
-        // a programming bug — the only callers are dismiss handlers that
-        // only run while the loop is alive. Swallow so we don't poison
-        // shutdown on the way out.
-        let _ = slint::quit_event_loop();
+    if !ONCE_MODE.load(Ordering::Relaxed) {
+        return;
     }
+    // `slint::quit_event_loop` would do the graceful exit dance — return
+    // from `run_event_loop_until_quit`, fall out of `daemon::run`, drop
+    // the window. On Linux Wayland that drop crashes with SIGSEGV in
+    // Slint 1.16's renderer because we never called `window.hide()` (the
+    // documented `is_hidden` workaround — see `hide()` below). For a
+    // single-shot process that's about to disappear anyway, the graceful
+    // path buys us nothing: settings position is persisted by
+    // `hide_and_persist_position` before this fires, frecency picks are
+    // persisted at action-time, plugin shutdown is fire-and-forget. Match
+    // the existing `Action::Quit` path and hard-exit.
+    std::process::exit(0);
 }
 
 /// Grace window after `show()` during which a `Focused(false)` event is
