@@ -106,7 +106,7 @@ fn canonical_key(text: &str) -> Option<String> {
         0xF702 => Some("ArrowLeft".into()),
         0xF703 => Some("ArrowRight".into()),
         // F1..=F24 — Slint allocates F1 at 0xF704, contiguous through F24.
-        c if (0xF704..=0xF71B).contains(&c) => Some(format!("F{}", c - 0xF703)),
+        c @ 0xF704..=0xF71B => Some(format!("F{}", c - 0xF703)),
         0xF727 => Some("Insert".into()),
         0xF729 => Some("Home".into()),
         0xF72B => Some("End".into()),
