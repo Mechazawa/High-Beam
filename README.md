@@ -11,16 +11,9 @@ results stream in from plugins, Enter executes the chosen action.
 
 ## Status
 
-Pre-release / personal-use. The Rust rewrite (this repository) supersedes
-two earlier iterations:
-
-- v1 — Electron + Vue + JS (kept locally in `legacy/`)
-- v2 — Electron + React + TypeScript (kept locally in `legacy-v2/`)
-- v3 — this native Rust binary
-
-The major v3 pieces — daemon, plugin runtime, SDK, frecency, theming,
-per-plugin logging — are all in. The pre-v1.0 backlog is in
-[Roadmap](#roadmap) below.
+Pre-release. The host pieces — daemon, plugin runtime, SDK, frecency,
+theming, per-plugin logging, settings UI — are all in. Pre-v1.0
+backlog in [Roadmap](#roadmap).
 
 ## Install
 
@@ -107,27 +100,19 @@ for the publish-side guide.
 ## What ships
 
 The host binary plus one in-process built-in (Core: shutdown / sleep /
-restart / lock / exit High Beam / version readout). Plus, in
-`plugins/`, eight reference plugins you can drop into your
-plugins directory:
+restart / lock / settings / install / reload / update / version
+readout). Reference plugins live under `plugins/` in this repo —
+each is a single-directory `manifest.json` + `plugin.js` pair. Browse
+that directory for the current set; the bundled installers (macOS
+.app, .deb, .pacman) seed a curated subset into the user plugin dir on
+first launch.
 
-| Plugin           | What it does                                                         |
-|------------------|----------------------------------------------------------------------|
-| `echo`           | Minimal smoke test — copies your input to the clipboard.             |
-| `echo-ts`        | TypeScript variant of `echo` with a `tsconfig.json`.                 |
-| `slow-echo`      | Streaming + abort demo (three rows, 300ms apart).                    |
-| `frecency-demo`  | Three equal-weight rows; pick one and watch it bubble up.            |
-| `calculator`     | Pinned, inline math (`1+2*3`, `sqrt(2)`, etc.). npm-free.            |
-| `http-codes`     | Type `http 404`; opens MDN.                                          |
-| `paper-size`     | Type `paper A4`; copies `210 x 297 mm`.                              |
-| `dnd`            | Type `spell fireball`; opens the D&D 5e reference.                   |
-| `app-launcher`   | Cross-platform Spotlight equivalent (mac `.app`s + Linux `.desktop`). |
-
-Copy or symlink any of them into your plugin directory:
+Copy or symlink any plugin directory into your plugin path to use it
+without an install:
 
 ```bash
-cp -r plugins/echo ~/Library/Application\ Support/high-beam/plugins/echo  # macOS
-cp -r plugins/echo "$XDG_DATA_HOME/high-beam/plugins/echo"                # Linux
+cp -r plugins/calculator ~/Library/Application\ Support/high-beam/plugins/calculator  # macOS
+cp -r plugins/calculator "$XDG_DATA_HOME/high-beam/plugins/calculator"                # Linux
 ```
 
 …then restart High Beam.
@@ -191,8 +176,6 @@ module layout, `src/lib.rs` is the source of truth.
 The v1 line: launcher + plugin runtime + bundled examples + theming +
 logging. After v1, in rough priority order:
 
-- Alt-action / modifier-key alternate action (Cmd+Enter = "open in finder"
-  vs Enter = "open")
 - `push` action / nested views (the `Action` enum reserves room)
 - Forms — multi-field input view dispatched by an `Action` variant
 - Detail / preview pane (Yosemite Spotlight's right-side preview)
