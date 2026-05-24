@@ -12,7 +12,7 @@
 //! winit 0.30 only consumes activation tokens at window *creation* time
 //! (via `WindowAttributes::with_activation_token`); there's no public API
 //! to re-activate an existing window. So we drop down to wayland-client
-//! and share winit's wl_display via `Backend::from_foreign_display` — same
+//! and share winit's `wl_display` via `Backend::from_foreign_display` — same
 //! pattern softbuffer and smithay-clipboard use to interop with winit.
 //!
 //! The connection runs in "guest" mode so dropping our backend doesn't
@@ -48,52 +48,52 @@ fn try_activate(window: &QueryWindow, token: &str) -> Result<(), Box<dyn std::er
     // wl_display / wl_surface ptrs we extract via raw-window-handle stay
     // valid until the closure returns. winit owns them and the window is
     // alive while `window` is.
-    let result = window
-        .window()
-        .with_winit_window(|w: &winit::window::Window| -> Result<(), Box<dyn std::error::Error>> {
-            let display_handle = w.display_handle()?;
-            let window_handle = w.window_handle()?;
-            let (display_ptr, surface_ptr) = match (display_handle.as_raw(), window_handle.as_raw()) {
-                (RawDisplayHandle::Wayland(d), RawWindowHandle::Wayland(s)) => {
-                    (d.display.as_ptr(), s.surface.as_ptr())
-                }
-                _ => {
-                    // X11 / non-Wayland: nothing for us to do here.
-                    // winit's regular activation handling covers X11.
-                    return Ok(());
-                }
-            };
+    let result =
+        window
+            .window()
+            .with_winit_window(|w: &winit::window::Window| -> Result<(), Box<dyn std::error::Error>> {
+                let display_handle = w.display_handle()?;
+                let window_handle = w.window_handle()?;
+                let (display_ptr, surface_ptr) = match (display_handle.as_raw(), window_handle.as_raw()) {
+                    (RawDisplayHandle::Wayland(d), RawWindowHandle::Wayland(s)) => {
+                        (d.display.as_ptr(), s.surface.as_ptr())
+                    }
+                    _ => {
+                        // X11 / non-Wayland: nothing for us to do here.
+                        // winit's regular activation handling covers X11.
+                        return Ok(());
+                    }
+                };
 
-            // SAFETY: `display_ptr` is winit's live wl_display for the
-            // lifetime of this closure. `from_foreign_display` runs the
-            // backend in "guest" mode — dropping it at the end of this
-            // function does NOT close winit's connection.
-            let backend = unsafe { Backend::from_foreign_display(display_ptr.cast()) };
-            let conn = Connection::from_backend(backend);
+                // SAFETY: `display_ptr` is winit's live wl_display for the
+                // lifetime of this closure. `from_foreign_display` runs the
+                // backend in "guest" mode — dropping it at the end of this
+                // function does NOT close winit's connection.
+                let backend = unsafe { Backend::from_foreign_display(display_ptr.cast()) };
+                let conn = Connection::from_backend(backend);
 
-            // Discover and bind `xdg_activation_v1`. This roundtrips to
-            // the compositor on a private event queue, so winit's queue
-            // is undisturbed.
-            let (globals, mut event_queue) = registry_queue_init::<ActivateState>(&conn)?;
-            let qh = event_queue.handle();
-            let activation: XdgActivationV1 = globals.bind(&qh, 1..=1, ())?;
+                // Discover and bind `xdg_activation_v1`. This roundtrips to
+                // the compositor on a private event queue, so winit's queue
+                // is undisturbed.
+                let (globals, mut event_queue) = registry_queue_init::<ActivateState>(&conn)?;
+                let qh = event_queue.handle();
+                let activation: XdgActivationV1 = globals.bind(&qh, 1..=1, ())?;
 
-            // Reconstruct the WlSurface proxy from the raw ptr. SAFETY:
-            // `surface_ptr` is winit's wl_surface for *this* window — it
-            // outlives the closure, and the interface matches.
-            let surface_id =
-                unsafe { ObjectId::from_ptr(WlSurface::interface(), surface_ptr.cast())? };
-            let surface = WlSurface::from_id(&conn, surface_id)?;
+                // Reconstruct the WlSurface proxy from the raw ptr. SAFETY:
+                // `surface_ptr` is winit's wl_surface for *this* window — it
+                // outlives the closure, and the interface matches.
+                let surface_id = unsafe { ObjectId::from_ptr(WlSurface::interface(), surface_ptr.cast())? };
+                let surface = WlSurface::from_id(&conn, surface_id)?;
 
-            // Fire-and-forget activation request. The compositor decides
-            // whether to honor it; we never see a response.
-            activation.activate(token.to_owned(), &surface);
-            conn.flush()?;
-            // Drain anything the registry roundtrip left pending so we
-            // drop the queue cleanly.
-            let _ = event_queue.dispatch_pending(&mut ActivateState);
-            Ok(())
-        });
+                // Fire-and-forget activation request. The compositor decides
+                // whether to honor it; we never see a response.
+                activation.activate(token.to_owned(), &surface);
+                conn.flush()?;
+                // Drain anything the registry roundtrip left pending so we
+                // drop the queue cleanly.
+                let _ = event_queue.dispatch_pending(&mut ActivateState);
+                Ok(())
+            });
     match result {
         Some(Ok(())) => Ok(()),
         Some(Err(err)) => Err(err),
@@ -122,7 +122,7 @@ impl Dispatch<XdgActivationV1, ()> for ActivateState {
         _: &mut Self,
         _: &XdgActivationV1,
         _: <XdgActivationV1 as Proxy>::Event,
-        _: &(),
+        &(): &(),
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
@@ -134,7 +134,7 @@ impl Dispatch<WlSurface, ()> for ActivateState {
         _: &mut Self,
         _: &WlSurface,
         _: <WlSurface as Proxy>::Event,
-        _: &(),
+        &(): &(),
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {

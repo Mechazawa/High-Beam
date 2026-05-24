@@ -437,7 +437,7 @@ pub fn move_into_plugins_dir(payload_root: &Path, plugins_dir: &Path, name: &str
     // `rename` works for cross-directory moves within one filesystem; for
     // cross-fs we fall back to copy + remove.
     if let Err(err) = std::fs::rename(payload_root, &destination) {
-        if err.raw_os_error() == Some(libc_xdev()) {
+        if err.kind() == std::io::ErrorKind::CrossesDevices {
             copy_dir_recursive(payload_root, &destination).map_err(|e| InstallError::Io(e.to_string()))?;
             std::fs::remove_dir_all(payload_root).map_err(|e| InstallError::Io(e.to_string()))?;
         } else {
@@ -446,15 +446,6 @@ pub fn move_into_plugins_dir(payload_root: &Path, plugins_dir: &Path, name: &str
     }
 
     Ok(destination)
-}
-
-/// `EXDEV` errno value — `std::io::Error::raw_os_error()` returns the
-/// platform raw, so we compare numerically rather than via the `libc` crate
-/// (which isn't a direct dep).
-const fn libc_xdev() -> i32 {
-    // Both macOS (Darwin) and Linux use 18 for EXDEV. Hardcoded because the
-    // crate doesn't pull `libc` in directly.
-    18
 }
 
 fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {

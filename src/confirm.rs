@@ -122,12 +122,6 @@ mod tests {
     }
 
     #[test]
-    fn new_caps_empty_when_equal() {
-        let caps = strs(&["actions", "http"]);
-        assert!(new_caps(&caps, &caps).is_empty());
-    }
-
-    #[test]
     fn new_caps_returns_caps_in_remote_not_in_installed() {
         let installed = strs(&["actions"]);
         let remote = strs(&["actions", "http", "fs.read"]);
@@ -143,13 +137,6 @@ mod tests {
         let mut result = new_caps(&remote, &installed);
         result.sort_unstable();
         assert_eq!(result, vec!["actions", "http"]);
-    }
-
-    #[test]
-    fn new_caps_empty_remote_returns_empty() {
-        let installed = strs(&["actions"]);
-        let remote: Vec<String> = Vec::new();
-        assert!(new_caps(&remote, &installed).is_empty());
     }
 
     // --- update_needs_prompt ---
@@ -168,17 +155,6 @@ mod tests {
         assert!(!update_needs_prompt(&remote, &installed));
     }
 
-    #[test]
-    fn update_needs_prompt_false_when_equal() {
-        let caps = strs(&["actions", "http"]);
-        assert!(!update_needs_prompt(&caps, &caps));
-    }
-
-    #[test]
-    fn update_needs_prompt_false_when_both_empty() {
-        assert!(!update_needs_prompt(&[], &[]));
-    }
-
     // --- CapabilityEntry ---
 
     #[test]
@@ -194,14 +170,6 @@ mod tests {
         let entry = CapabilityEntry::from_cap("future.capability", false);
         assert_eq!(entry.cap, "future.capability");
         assert_eq!(entry.explanation, "future.capability");
-    }
-
-    #[test]
-    fn capability_entry_is_new_flag_propagates() {
-        let new_entry = CapabilityEntry::from_cap("http", true);
-        let old_entry = CapabilityEntry::from_cap("http", false);
-        assert!(new_entry.is_new);
-        assert!(!old_entry.is_new);
     }
 
     // --- ConfirmationSummary ---

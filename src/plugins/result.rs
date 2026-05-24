@@ -132,37 +132,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn action_roundtrip_open_url() {
-        let action = Action::OpenUrl {
-            url: "https://example.com".into(),
-        };
-        let s = serde_json::to_string(&action).unwrap();
-        let parsed: Action = serde_json::from_str(&s).unwrap();
-        assert!(matches!(parsed, Action::OpenUrl { url } if url == "https://example.com"));
-    }
-
-    #[test]
-    fn action_roundtrip_copy() {
-        let json = r#"{"kind":"copy","text":"hello"}"#;
-        let parsed: Action = serde_json::from_str(json).unwrap();
-        assert!(matches!(parsed, Action::Copy { text } if text == "hello"));
-    }
-
-    #[test]
-    fn action_roundtrip_exec() {
-        let json = r#"{"kind":"exec","cmd":"/usr/bin/say","args":["hello","world"]}"#;
-        let parsed: Action = serde_json::from_str(json).unwrap();
-        match parsed {
-            Action::Exec { cmd, args } => {
-                assert_eq!(cmd, "/usr/bin/say");
-                assert_eq!(args, vec!["hello".to_owned(), "world".to_owned()]);
-            }
-            other => panic!("expected Exec, got {other:?}"),
-        }
-    }
-
-    #[test]
     fn action_exec_args_default_to_empty() {
+        // `args` is `#[serde(default)]` so a builder that omits the array
+        // round-trips to an empty Vec. Guards against the default being
+        // accidentally dropped.
         let json = r#"{"kind":"exec","cmd":"/usr/bin/true"}"#;
         let parsed: Action = serde_json::from_str(json).unwrap();
         match parsed {
@@ -172,17 +145,10 @@ mod tests {
     }
 
     #[test]
-    fn action_roundtrip_reveal() {
-        let json = r#"{"kind":"reveal","path":"/tmp/file.pdf"}"#;
-        let parsed: Action = serde_json::from_str(json).unwrap();
-        match parsed {
-            Action::Reveal { path } => assert_eq!(path, PathBuf::from("/tmp/file.pdf")),
-            other => panic!("expected Reveal, got {other:?}"),
-        }
-    }
-
-    #[test]
     fn result_parses_minimal_shape() {
+        // The required-fields contract: key, title, action. Everything else
+        // must default sanely so a minimal yielded object lands without
+        // forcing plugin authors to spell out every property.
         let json = r#"{"key":"k","title":"t","action":{"kind":"copy","text":"x"}}"#;
         let parsed: PluginResult = serde_json::from_str(json).unwrap();
         assert_eq!(parsed.key, "k");

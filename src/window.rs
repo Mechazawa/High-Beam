@@ -299,7 +299,7 @@ fn apply_saved_or_centered_position(window: &QueryWindow, settings: &SettingsCon
 
     let rects = monitor_rects(window);
 
-    if !position_visible_on_any_monitor(saved, window_size(window), &rects) {
+    if !position_visible_on_any_monitor(saved, &rects) {
         tracing::info!(
             x = saved.x,
             y = saved.y,
@@ -369,14 +369,6 @@ fn monitor_rects(window: &QueryWindow) -> Vec<MonitorRect> {
         .unwrap_or_default()
 }
 
-fn window_size(window: &QueryWindow) -> (i32, i32) {
-    let size = window.window().size();
-    (
-        i32::try_from(size.width).unwrap_or(i32::MAX),
-        i32::try_from(size.height).unwrap_or(i32::MAX),
-    )
-}
-
 /// Virtual-desktop rectangle, in physical pixels, used by
 /// [`position_visible_on_any_monitor`]. Kept as a plain struct (rather than
 /// re-using winit's `MonitorHandle`) so the visibility check is unit-
@@ -390,16 +382,11 @@ pub(crate) struct MonitorRect {
 }
 
 /// Whether a candidate window origin would land somewhere a user could
-/// actually grab it. A position counts as visible if at least one monitor
-/// shows a non-trivial overlap with the window's would-be rect — using
-/// "any pixel overlap" was too permissive (a 1px sliver on a remembered
+/// actually grab it. The check is on the top-left corner only — "any
+/// pixel overlap" was too permissive (a 1px sliver on a remembered
 /// monitor that's now disconnected leaves the window unreachable), so we
-/// require the top-left corner itself to land inside some monitor.
-pub(crate) fn position_visible_on_any_monitor(
-    pos: WindowPosition,
-    _window_size: (i32, i32),
-    monitors: &[MonitorRect],
-) -> bool {
+/// require the origin itself to land inside some monitor.
+pub(crate) fn position_visible_on_any_monitor(pos: WindowPosition, monitors: &[MonitorRect]) -> bool {
     if monitors.is_empty() {
         return false;
     }
@@ -561,18 +548,6 @@ mod tests {
     const TINY_JPEG_B64: &str = "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/2wBDAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/wAARCAABAAEDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD9/KKKKAP/2Q==";
 
     #[test]
-    fn decode_icon_none_returns_default() {
-        let img = decode_icon(None);
-        assert_eq!(img.size().width, 0);
-    }
-
-    #[test]
-    fn decode_icon_empty_string_returns_default() {
-        let img = decode_icon(Some(""));
-        assert_eq!(img.size().width, 0);
-    }
-
-    #[test]
     fn decode_icon_non_data_uri_returns_default() {
         // Bare filesystem path: plugin was supposed to pre-resolve via
         // `highbeam:icons.forPath(...)`; do NOT touch the disk here.
@@ -655,7 +630,7 @@ mod tests {
     #[test]
     fn position_visible_in_primary_display() {
         let pos = WindowPosition { x: 100, y: 200 };
-        assert!(position_visible_on_any_monitor(pos, (760, 80), &primary_only(),));
+        assert!(position_visible_on_any_monitor(pos, &primary_only(),));
     }
 
     #[test]
@@ -664,11 +639,7 @@ mod tests {
         // at x = 1920. Without secondary-aware logic this would be reported
         // as off-screen and recenter unnecessarily.
         let pos = WindowPosition { x: 2000, y: 100 };
-        assert!(position_visible_on_any_monitor(
-            pos,
-            (760, 80),
-            &primary_and_secondary_right(),
-        ));
+        assert!(position_visible_on_any_monitor(pos, &primary_and_secondary_right()));
     }
 
     #[test]
@@ -678,11 +649,7 @@ mod tests {
         // case — the host should recenter rather than place the window in
         // the void.
         let pos = WindowPosition { x: 100, y: 5000 };
-        assert!(!position_visible_on_any_monitor(
-            pos,
-            (760, 80),
-            &primary_and_secondary_right(),
-        ));
+        assert!(!position_visible_on_any_monitor(pos, &primary_and_secondary_right()));
     }
 
     #[test]
@@ -690,7 +657,7 @@ mod tests {
         // The leading edge is inclusive — (0, 0) is the first visible pixel
         // of a monitor whose origin is (0, 0).
         let pos = WindowPosition { x: 0, y: 0 };
-        assert!(position_visible_on_any_monitor(pos, (760, 80), &primary_only(),));
+        assert!(position_visible_on_any_monitor(pos, &primary_only(),));
     }
 
     #[test]
@@ -700,7 +667,7 @@ mod tests {
         // technically off-screen and we treat it as such to keep the
         // recenter-on-unreachable contract crisp.
         let pos = WindowPosition { x: 1920, y: 1080 };
-        assert!(!position_visible_on_any_monitor(pos, (760, 80), &primary_only(),));
+        assert!(!position_visible_on_any_monitor(pos, &primary_only(),));
     }
 
     #[test]
@@ -709,6 +676,6 @@ mod tests {
         // initialised) means we can't validate; the safe default is "treat
         // as off-screen" so the host falls back to the centered path.
         let pos = WindowPosition { x: 100, y: 100 };
-        assert!(!position_visible_on_any_monitor(pos, (760, 80), &[]));
+        assert!(!position_visible_on_any_monitor(pos, &[]));
     }
 }

@@ -198,7 +198,10 @@ fn detect_reason(manifest_version: Option<&str>, recorded: Option<&str>) -> Opti
     }
 }
 
-async fn load_one(plugin_dir: &Path, settings: &Settings) -> Result<(LoadedPlugin, Option<LifecycleReason>), LoadError> {
+async fn load_one(
+    plugin_dir: &Path,
+    settings: &Settings,
+) -> Result<(LoadedPlugin, Option<LifecycleReason>), LoadError> {
     let manifest_path = plugin_dir.join("manifest.json");
     let read_path = manifest_path.clone();
     let bytes = tokio::task::spawn_blocking(move || std::fs::read(&read_path))

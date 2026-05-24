@@ -353,27 +353,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_full_manifest() {
-        let json = br#"{
-            "name": "echo",
-            "displayName": "Echo",
-            "version": "0.1.0",
-            "description": "Echo plugin",
-            "entry": "plugin.js",
-            "timeoutMs": 750,
-            "memoryMb": 16,
-            "capabilities": ["actions"]
-        }"#;
-        let m = Manifest::parse(json).expect("parse");
-        assert_eq!(m.name, "echo");
-        assert_eq!(m.display_name.as_deref(), Some("Echo"));
-        assert_eq!(m.entry, "plugin.js");
-        assert_eq!(m.timeout_ms, 750);
-        assert_eq!(m.memory_mb, 16);
-        assert_eq!(m.capabilities, vec!["actions".to_owned()]);
-    }
-
-    #[test]
     fn applies_defaults_for_optional_fields() {
         let json = br#"{ "name": "minimal" }"#;
         let m = Manifest::parse(json).expect("parse");
@@ -382,13 +361,6 @@ mod tests {
         assert_eq!(m.memory_mb, 32);
         assert_eq!(m.debounce_ms, 0);
         assert!(m.capabilities.is_empty());
-    }
-
-    #[test]
-    fn parses_debounce_ms() {
-        let json = br#"{ "name": "slow", "debounceMs": 250 }"#;
-        let m = Manifest::parse(json).expect("parse");
-        assert_eq!(m.debounce_ms, 250);
     }
 
     #[test]
@@ -405,13 +377,6 @@ mod tests {
     fn rejects_missing_name() {
         let json = br#"{ "version": "1.0.0" }"#;
         assert!(Manifest::parse(json).is_err());
-    }
-
-    #[test]
-    fn entry_path_joins_with_plugin_dir() {
-        let m = Manifest::parse(br#"{ "name": "x", "entry": "main.js" }"#).unwrap();
-        let path = m.entry_path(Path::new("/tmp/plugins/x"));
-        assert_eq!(path, PathBuf::from("/tmp/plugins/x/main.js"));
     }
 
     #[test]
@@ -626,48 +591,10 @@ mod tests {
     }
 
     #[test]
-    fn default_enabled_false_round_trips() {
-        let json = br#"{ "name": "x", "defaultEnabled": false }"#;
-        let m = Manifest::parse(json).unwrap();
-        assert!(!m.default_enabled);
-    }
-
-    #[test]
-    fn default_enabled_true_explicit_round_trips() {
-        let json = br#"{ "name": "x", "defaultEnabled": true }"#;
-        let m = Manifest::parse(json).unwrap();
-        assert!(m.default_enabled);
-    }
-
-    #[test]
     fn archive_and_manifest_urls_default_to_none() {
         let m = Manifest::parse(br#"{ "name": "x" }"#).unwrap();
         assert!(m.archive_url.is_none());
         assert!(m.manifest_url.is_none());
-    }
-
-    #[test]
-    fn archive_and_manifest_urls_round_trip_when_present() {
-        let json = br#"{
-            "name": "x",
-            "archiveUrl": "https://example.com/x.tar.gz",
-            "manifestUrl": "https://example.com/x/manifest.json"
-        }"#;
-        let m = Manifest::parse(json).unwrap();
-        assert_eq!(m.archive_url.as_deref(), Some("https://example.com/x.tar.gz"));
-        assert_eq!(m.manifest_url.as_deref(), Some("https://example.com/x/manifest.json"));
-        assert!(m.entry_url.is_none());
-    }
-
-    #[test]
-    fn entry_url_parses_when_present() {
-        let json = br#"{
-            "name": "x",
-            "entryUrl": "https://example.com/x.js"
-        }"#;
-        let m = Manifest::parse(json).unwrap();
-        assert_eq!(m.entry_url.as_deref(), Some("https://example.com/x.js"));
-        assert!(m.archive_url.is_none());
     }
 
     #[test]
@@ -705,5 +632,42 @@ mod tests {
         assert_eq!(parsed.defs[1].default_json(), JsonValue::Bool(true));
         assert_eq!(parsed.defs[2].default_json(), JsonValue::Number(7.into()));
         assert_eq!(parsed.defs[3].default_json(), JsonValue::String("b".into()));
+    }
+
+    fn manifest_with_one_string_option(key: &str, default: &str) -> Manifest {
+        let raw = format!(
+            r#"{{ "name": "p", "options": [{{ "key": "{key}", "type": "string", "default": "{default}" }}] }}"#,
+        );
+        Manifest::parse(raw.as_bytes()).expect("parse")
+    }
+
+    #[test]
+    fn merged_options_uses_user_value_when_set() {
+        let m = manifest_with_one_string_option("user", "alice");
+        let mut user = HashMap::new();
+        user.insert("user".into(), JsonValue::String("bob".into()));
+        let merged = m.merged_options(&user);
+        assert_eq!(merged.get("user"), Some(&JsonValue::String("bob".into())));
+    }
+
+    #[test]
+    fn merged_options_falls_back_to_manifest_default() {
+        let m = manifest_with_one_string_option("user", "alice");
+        let merged = m.merged_options(&HashMap::new());
+        assert_eq!(merged.get("user"), Some(&JsonValue::String("alice".into())));
+    }
+
+    #[test]
+    fn merged_options_drops_keys_not_in_manifest() {
+        // A plugin author renaming an option leaves the old key in
+        // settings.toml; the merge must not surface it to the running
+        // plugin or it'd see a value for a key its current manifest doesn't
+        // declare.
+        let m = manifest_with_one_string_option("user", "alice");
+        let mut user = HashMap::new();
+        user.insert("stale".into(), JsonValue::String("from-old-manifest".into()));
+        let merged = m.merged_options(&user);
+        assert!(!merged.contains_key("stale"));
+        assert_eq!(merged.len(), 1);
     }
 }

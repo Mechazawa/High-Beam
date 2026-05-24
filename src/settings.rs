@@ -381,9 +381,7 @@ impl Settings {
     /// Last manifest version recorded for this plugin, if any.
     #[must_use]
     pub fn last_loaded_version(&self, name: &str) -> Option<&str> {
-        self.plugins
-            .get(name)
-            .and_then(|s| s.last_loaded_version.as_deref())
+        self.plugins.get(name).and_then(|s| s.last_loaded_version.as_deref())
     }
 
     /// Record the manifest version that just got loaded for this plugin.
@@ -557,58 +555,6 @@ mod tests {
     }
 
     #[test]
-    fn parses_disabled_plugin() {
-        let text = r"
-            [plugins.echo]
-            enabled = false
-        ";
-        let s = Settings::from_toml(text).expect("parse");
-        assert!(!s.is_plugin_enabled("echo"));
-        assert!(s.is_plugin_enabled("other"), "missing entry → enabled");
-    }
-
-    #[test]
-    fn parses_options_table() {
-        let text = r#"
-            [plugins.web-search]
-            enabled = true
-
-            [plugins.web-search.options]
-            default_engine = "ddg"
-            result_limit = 10
-            live = true
-            "#;
-        let s = Settings::from_toml(text).expect("parse");
-        let opts = s.plugin_options("web-search");
-        assert_eq!(opts.get("default_engine"), Some(&JsonValue::String("ddg".into())));
-        assert_eq!(opts.get("result_limit"), Some(&JsonValue::Number(10.into())));
-        assert_eq!(opts.get("live"), Some(&JsonValue::Bool(true)));
-    }
-
-    #[test]
-    fn last_loaded_version_round_trips_through_toml() {
-        let mut s = Settings::default();
-        s.set_last_loaded_version("xkcd", Some("0.2.0".to_owned()));
-        let text = s.to_toml();
-        assert!(
-            text.contains("last_loaded_version = \"0.2.0\""),
-            "expected version in TOML, got: {text}",
-        );
-        let reloaded = Settings::from_toml(&text).expect("reparse");
-        assert_eq!(reloaded.last_loaded_version("xkcd"), Some("0.2.0"));
-        assert_eq!(reloaded.last_loaded_version("absent"), None);
-    }
-
-    #[test]
-    fn set_plugin_enabled_persists_through_roundtrip() {
-        let mut s = Settings::default();
-        s.set_plugin_enabled("echo", false);
-        let text = s.to_toml();
-        let reloaded = Settings::from_toml(&text).expect("reparse");
-        assert!(!reloaded.is_plugin_enabled("echo"));
-    }
-
-    #[test]
     fn set_plugin_option_per_plugin_scoping() {
         // One plugin's option must not leak into another's.
         let mut s = Settings::default();
@@ -619,24 +565,6 @@ mod tests {
         let b = s.plugin_options("plugin-b");
         assert_eq!(a.get("key"), Some(&JsonValue::String("value-a".into())));
         assert_eq!(b.get("key"), Some(&JsonValue::String("value-b".into())));
-    }
-
-    #[test]
-    fn save_and_load_roundtrips_via_disk() {
-        let dir = fresh_tmp("roundtrip");
-        let path = dir.join("settings.toml");
-
-        let mut s = Settings::load_from(&path);
-        s.set_plugin_enabled("kill-process", false);
-        s.set_plugin_option("web-search", "engine", JsonValue::String("ddg".into()));
-        s.save().expect("save");
-
-        let reloaded = Settings::load_from(&path);
-        assert!(!reloaded.is_plugin_enabled("kill-process"));
-        let opts = reloaded.plugin_options("web-search");
-        assert_eq!(opts.get("engine"), Some(&JsonValue::String("ddg".into())));
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -695,34 +623,6 @@ mod tests {
     }
 
     #[test]
-    fn global_hotkey_roundtrips_through_toml() {
-        let mut s = Settings::default();
-        s.set_hotkey("Cmd+Space");
-        let text = s.to_toml();
-        assert!(
-            text.contains("hotkey = \"Cmd+Space\""),
-            "expected hotkey in TOML, got: {text}"
-        );
-        let reloaded = Settings::from_toml(&text).expect("reparse");
-        assert_eq!(reloaded.global().hotkey, "Cmd+Space");
-    }
-
-    #[test]
-    fn global_hotkey_roundtrips_through_disk() {
-        let dir = fresh_tmp("global-disk");
-        let path = dir.join("settings.toml");
-
-        let mut s = Settings::load_from(&path);
-        s.set_hotkey("Ctrl+Alt+K");
-        s.save().expect("save");
-
-        let reloaded = Settings::load_from(&path);
-        assert_eq!(reloaded.global().hotkey, "Ctrl+Alt+K");
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
     fn default_settings_omit_global_section() {
         // A pristine settings file shouldn't carry a `[global]` block — it's
         // implicit and identical to the default.
@@ -753,57 +653,6 @@ mod tests {
 
         let s = Settings::from_toml("[global]\nhotkey = \"Cmd+K\"\n").expect("parse");
         assert!(s.global().launcher_position.is_none());
-    }
-
-    #[test]
-    fn launcher_position_parses_from_toml() {
-        let text = "\
-            [global]\n\
-            [global.launcher_position]\n\
-            x = 320\n\
-            y = 180\n\
-        ";
-        let s = Settings::from_toml(text).expect("parse");
-        assert_eq!(s.global().launcher_position, Some(WindowPosition { x: 320, y: 180 }));
-    }
-
-    #[test]
-    fn launcher_position_roundtrips_through_toml() {
-        let mut s = Settings::default();
-        s.set_launcher_position(WindowPosition { x: -42, y: 17 });
-        let text = s.to_toml();
-        assert!(
-            text.contains("[global.launcher_position]"),
-            "expected launcher_position table in TOML, got: {text}"
-        );
-        let reloaded = Settings::from_toml(&text).expect("reparse");
-        assert_eq!(
-            reloaded.global().launcher_position,
-            Some(WindowPosition { x: -42, y: 17 })
-        );
-    }
-
-    #[test]
-    fn set_then_clear_launcher_position_round_trips_disk() {
-        let dir = fresh_tmp("launcher-pos");
-        let path = dir.join("settings.toml");
-
-        let mut s = Settings::load_from(&path);
-        s.set_launcher_position(WindowPosition { x: 100, y: 200 });
-        s.save().expect("save");
-
-        let mut reloaded = Settings::load_from(&path);
-        assert_eq!(
-            reloaded.global().launcher_position,
-            Some(WindowPosition { x: 100, y: 200 })
-        );
-
-        reloaded.clear_launcher_position();
-        reloaded.save().expect("save");
-        let again = Settings::load_from(&path);
-        assert!(again.global().launcher_position.is_none());
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

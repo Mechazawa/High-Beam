@@ -10,9 +10,9 @@
 use std::process::Stdio;
 use std::time::Duration;
 
-use rquickjs::function::{Async, Opt, Rest};
 #[cfg(target_os = "macos")]
 use rquickjs::IntoJs;
+use rquickjs::function::{Async, Opt, Rest};
 use rquickjs::{Ctx, Function, Object, Result as JsResult, Value, module::ModuleDef};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;

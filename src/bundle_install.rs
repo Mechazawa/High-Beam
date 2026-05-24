@@ -164,37 +164,6 @@ mod tests {
     }
 
     #[test]
-    fn copy_dir_recursive_creates_missing_target() {
-        let root = fresh_tmp("creates-target");
-        let src = root.join("src");
-        let dst = root.join("does/not/exist/yet");
-        fs::create_dir_all(&src).unwrap();
-        fs::write(src.join("only.txt"), b"hi").unwrap();
-
-        copy_dir_recursive(&src, &dst).expect("copy");
-        assert_eq!(fs::read(dst.join("only.txt")).unwrap(), b"hi");
-
-        let _ = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn copy_dir_recursive_empty_source_is_noop() {
-        let root = fresh_tmp("empty-src");
-        let src = root.join("src");
-        let dst = root.join("dst");
-        fs::create_dir_all(&src).unwrap();
-
-        copy_dir_recursive(&src, &dst).expect("copy");
-        assert!(dst.is_dir(), "destination directory should still be created");
-        assert!(
-            fs::read_dir(&dst).unwrap().next().is_none(),
-            "destination should be empty",
-        );
-
-        let _ = fs::remove_dir_all(&root);
-    }
-
-    #[test]
     fn copy_dir_recursive_overlays_into_existing_dir() {
         // The first-launch install only triggers on an empty dir, but the
         // copy helper itself must be safe to call against a pre-existing

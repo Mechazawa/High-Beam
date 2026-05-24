@@ -415,11 +415,7 @@ impl LoadedPlugin {
     /// fires, signalling the runtime is being torn down). Outcome is
     /// recorded in `plugin.log`; nothing surfaces to the caller. No-op
     /// if the plugin didn't export the requested hook.
-    pub fn run_lifecycle_hook(
-        &self,
-        kind: HookKind,
-        reason: LifecycleReason,
-    ) -> tokio::task::JoinHandle<()> {
+    pub fn run_lifecycle_hook(&self, kind: HookKind, reason: LifecycleReason) -> tokio::task::JoinHandle<()> {
         if !self.has_hook(kind) {
             return tokio::spawn(async {});
         }
@@ -638,23 +634,14 @@ fn log_hook_outcome(
     match outcome {
         Ok(()) => log.write(
             LogLevel::Info,
-            &format!(
-                "hook {label}({reason_str}) completed in {:.1}s",
-                elapsed.as_secs_f32(),
-            ),
+            &format!("hook {label}({reason_str}) completed in {:.1}s", elapsed.as_secs_f32(),),
         ),
-        Err(PluginError::Cancelled) => log.write(
-            LogLevel::Info,
-            &format!("hook {label}({reason_str}) cancelled"),
-        ),
+        Err(PluginError::Cancelled) => log.write(LogLevel::Info, &format!("hook {label}({reason_str}) cancelled")),
         Err(err) => {
             // tracing line too so `tail -f plugins/*/plugin.log` isn't the
             // only way to notice a misbehaving hook in dev.
             tracing::warn!(plugin = %plugin_name, hook = label, reason = reason_str, %err, "plugin lifecycle hook failed");
-            log.write(
-                LogLevel::Error,
-                &format!("hook {label}({reason_str}) failed: {err}"),
-            );
+            log.write(LogLevel::Error, &format!("hook {label}({reason_str}) failed: {err}"));
         }
     }
 }

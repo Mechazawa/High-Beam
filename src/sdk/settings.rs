@@ -148,4 +148,3 @@ fn json_to_js<'js>(ctx: &Ctx<'js>, value: &JsonValue) -> JsResult<Value<'js>> {
         }
     }
 }
-

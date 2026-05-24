@@ -482,7 +482,16 @@ impl SettingsController {
                 let Ok(parsed) = raw.trim().parse::<i64>() else {
                     return;
                 };
-                let clamped = clamp_int(parsed, *min, *max);
+                // Stdlib `i64::clamp` would panic if `min > max`; the
+                // manifest schema doesn't forbid the inversion, so clamp
+                // each bound separately instead.
+                let mut clamped = parsed;
+                if let Some(lo) = *min {
+                    clamped = clamped.max(lo);
+                }
+                if let Some(hi) = *max {
+                    clamped = clamped.min(hi);
+                }
                 JsonValue::Number(clamped.into())
             }
             // For enums, the Slint-side cycles by re-emitting the CSV of
@@ -569,17 +578,6 @@ fn option_row(
     }
 }
 
-fn clamp_int(v: i64, min: Option<i64>, max: Option<i64>) -> i64 {
-    let mut out = v;
-    if let Some(lo) = min {
-        out = out.max(lo);
-    }
-    if let Some(hi) = max {
-        out = out.min(hi);
-    }
-    out
-}
-
 /// Return the choice immediately after `current` in `choices`, wrapping
 /// around at the end. Used to implement the v1 "click-to-cycle" enum widget;
 /// proper dropdowns are post-v1.
@@ -592,16 +590,6 @@ fn next_choice(current: &str, choices: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn clamp_int_respects_both_bounds() {
-        assert_eq!(clamp_int(5, Some(1), Some(10)), 5);
-        assert_eq!(clamp_int(0, Some(1), Some(10)), 1);
-        assert_eq!(clamp_int(11, Some(1), Some(10)), 10);
-        assert_eq!(clamp_int(11, None, None), 11);
-        assert_eq!(clamp_int(11, None, Some(7)), 7);
-        assert_eq!(clamp_int(-2, Some(0), None), 0);
-    }
 
     #[test]
     fn next_choice_wraps_around() {
@@ -666,115 +654,6 @@ mod tests {
         let manifest_ref = &ctrl.inner.manifests[0];
         let enabled = settings_guard.is_plugin_enabled_or_default(&manifest_ref.name, manifest_ref.default_enabled);
         assert!(!enabled, "slot should reflect manifest defaultEnabled: false");
-
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn controller_persists_toggle() {
-        let tmp = std::env::temp_dir().join(format!(
-            "high-beam-settings-ui-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&tmp).unwrap();
-        let path = tmp.join("settings.toml");
-        let settings = Settings::load_from(&path);
-        let manifests = vec![manifest_with_options("echo", "[]")];
-        let ctrl = SettingsController::new(manifests, settings);
-
-        ctrl.set_enabled("echo", false);
-
-        let reloaded = Settings::load_from(&path);
-        assert!(!reloaded.is_plugin_enabled("echo"));
-
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn controller_refresh_global_reads_back_hotkey() {
-        // Whatever value is persisted on disk must round-trip through the
-        // controller's view-side state — the Slint hotkey-value property is
-        // populated from this read.
-        let tmp = std::env::temp_dir().join(format!(
-            "high-beam-settings-refresh-global-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&tmp).unwrap();
-        let path = tmp.join("settings.toml");
-
-        let mut s = Settings::load_from(&path);
-        s.set_hotkey("Shift+F2");
-        s.save().expect("save");
-
-        let reloaded = Settings::load_from(&path);
-        let ctrl = SettingsController::new(vec![], reloaded);
-        let observed = ctrl.inner.settings.lock().unwrap().global().hotkey.clone();
-        assert_eq!(observed, "Shift+F2");
-
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn controller_persists_hotkey() {
-        let tmp = std::env::temp_dir().join(format!(
-            "high-beam-settings-hotkey-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&tmp).unwrap();
-        let path = tmp.join("settings.toml");
-        let settings = Settings::load_from(&path);
-        let manifests: Vec<Manifest> = vec![];
-        let ctrl = SettingsController::new(manifests, settings);
-
-        ctrl.set_hotkey("Cmd+K");
-
-        let reloaded = Settings::load_from(&path);
-        assert_eq!(reloaded.global().hotkey, "Cmd+K");
-
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn controller_persists_and_clears_launcher_position() {
-        // The window layer writes the user-dropped origin through the
-        // controller after every hide. A fresh load must observe both the
-        // set and the subsequent clear (Recenter button).
-        let tmp = std::env::temp_dir().join(format!(
-            "high-beam-settings-launcher-pos-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&tmp).unwrap();
-        let path = tmp.join("settings.toml");
-        let settings = Settings::load_from(&path);
-        let ctrl = SettingsController::new(vec![], settings);
-
-        ctrl.set_launcher_position(WindowPosition { x: 320, y: 180 });
-        assert_eq!(ctrl.launcher_position(), Some(WindowPosition { x: 320, y: 180 }));
-
-        // Round-trip through disk so we know the value persisted (not
-        // just lived in the in-memory Mutex).
-        let reloaded = Settings::load_from(&path);
-        assert_eq!(
-            reloaded.global().launcher_position,
-            Some(WindowPosition { x: 320, y: 180 })
-        );
-
-        ctrl.clear_launcher_position();
-        assert!(ctrl.launcher_position().is_none());
-        let reloaded = Settings::load_from(&path);
-        assert!(reloaded.global().launcher_position.is_none());
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

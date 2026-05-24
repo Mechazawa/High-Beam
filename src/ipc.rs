@@ -31,7 +31,9 @@ impl Command {
     fn as_wire(&self) -> String {
         match self {
             Self::Open { activation_token: None } => "open".to_owned(),
-            Self::Open { activation_token: Some(t) } => format!("open {t}"),
+            Self::Open {
+                activation_token: Some(t),
+            } => format!("open {t}"),
         }
     }
 

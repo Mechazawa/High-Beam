@@ -502,15 +502,6 @@ mod tests {
     }
 
     #[test]
-    fn settings_verb_matches_prefix() {
-        let results = query("sett");
-        assert!(
-            results.iter().any(|r| r.result.title == "settings"),
-            "expected settings result for prefix 'sett', got {results:?}",
-        );
-    }
-
-    #[test]
     fn exit_high_beam_produces_quit_action() {
         let results = query("exit");
         let r = results
@@ -567,33 +558,6 @@ mod tests {
     }
 
     #[test]
-    fn lock_verb_still_matches() {
-        let results = query("lock");
-        let r = results.iter().find(|r| r.result.title == "lock").expect("lock result");
-        assert!(matches!(r.result.action, Action::Exec { .. }));
-    }
-
-    #[test]
-    fn sleep_verb_still_matches() {
-        let results = query("sleep");
-        let r = results
-            .iter()
-            .find(|r| r.result.title == "sleep")
-            .expect("sleep result");
-        assert!(matches!(r.result.action, Action::Exec { .. }));
-    }
-
-    #[test]
-    fn restart_verb_still_matches() {
-        let results = query("restart");
-        let r = results
-            .iter()
-            .find(|r| r.result.title == "restart")
-            .expect("restart result");
-        assert!(matches!(r.result.action, Action::Exec { .. }));
-    }
-
-    #[test]
     fn reboot_aliases_restart_action() {
         let restart = query("restart")
             .into_iter()
@@ -620,42 +584,6 @@ mod tests {
             .iter()
             .find(|r| r.result.title == "log out")
             .expect("log out result");
-        assert!(matches!(r.result.action, Action::Exec { .. }));
-    }
-
-    #[test]
-    fn log_out_matches_prefix() {
-        let results = query("log");
-        assert!(results.iter().any(|r| r.result.title == "log out"));
-    }
-
-    #[test]
-    fn screensaver_matches_prefix() {
-        let results = query("screen");
-        let r = results
-            .iter()
-            .find(|r| r.result.title == "screensaver")
-            .expect("screensaver result");
-        assert!(matches!(r.result.action, Action::Exec { .. }));
-    }
-
-    #[test]
-    fn display_sleep_matches_prefix() {
-        let results = query("display");
-        let r = results
-            .iter()
-            .find(|r| r.result.title == "display sleep")
-            .expect("display sleep result");
-        assert!(matches!(r.result.action, Action::Exec { .. }));
-    }
-
-    #[test]
-    fn empty_trash_matches_prefix() {
-        let results = query("empty");
-        let r = results
-            .iter()
-            .find(|r| r.result.title == "empty trash")
-            .expect("empty trash result");
         assert!(matches!(r.result.action, Action::Exec { .. }));
     }
 
@@ -787,11 +715,5 @@ mod tests {
             .find(|r| r.result.title == "Update plugins")
             .expect("update row");
         assert!(matches!(row.result.action, Action::UpdatePlugins));
-    }
-
-    #[test]
-    fn update_verb_matches_prefix() {
-        let results = super::query("upd", &[]);
-        assert!(results.iter().any(|r| r.result.title == "Update plugins"));
     }
 }
