@@ -608,7 +608,7 @@ async fn run_hook<'js>(
         .map_err(|err| PluginError::Js(format!("call {label}(): {err}", label = kind.label())))?;
     let fut = promise.into_future::<()>();
 
-    tokio::select! {
+    let result = tokio::select! {
         biased;
         () = shutdown.cancelled() => {
             let _ = abort.cancel(ctx);
@@ -617,7 +617,14 @@ async fn run_hook<'js>(
         res = fut => res
             .catch(ctx)
             .map_err(|err| PluginError::Js(format!("await {label}(): {err}", label = kind.label()))),
+    };
+    // Cancel paths already disposed via `abort.cancel`; release only on
+    // the natural-completion arm. Either way the JS controller is now out
+    // of the registry.
+    if result.is_ok() {
+        let _ = abort.release(ctx);
     }
+    result
 }
 
 /// Map a hook outcome to a `plugin.log` line.
@@ -724,6 +731,10 @@ async fn stream_query<'js>(
             .map_err(|err| PluginError::Js(format!("read step.done: {err}")))?;
 
         if done {
+            // Natural completion: dispose the JS-side controller so the
+            // registry doesn't accumulate one entry per query over the
+            // plugin context's lifetime.
+            let _ = abort.release(&ctx);
             return Ok(());
         }
 

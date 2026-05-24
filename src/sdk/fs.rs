@@ -13,7 +13,7 @@ use rquickjs::{Ctx, Function, Object, Result as JsResult, TypedArray, Value, mod
 use tokio_util::sync::CancellationToken;
 
 use crate::sdk::abort;
-use crate::sdk::errors::{throw_abort, throw_cap, throw_named};
+use crate::sdk::errors::{cap_error_thrower, throw_abort, throw_cap, throw_named};
 
 const READ_DIR_GLOBAL: &str = "__highbeam_fs_read_dir";
 const READ_FILE_GLOBAL: &str = "__highbeam_fs_read_file";
@@ -53,17 +53,6 @@ impl ModuleDef for FsModule {
         }
         Ok(())
     }
-}
-
-fn cap_error_thrower<'js>(ctx: &Ctx<'js>, cap: &'static str) -> JsResult<Function<'js>> {
-    Function::new(
-        ctx.clone(),
-        Async(
-            move |ctx: Ctx<'js>, _args: rquickjs::function::Rest<Value<'js>>| async move {
-                Err::<(), _>(throw_cap(&ctx, cap))
-            },
-        ),
-    )
 }
 
 /// Install per-plugin bindings. Must run BEFORE the plugin's entry module

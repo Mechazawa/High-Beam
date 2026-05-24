@@ -11,10 +11,10 @@ use std::sync::Mutex;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use rquickjs::function::{Async, Opt, Rest};
+use rquickjs::function::{Async, Opt};
 use rquickjs::{Ctx, Function, Result as JsResult, Value, module::ModuleDef};
 
-use crate::sdk::errors::{throw_cap, throw_named};
+use crate::sdk::errors::{cap_error_thrower, throw_cap, throw_named};
 
 const FOR_PATH_GLOBAL: &str = "__highbeam_icons_for_path";
 
@@ -31,15 +31,9 @@ impl ModuleDef for IconsModule {
             .globals()
             .get(FOR_PATH_GLOBAL)
             .unwrap_or_else(|_| Value::new_undefined(ctx.clone()));
-        let f = if let Some(f) = val.into_function() {
-            f
-        } else {
-            Function::new(
-                ctx.clone(),
-                Async(
-                    |ctx: Ctx<'js>, _args: Rest<Value<'js>>| async move { Err::<String, _>(throw_cap(&ctx, "icons")) },
-                ),
-            )?
+        let f = match val.into_function() {
+            Some(f) => f,
+            None => cap_error_thrower(ctx, "icons")?,
         };
         exports.export("forPath", f)?;
         Ok(())

@@ -11,7 +11,7 @@
 use rquickjs::function::Async;
 use rquickjs::{Ctx, Function, Result as JsResult, Value, module::ModuleDef};
 
-use crate::sdk::errors::{throw_cap, throw_named};
+use crate::sdk::errors::{cap_error_thrower, throw_cap, throw_named};
 
 const READ_GLOBAL: &str = "__highbeam_clipboard_read";
 const WRITE_GLOBAL: &str = "__highbeam_clipboard_write";
@@ -39,21 +39,13 @@ impl ModuleDef for ClipboardModule {
             .get(WRITE_GLOBAL)
             .unwrap_or_else(|_| Value::new_undefined(ctx.clone()));
 
-        let read_fn = if let Some(f) = read_val.into_function() {
-            f
-        } else {
-            Function::new(
-                ctx.clone(),
-                Async(|ctx: Ctx<'js>| async move { Err::<(), _>(throw_cap(&ctx, "clipboard.read")) }),
-            )?
+        let read_fn = match read_val.into_function() {
+            Some(f) => f,
+            None => cap_error_thrower(ctx, "clipboard.read")?,
         };
-        let write_fn = if let Some(f) = write_val.into_function() {
-            f
-        } else {
-            Function::new(
-                ctx.clone(),
-                Async(|ctx: Ctx<'js>, _text: String| async move { Err::<(), _>(throw_cap(&ctx, "clipboard.write")) }),
-            )?
+        let write_fn = match write_val.into_function() {
+            Some(f) => f,
+            None => cap_error_thrower(ctx, "clipboard.write")?,
         };
         exports.export("read", read_fn)?;
         exports.export("write", write_fn)?;

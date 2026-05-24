@@ -57,8 +57,10 @@ impl ProgressEmitter {
         }
     }
 
-    /// Push (or replace by `key`) one progress row and re-render.
-    fn emit(&self, key: &str, title: String, subtitle: Option<String>, action: plugins::result::Action) {
+    /// Push (or replace by `key`) one progress row and re-render. Progress
+    /// rows are inert — Enter is a no-op — because they communicate
+    /// background-task state, not actionable choices.
+    fn emit(&self, key: &str, title: String, subtitle: Option<String>) {
         // Skip the paint if another query/task has already taken over —
         // late-arriving progress for an abandoned task shouldn't repaint.
         if self.query_id < self.latest_id.load(Ordering::Relaxed) {
@@ -73,7 +75,7 @@ impl ProgressEmitter {
                 icon: None,
                 weight: 100.0,
                 pinned: true,
-                action,
+                action: plugins::result::Action::Noop,
                 alt_action: None,
                 alt_title: None,
                 alt_subtitle: None,
@@ -138,7 +140,6 @@ async fn run_install(
         "install",
         format!("Installing {url}…"),
         Some("fetching manifest".to_owned()),
-        plugins::result::Action::Noop,
     );
     install_pipeline(url, "install", None, registry, progress, confirm_state, weak, settings).await
 }
@@ -163,12 +164,7 @@ async fn install_pipeline(
     let manifest = match plugins::install::fetch_and_validate_manifest(url).await {
         Ok(m) => m,
         Err(err) => {
-            progress.emit(
-                progress_key,
-                "Install failed".to_owned(),
-                Some(err.to_string()),
-                plugins::result::Action::Noop,
-            );
+            progress.emit(progress_key, "Install failed".to_owned(), Some(err.to_string()));
             return None;
         }
     };
@@ -176,12 +172,7 @@ async fn install_pipeline(
     // Gate on user confirmation before downloading anything.
     let confirmed = request_confirmation(&manifest, url, installed_caps, confirm_state, weak).await;
     if !confirmed {
-        progress.emit(
-            progress_key,
-            format!("Install {} cancelled", manifest.name),
-            None,
-            plugins::result::Action::Noop,
-        );
+        progress.emit(progress_key, format!("Install {} cancelled", manifest.name), None);
         return None;
     }
 
@@ -359,7 +350,6 @@ async fn stage_from_archive(
         progress_key,
         format!("Installing {plugin_name} v{plugin_version}…"),
         Some(format!("downloading {archive_url}")),
-        plugins::result::Action::Noop,
     );
     let (bytes, format) = match plugins::install::download_archive(archive_url).await {
         Ok(pair) => pair,
@@ -401,7 +391,6 @@ async fn stage_from_entry(
         progress_key,
         format!("Installing {plugin_name} v{plugin_version}…"),
         Some(format!("downloading {entry_url}")),
-        plugins::result::Action::Noop,
     );
     let bytes = match plugins::install::download_entry(entry_url).await {
         Ok(b) => b,
@@ -494,7 +483,6 @@ async fn finalize_install(ctx: FinalizeCtx<'_>) -> Option<String> {
         progress_key,
         format!("Loading {plugin_name} v{plugin_version}…"),
         Some(installed_path.display().to_string()),
-        plugins::result::Action::Noop,
     );
 
     match loader::load_one_for_reload(&installed_path, &settings.snapshot()).await {
@@ -513,7 +501,6 @@ async fn finalize_install(ctx: FinalizeCtx<'_>) -> Option<String> {
                 progress_key,
                 format!("Installed {plugin_name} v{plugin_version}"),
                 Some("ready to use".to_owned()),
-                plugins::result::Action::Noop,
             );
             Some(plugin_name.to_owned())
         }
@@ -522,7 +509,6 @@ async fn finalize_install(ctx: FinalizeCtx<'_>) -> Option<String> {
                 progress_key,
                 format!("Installed {plugin_name} but load failed"),
                 Some(err),
-                plugins::result::Action::Noop,
             );
             None
         }
@@ -534,7 +520,6 @@ fn emit_install_failure(progress: &ProgressEmitter, progress_key: &str, plugin_n
         progress_key,
         format!("Install {plugin_name} failed"),
         Some(detail.to_owned()),
-        plugins::result::Action::Noop,
     );
 }
 
@@ -551,7 +536,6 @@ async fn run_update_all(
             "update-summary",
             "No plugins loaded".to_owned(),
             Some("nothing to update".to_owned()),
-            plugins::result::Action::Noop,
         );
         return;
     }
@@ -568,30 +552,19 @@ async fn run_update_all(
                 &key,
                 format!("Skipped {}", plugin.manifest.name),
                 Some("no manifestUrl — plugin opts out of updates".to_owned()),
-                plugins::result::Action::Noop,
             );
             continue;
         };
 
         let name = plugin.manifest.name.clone();
         let key = format!("update-{name}");
-        progress.emit(
-            &key,
-            format!("Checking {name}…"),
-            Some(manifest_url.clone()),
-            plugins::result::Action::Noop,
-        );
+        progress.emit(&key, format!("Checking {name}…"), Some(manifest_url.clone()));
 
         let remote = match plugins::install::fetch_and_validate_manifest(&manifest_url).await {
             Ok(m) => m,
             Err(err) => {
                 failed += 1;
-                progress.emit(
-                    &key,
-                    format!("Update check failed: {name}"),
-                    Some(err.to_string()),
-                    plugins::result::Action::Noop,
-                );
+                progress.emit(&key, format!("Update check failed: {name}"), Some(err.to_string()));
                 continue;
             }
         };
@@ -600,12 +573,7 @@ async fn run_update_all(
 
         if !plugins::manifest::is_newer_version(&remote_version, &local_version) {
             up_to_date += 1;
-            progress.emit(
-                &key,
-                format!("Up to date: {name} v{local_version}"),
-                None,
-                plugins::result::Action::Noop,
-            );
+            progress.emit(&key, format!("Up to date: {name} v{local_version}"), None);
             continue;
         }
 
@@ -613,7 +581,6 @@ async fn run_update_all(
             &key,
             format!("Updating {name} v{local_version} → v{remote_version}…"),
             None,
-            plugins::result::Action::Noop,
         );
 
         // Only prompt if the update introduces new capabilities.
@@ -642,7 +609,6 @@ async fn run_update_all(
         "update-summary",
         format!("Update complete — {updated} updated, {up_to_date} up to date, {failed} failed"),
         None,
-        plugins::result::Action::Noop,
     );
 }
 
@@ -668,12 +634,7 @@ async fn run_reload(
     let settings_snapshot = settings.snapshot();
     match name {
         None => {
-            progress.emit(
-                "reload-all",
-                "Reloading all plugins…".to_owned(),
-                None,
-                plugins::result::Action::Noop,
-            );
+            progress.emit("reload-all", "Reloading all plugins…".to_owned(), None);
             let outcomes = registry.reload_all(&settings_snapshot).await;
             // The `reload` verb forces every fresh plugin's hook to fire
             // with `Reload`, regardless of whether the manifest version
@@ -688,17 +649,11 @@ async fn run_reload(
                 } else {
                     names.join(", ")
                 }),
-                plugins::result::Action::Noop,
             );
         }
         Some(target) => {
             let key = format!("reload-{target}");
-            progress.emit(
-                &key,
-                format!("Reloading {target}…"),
-                None,
-                plugins::result::Action::Noop,
-            );
+            progress.emit(&key, format!("Reloading {target}…"), None);
             match registry.reload_one(&target, &settings_snapshot).await {
                 Ok(plugin) => {
                     let version = plugin.manifest.version.clone();
@@ -710,20 +665,10 @@ async fn run_reload(
                         LifecycleReason::Reload,
                         settings,
                     );
-                    progress.emit(
-                        &key,
-                        format!("Reloaded {target}"),
-                        version.map(|v| format!("v{v}")),
-                        plugins::result::Action::Noop,
-                    );
+                    progress.emit(&key, format!("Reloaded {target}"), version.map(|v| format!("v{v}")));
                 }
                 Err(err) => {
-                    progress.emit(
-                        &key,
-                        format!("Failed to reload {target}"),
-                        Some(err.to_string()),
-                        plugins::result::Action::Noop,
-                    );
+                    progress.emit(&key, format!("Failed to reload {target}"), Some(err.to_string()));
                 }
             }
         }

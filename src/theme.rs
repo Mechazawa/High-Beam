@@ -47,16 +47,19 @@ pub struct Window {
 
 impl Default for Colors {
     fn default() -> Self {
+        // These hex literals are the runtime source of truth — the bundled
+        // `themes/yosemite-spotlight.toml` and the .slint property defaults
+        // exist for parity; only Rust reads at runtime. `expect` (not
+        // `unwrap`) so a typo in one of these literals panics with a
+        // message that names the offender at the panic site.
+        let parse = |hex: &str| parse_hex_color(hex).unwrap_or_else(|| panic!("default theme: invalid hex {hex:?}"));
         Self {
-            // These hex literals are the runtime source of truth — the
-            // bundled `themes/yosemite-spotlight.toml` and the .slint
-            // property defaults exist for parity; only Rust reads at runtime.
-            background: parse_hex_color("#ffffffea").unwrap(),
-            foreground: parse_hex_color("#1d1d1f").unwrap(),
-            muted: parse_hex_color("#86868b").unwrap(),
-            highlight: parse_hex_color("#0a84ff").unwrap(),
-            selection: parse_hex_color("#0a84ff33").unwrap(),
-            border: parse_hex_color("#00000010").unwrap(),
+            background: parse("#ffffffea"),
+            foreground: parse("#1d1d1f"),
+            muted: parse("#86868b"),
+            highlight: parse("#0a84ff"),
+            selection: parse("#0a84ff33"),
+            border: parse("#00000010"),
         }
     }
 }

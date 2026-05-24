@@ -12,14 +12,14 @@ use std::time::Duration;
 
 #[cfg(target_os = "macos")]
 use rquickjs::IntoJs;
-use rquickjs::function::{Async, Opt, Rest};
+use rquickjs::function::{Async, Opt};
 use rquickjs::{Ctx, Function, Object, Result as JsResult, Value, module::ModuleDef};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
 use crate::sdk::abort;
-use crate::sdk::errors::{throw_abort, throw_cap, throw_named};
+use crate::sdk::errors::{cap_error_thrower, throw_abort, throw_cap, throw_named};
 
 const EXEC_GLOBAL: &str = "__highbeam_system_exec";
 const APPLESCRIPT_GLOBAL: &str = "__highbeam_system_applescript";
@@ -42,28 +42,16 @@ impl ModuleDef for SystemModule {
         let exec_val: Value<'js> = globals
             .get(EXEC_GLOBAL)
             .unwrap_or_else(|_| Value::new_undefined(ctx.clone()));
-        let exec_fn = if let Some(f) = exec_val.into_function() {
-            f
-        } else {
-            Function::new(
-                ctx.clone(),
-                Async(|ctx: Ctx<'js>, _args: Rest<Value<'js>>| async move {
-                    Err::<Value<'js>, _>(throw_cap(&ctx, "system.exec"))
-                }),
-            )?
-        };
         let applescript_val: Value<'js> = globals
             .get(APPLESCRIPT_GLOBAL)
             .unwrap_or_else(|_| Value::new_undefined(ctx.clone()));
-        let applescript_fn = if let Some(f) = applescript_val.into_function() {
-            f
-        } else {
-            Function::new(
-                ctx.clone(),
-                Async(|ctx: Ctx<'js>, _args: Rest<Value<'js>>| async move {
-                    Err::<Value<'js>, _>(throw_cap(&ctx, "system.applescript"))
-                }),
-            )?
+        let exec_fn = match exec_val.into_function() {
+            Some(f) => f,
+            None => cap_error_thrower(ctx, "system.exec")?,
+        };
+        let applescript_fn = match applescript_val.into_function() {
+            Some(f) => f,
+            None => cap_error_thrower(ctx, "system.applescript")?,
         };
         exports.export("exec", exec_fn)?;
         exports.export("applescript", applescript_fn)?;

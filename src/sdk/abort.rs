@@ -23,9 +23,17 @@ const ABORT_CREATE_JS: &str = include_str!("js/abort_create.js");
 
 const ABORT_FIRE_JS: &str = include_str!("js/abort_fire.js");
 
+const ABORT_RELEASE_JS: &str = include_str!("js/abort_release.js");
+
 /// Host handle for one signal. Owns a [`CancellationToken`] mirrored by the
 /// JS controller's abort state plus an opaque controller id used by
 /// [`Abort::cancel`] to flip the JS side from Rust.
+///
+/// The JS-side controller stays in the global registry until either
+/// [`Abort::cancel`] (cancel path) or [`Abort::release`] (success path) is
+/// called. Failing to call one of them leaves the registry entry alive for
+/// the remainder of the plugin context's lifetime — a slow leak, not UB,
+/// but worth avoiding.
 pub struct Abort {
     token: CancellationToken,
     controller_id: i64,
@@ -62,14 +70,18 @@ impl Abort {
         self.token.is_cancelled()
     }
 
-    /// Flip the abort flag. Fires JS-side listeners AND the Rust-side token.
-    /// Idempotent. Must be called from inside an `async_with!` block.
+    /// Flip the abort flag and drop the JS registry entry. Fires JS-side
+    /// listeners AND the Rust-side token. Idempotent. Must be called from
+    /// inside an `async_with!` block.
     ///
     /// # Errors
     ///
     /// Propagates errors from invoking the JS-side controller's `abort()`.
     pub fn cancel(&self, ctx: &Ctx<'_>) -> Result<(), JsError> {
         if self.token.is_cancelled() {
+            // Cancellation is idempotent, but `release` isn't — only call it
+            // on the first cancel so a repeat call doesn't double-evaluate
+            // the JS snippet.
             return Ok(());
         }
         self.token.cancel();
@@ -77,6 +89,25 @@ impl Abort {
         fire.call::<_, ()>((self.controller_id,))
             .catch(ctx)
             .map_err(|err| JsError::new_loading_message("abort", format!("fire listeners: {err}")))?;
+        self.release(ctx)?;
+        Ok(())
+    }
+
+    /// Drop the JS registry entry without firing listeners. The success-path
+    /// counterpart to [`Self::cancel`]: when work completes naturally, the
+    /// plugin doesn't need to observe an abort, but we still want the
+    /// controller out of the registry so memory doesn't grow with query
+    /// count over the plugin's lifetime.
+    ///
+    /// # Errors
+    ///
+    /// Propagates errors from the JS-side `delete`.
+    pub fn release(&self, ctx: &Ctx<'_>) -> Result<(), JsError> {
+        let release: Function<'_> = ctx.eval(ABORT_RELEASE_JS)?;
+        release
+            .call::<_, ()>((self.controller_id,))
+            .catch(ctx)
+            .map_err(|err| JsError::new_loading_message("abort", format!("release controller: {err}")))?;
         Ok(())
     }
 }
@@ -186,6 +217,34 @@ mod tests {
                 assert!(observed, "JS listener did not fire");
                 let aborted: bool = signal.get("aborted").expect("read aborted");
                 assert!(aborted, "signal.aborted is false after abort()");
+            })
+            .await;
+        });
+    }
+
+    #[test]
+    fn release_drops_controller_from_registry() {
+        // Memory hygiene: every Abort::create registers a controller in the
+        // JS-side global map. Without release (or cancel, which also
+        // releases), the registry grows unboundedly over a plugin context's
+        // lifetime. Build two abort handles, release one, assert the
+        // registry contains only the other.
+        let runtime = rt();
+        runtime.block_on(async {
+            let async_rt = AsyncRuntime::new().expect("rt");
+            let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
+            async_with!(ctx => |ctx| {
+                let (keep, _signal_keep) = Abort::create(&ctx).expect("create keep");
+                let (drop_, _signal_drop) = Abort::create(&ctx).expect("create drop");
+                let size_before: i32 = ctx.eval("globalThis.__highbeam_abort_registry.controllers.size").expect("eval");
+                assert_eq!(size_before, 2);
+                drop_.release(&ctx).expect("release");
+                let size_after: i32 = ctx.eval("globalThis.__highbeam_abort_registry.controllers.size").expect("eval");
+                assert_eq!(size_after, 1, "release should drop one entry");
+                // `keep` is intentionally not released — without that, the
+                // registry-shrink assertion above wouldn't discriminate
+                // between "release worked" and "create never ran".
+                drop(keep);
             })
             .await;
         });
