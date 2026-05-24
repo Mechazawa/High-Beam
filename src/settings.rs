@@ -124,6 +124,12 @@ pub struct PluginSettings {
     /// scalar shapes the manifest declares (`string`/`bool`/`int`/`enum`)
     /// without each consumer needing to branch on the option's declared type.
     pub options: HashMap<String, JsonValue>,
+    /// Manifest `version` we last loaded for this plugin. Used by the
+    /// lifecycle-hook layer to tell "first install" from "version bump" — a
+    /// load that finds this `None` infers `Install`, a load that finds a
+    /// different value infers `Update`. `None` when the plugin was never
+    /// loaded (or pre-dates this field).
+    pub last_loaded_version: Option<String>,
 }
 
 impl PluginSettings {
@@ -134,6 +140,7 @@ impl PluginSettings {
         Self {
             enabled: true,
             options: HashMap::new(),
+            last_loaded_version: None,
         }
     }
 }
@@ -207,6 +214,7 @@ impl Settings {
                         .options
                         .map(|tbl| tbl.into_iter().map(|(k, v)| (k, toml_to_json(v))).collect())
                         .unwrap_or_default(),
+                    last_loaded_version: slot.last_loaded_version,
                 };
                 (name, plugin)
             })
@@ -260,6 +268,7 @@ impl Settings {
                 let raw = PluginSlotFile {
                     enabled: Some(slot.enabled),
                     options,
+                    last_loaded_version: slot.last_loaded_version.clone(),
                 };
                 (name.clone(), raw)
             })
@@ -369,6 +378,24 @@ impl Settings {
         slot.enabled = enabled;
     }
 
+    /// Last manifest version recorded for this plugin, if any.
+    #[must_use]
+    pub fn last_loaded_version(&self, name: &str) -> Option<&str> {
+        self.plugins
+            .get(name)
+            .and_then(|s| s.last_loaded_version.as_deref())
+    }
+
+    /// Record the manifest version that just got loaded for this plugin.
+    /// Pass `None` to clear (e.g. on uninstall).
+    pub fn set_last_loaded_version(&mut self, name: &str, version: Option<String>) {
+        let slot = self
+            .plugins
+            .entry(name.to_owned())
+            .or_insert_with(PluginSettings::enabled_default);
+        slot.last_loaded_version = version;
+    }
+
     /// Set one option value for one plugin. Other plugins' option bags are
     /// untouched — scoping is per-plugin.
     pub fn set_plugin_option(&mut self, plugin: &str, key: &str, value: JsonValue) {
@@ -461,6 +488,8 @@ struct PluginSlotFile {
     enabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     options: Option<toml::value::Table>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_loaded_version: Option<String>,
 }
 
 /// Path the daemon reads on startup. `None` when the project dir can't be
@@ -554,6 +583,20 @@ mod tests {
         assert_eq!(opts.get("default_engine"), Some(&JsonValue::String("ddg".into())));
         assert_eq!(opts.get("result_limit"), Some(&JsonValue::Number(10.into())));
         assert_eq!(opts.get("live"), Some(&JsonValue::Bool(true)));
+    }
+
+    #[test]
+    fn last_loaded_version_round_trips_through_toml() {
+        let mut s = Settings::default();
+        s.set_last_loaded_version("xkcd", Some("0.2.0".to_owned()));
+        let text = s.to_toml();
+        assert!(
+            text.contains("last_loaded_version = \"0.2.0\""),
+            "expected version in TOML, got: {text}",
+        );
+        let reloaded = Settings::from_toml(&text).expect("reparse");
+        assert_eq!(reloaded.last_loaded_version("xkcd"), Some("0.2.0"));
+        assert_eq!(reloaded.last_loaded_version("absent"), None);
     }
 
     #[test]

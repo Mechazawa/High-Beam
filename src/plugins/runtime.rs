@@ -20,6 +20,7 @@ use serde_json::Value as JsonValue;
 
 use rquickjs::function::This;
 use rquickjs::loader::{Loader, Resolver};
+use rquickjs::module::Evaluated;
 use rquickjs::{
     AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Error as JsError, Function, IntoJs, Module, Object, Promise,
     Value, async_with,
@@ -63,6 +64,69 @@ const SETTINGS_MODULE: &str = "highbeam:settings";
 /// `Persistent<Function<'static>>` holds a raw `!Send` pointer that can't
 /// cross `async_with!` under rquickjs's `parallel` feature.
 const QUERY_GLOBAL: &str = "__highbeam_query";
+/// Slots for the optional lifecycle hooks. Same reasoning as `QUERY_GLOBAL` —
+/// the JS Function handle can't escape its evaluating context.
+const ON_ENABLE_GLOBAL: &str = "__highbeam_on_enable";
+const ON_DISABLE_GLOBAL: &str = "__highbeam_on_disable";
+
+/// Which lifecycle hook to dispatch.
+#[derive(Debug, Clone, Copy)]
+pub enum HookKind {
+    Enable,
+    Disable,
+}
+
+impl HookKind {
+    fn js_global(self) -> &'static str {
+        match self {
+            Self::Enable => ON_ENABLE_GLOBAL,
+            Self::Disable => ON_DISABLE_GLOBAL,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Enable => "onEnable",
+            Self::Disable => "onDisable",
+        }
+    }
+}
+
+/// Why a lifecycle hook is firing. Forwarded to the JS hook as the first
+/// argument; the enum is `camelCase` on the JS side to match the existing
+/// plugin-result serialisation style.
+///
+/// `Enable` / `Disable` are reserved for a future live-toggle path and are
+/// not produced by any current code path — present so the JS API doesn't
+/// need to be widened later.
+#[derive(Debug, Clone, Copy)]
+pub enum LifecycleReason {
+    /// First time the host has seen this plugin (no recorded
+    /// `last_loaded_version`).
+    Install,
+    /// Manifest `version` changed since the last load.
+    Update,
+    /// Manual `reload` verb (dev iteration).
+    Reload,
+    /// Reserved: user flipped the enabled toggle live. Not currently produced.
+    #[allow(dead_code)]
+    Enable,
+    /// Reserved: user flipped the disabled toggle live. Not currently produced.
+    #[allow(dead_code)]
+    Disable,
+}
+
+impl LifecycleReason {
+    fn as_js_str(self) -> &'static str {
+        match self {
+            Self::Install => "install",
+            Self::Update => "update",
+            Self::Reload => "reload",
+            Self::Enable => "enable",
+            Self::Disable => "disable",
+        }
+    }
+}
 
 /// A loaded, evaluated plugin ready to handle queries.
 ///
@@ -79,6 +143,14 @@ pub struct LoadedPlugin {
     // Mirrors what the interrupt hook captures; we keep the Arc alive here.
     interrupt_flag: Arc<AtomicBool>,
     log: Arc<PluginLog>,
+    /// Whether the plugin exported an `onEnable` function.
+    has_on_enable: bool,
+    /// Whether the plugin exported an `onDisable` function.
+    has_on_disable: bool,
+    /// Fires when this plugin is being torn down (e.g. registry swap, daemon
+    /// shutdown). Lifecycle hook tasks observe this and forward it to the
+    /// JS-side `AbortSignal` they hand to the plugin.
+    shutdown: CancellationToken,
 }
 
 /// Errors surfaced while loading or running a plugin.
@@ -216,7 +288,7 @@ impl LoadedPlugin {
         let plugin_caps = manifest.capabilities.clone();
         let plugin_dir_owned = plugin_dir.to_path_buf();
         let log_for_ctx = Arc::clone(&log);
-        async_with!(context => |ctx| {
+        let exports = async_with!(context => |ctx| {
             install_host_globals(
                 &ctx,
                 &log_for_ctx,
@@ -247,7 +319,14 @@ impl LoadedPlugin {
                 .set(QUERY_GLOBAL, query)
                 .catch(&ctx)
                 .map_err(|err| PluginError::Js(format!("stash query global: {err}")))?;
-            Ok::<_, PluginError>(())
+
+            // onEnable / onDisable are optional — a `module.get` for a
+            // missing export raises, so swallow that into a `None` rather
+            // than treating it as a hard error.
+            let has_on_enable = stash_optional_hook(&ctx, &module, "onEnable", ON_ENABLE_GLOBAL)?;
+            let has_on_disable = stash_optional_hook(&ctx, &module, "onDisable", ON_DISABLE_GLOBAL)?;
+
+            Ok::<_, PluginError>(ExportFlags { has_on_enable, has_on_disable })
         })
         .await?;
 
@@ -259,6 +338,9 @@ impl LoadedPlugin {
             timeout,
             interrupt_flag,
             log,
+            has_on_enable: exports.has_on_enable,
+            has_on_disable: exports.has_on_disable,
+            shutdown: CancellationToken::new(),
         })
     }
 
@@ -327,6 +409,45 @@ impl LoadedPlugin {
 
         rx
     }
+
+    /// Whether this plugin exported the requested hook. Callers can skip
+    /// scheduling work for plugins that won't react.
+    #[must_use]
+    pub fn has_hook(&self, kind: HookKind) -> bool {
+        match kind {
+            HookKind::Enable => self.has_on_enable,
+            HookKind::Disable => self.has_on_disable,
+        }
+    }
+
+    /// Fire one lifecycle hook in the background.
+    ///
+    /// Returns immediately with a `JoinHandle` the caller may drop — the
+    /// task runs to completion (or until the plugin's `shutdown` token
+    /// fires, signalling the runtime is being torn down). Outcome is
+    /// recorded in `plugin.log`; nothing surfaces to the caller. No-op
+    /// if the plugin didn't export the requested hook.
+    pub fn run_lifecycle_hook(
+        &self,
+        kind: HookKind,
+        reason: LifecycleReason,
+    ) -> tokio::task::JoinHandle<()> {
+        if !self.has_hook(kind) {
+            return tokio::spawn(async {});
+        }
+        let context = self.context.clone();
+        let log = Arc::clone(&self.log);
+        let shutdown = self.shutdown.clone();
+        let plugin_name = self.manifest.name.clone();
+        tokio::spawn(async move {
+            let started = std::time::Instant::now();
+            let outcome: Result<(), PluginError> = async_with!(context => |ctx| {
+                run_hook(&ctx, kind, reason, &shutdown).await
+            })
+            .await;
+            log_hook_outcome(&log, &plugin_name, kind, reason, &outcome, started.elapsed());
+        })
+    }
 }
 
 impl Drop for LoadedPlugin {
@@ -339,7 +460,35 @@ impl Drop for LoadedPlugin {
         // ever go parallel, this reset must move into the constructor
         // (where the new plugin owns a fresh AtomicBool) instead.
         self.interrupt_flag.store(false, Ordering::Relaxed);
+        // Tells any still-running lifecycle hook task it's time to wind
+        // down — the JS-side AbortSignal gets fired by the task itself.
+        self.shutdown.cancel();
     }
+}
+
+/// Set of hook exports we found on the plugin's entry module.
+struct ExportFlags {
+    has_on_enable: bool,
+    has_on_disable: bool,
+}
+
+/// Try to read an optional `Function` export from `module` and stash it on
+/// the JS globals under `global_name`. Returns `true` when the export was
+/// present.
+fn stash_optional_hook<'js>(
+    ctx: &Ctx<'js>,
+    module: &Module<'js, Evaluated>,
+    export_name: &str,
+    global_name: &str,
+) -> Result<bool, PluginError> {
+    let Ok(func) = module.get::<_, Function<'js>>(export_name) else {
+        return Ok(false);
+    };
+    ctx.globals()
+        .set(global_name, func)
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("stash {export_name} global: {err}")))?;
+    Ok(true)
 }
 
 /// Install every host-side global the plugin's `query` body might touch
@@ -441,6 +590,85 @@ fn log_query_outcome(
     }
 
     log.write(LogLevel::Error, &format!("query threw: {msg}; input: {input:?}"));
+}
+
+/// Call one lifecycle hook and await its returned Promise.
+///
+/// Builds a fresh `AbortSignal` whose cancellation tracks `shutdown` so the
+/// plugin's JS code can observe daemon-shutdown / plugin-tear-down via the
+/// same `signal.aborted` shape it sees in `query`.
+async fn run_hook<'js>(
+    ctx: &Ctx<'js>,
+    kind: HookKind,
+    reason: LifecycleReason,
+    shutdown: &CancellationToken,
+) -> Result<(), PluginError> {
+    let hook: Function<'js> = ctx
+        .globals()
+        .get(kind.js_global())
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("{label} not callable: {err}", label = kind.label())))?;
+
+    let (abort, signal) = Abort::create(ctx)
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("build signal: {err}")))?;
+
+    let reason_js = reason
+        .as_js_str()
+        .into_js(ctx)
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("convert reason: {err}")))?;
+    let promise: Promise<'js> = hook
+        .call((reason_js, signal.clone()))
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("call {label}(): {err}", label = kind.label())))?;
+    let fut = promise.into_future::<()>();
+
+    tokio::select! {
+        biased;
+        () = shutdown.cancelled() => {
+            let _ = abort.cancel(ctx);
+            Err(PluginError::Cancelled)
+        }
+        res = fut => res
+            .catch(ctx)
+            .map_err(|err| PluginError::Js(format!("await {label}(): {err}", label = kind.label()))),
+    }
+}
+
+/// Map a hook outcome to a `plugin.log` line.
+fn log_hook_outcome(
+    log: &PluginLog,
+    plugin_name: &str,
+    kind: HookKind,
+    reason: LifecycleReason,
+    outcome: &Result<(), PluginError>,
+    elapsed: Duration,
+) {
+    let label = kind.label();
+    let reason_str = reason.as_js_str();
+    match outcome {
+        Ok(()) => log.write(
+            LogLevel::Info,
+            &format!(
+                "hook {label}({reason_str}) completed in {:.1}s",
+                elapsed.as_secs_f32(),
+            ),
+        ),
+        Err(PluginError::Cancelled) => log.write(
+            LogLevel::Info,
+            &format!("hook {label}({reason_str}) cancelled"),
+        ),
+        Err(err) => {
+            // tracing line too so `tail -f plugins/*/plugin.log` isn't the
+            // only way to notice a misbehaving hook in dev.
+            tracing::warn!(plugin = %plugin_name, hook = label, reason = reason_str, %err, "plugin lifecycle hook failed");
+            log.write(
+                LogLevel::Error,
+                &format!("hook {label}({reason_str}) failed: {err}"),
+            );
+        }
+    }
 }
 
 /// Iterate the plugin's async iterator, sending each yielded result through

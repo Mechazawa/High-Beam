@@ -25,7 +25,7 @@ use crate::plugins::dispatch::{self, StreamedResult};
 use crate::plugins::loader::{self, LoaderOptions};
 use crate::plugins::registry::PluginRegistry;
 use crate::plugins::result::RankedResult;
-use crate::plugins::runtime::LoadedPlugin;
+use crate::plugins::runtime::{HookKind, LifecycleReason, LoadedPlugin};
 use crate::query_history::{InputAction, QueryHistoryDb, QueryHistoryState};
 use crate::settings::Settings;
 use crate::settings_ui::SettingsController;
@@ -128,14 +128,20 @@ fn spawn_runtime_thread(
 
             runtime.block_on(async move {
                 let opts = LoaderOptions::resolve(plugins_override);
-                let settings = Settings::load_or_default();
-                let plugins = loader::load_all(&opts, &settings).await;
-                if plugins.is_empty() {
+                let mut settings = Settings::load_or_default();
+                let outcomes = loader::load_all(&opts, &settings).await;
+                if outcomes.is_empty() {
                     tracing::warn!(
                         plugins_dir = %opts.plugins_dir.display(),
                         "plugins: no plugins loaded",
                     );
                 }
+                // Fire onEnable for plugins the loader marked as Install /
+                // Update (a sideloaded plugin with no recorded version, or a
+                // version bump applied via disk while the daemon was off).
+                // No-op when the plugin doesn't export the hook.
+                fire_enable_hooks(&outcomes, &mut settings);
+                let plugins: Vec<Arc<LoadedPlugin>> = outcomes.into_iter().map(|o| o.plugin).collect();
                 let registry = PluginRegistry::new(opts, plugins);
                 let mut current_cancel: Option<CancellationToken> = None;
 
@@ -1139,11 +1145,20 @@ async fn finalize_install(ctx: FinalizeCtx<'_>) -> Option<String> {
         plugins::result::Action::Noop,
     );
 
-    let settings = Settings::load_or_default();
+    let mut settings = Settings::load_or_default();
 
     match loader::load_one_for_reload(&installed_path, &settings).await {
-        Ok(loaded) => {
-            registry.install(loaded).await;
+        Ok(outcome) => {
+            let plugin = outcome.plugin;
+            let reason = outcome.reason;
+            registry.install(Arc::clone(&plugin)).await;
+            fire_enable_hooks(
+                &[loader::LoadOutcome {
+                    plugin: Arc::clone(&plugin),
+                    reason,
+                }],
+                &mut settings,
+            );
             progress.emit(
                 progress_key,
                 format!("Installed {plugin_name} v{plugin_version}"),
@@ -1285,7 +1300,7 @@ fn cleanup_staging(path: &Path) {
 }
 
 async fn run_reload(name: Option<String>, registry: &PluginRegistry, progress: &ProgressEmitter) {
-    let settings = Settings::load_or_default();
+    let mut settings = Settings::load_or_default();
     match name {
         None => {
             progress.emit(
@@ -1294,7 +1309,12 @@ async fn run_reload(name: Option<String>, registry: &PluginRegistry, progress: &
                 None,
                 plugins::result::Action::Noop,
             );
-            let names = registry.reload_all(&settings).await;
+            let outcomes = registry.reload_all(&settings).await;
+            // The `reload` verb forces every fresh plugin's hook to fire
+            // with `Reload`, regardless of whether the manifest version
+            // moved — that's what the user just asked for.
+            let names: Vec<String> = outcomes.iter().map(|o| o.plugin.manifest.name.clone()).collect();
+            persist_versions_and_fire(&outcomes, LifecycleReason::Reload, &mut settings);
             progress.emit(
                 "reload-all",
                 format!("Reloaded {} plugin(s)", names.len()),
@@ -1317,6 +1337,14 @@ async fn run_reload(name: Option<String>, registry: &PluginRegistry, progress: &
             match registry.reload_one(&target, &settings).await {
                 Ok(plugin) => {
                     let version = plugin.manifest.version.clone();
+                    persist_versions_and_fire(
+                        &[loader::LoadOutcome {
+                            plugin: Arc::clone(&plugin),
+                            reason: Some(LifecycleReason::Reload),
+                        }],
+                        LifecycleReason::Reload,
+                        &mut settings,
+                    );
                     progress.emit(
                         &key,
                         format!("Reloaded {target}"),
@@ -1334,5 +1362,51 @@ async fn run_reload(name: Option<String>, registry: &PluginRegistry, progress: &
                 }
             }
         }
+    }
+}
+
+/// Variant of [`fire_enable_hooks`] that overrides the loader's reason —
+/// used by the `reload` verb, where the user's intent is "reload" no matter
+/// whether the manifest version on disk also happened to move.
+fn persist_versions_and_fire(
+    outcomes: &[loader::LoadOutcome],
+    reason: LifecycleReason,
+    settings: &mut Settings,
+) {
+    let mut touched = false;
+    for outcome in outcomes {
+        if let Some(version) = outcome.plugin.manifest.version.clone() {
+            settings.set_last_loaded_version(&outcome.plugin.manifest.name, Some(version));
+            touched = true;
+        }
+        drop(outcome.plugin.run_lifecycle_hook(HookKind::Enable, reason));
+    }
+    if touched
+        && let Err(err) = settings.save()
+    {
+        tracing::warn!(%err, "settings: could not persist last_loaded_version after lifecycle dispatch");
+    }
+}
+
+/// For each newly-loaded plugin the loader flagged with an `Install` /
+/// `Update` reason, record the manifest version in settings and spawn the
+/// `onEnable` hook task. Settings are saved once at the end so multiple
+/// fires don't each round-trip the TOML file.
+fn fire_enable_hooks(outcomes: &[loader::LoadOutcome], settings: &mut Settings) {
+    let mut touched = false;
+    for outcome in outcomes {
+        let Some(reason) = outcome.reason else { continue };
+        if let Some(version) = outcome.plugin.manifest.version.clone() {
+            settings.set_last_loaded_version(&outcome.plugin.manifest.name, Some(version));
+            touched = true;
+        }
+        // Bookkeeping persists before the hook fires so a crash mid-hook
+        // doesn't replay the work on next boot.
+        drop(outcome.plugin.run_lifecycle_hook(HookKind::Enable, reason));
+    }
+    if touched
+        && let Err(err) = settings.save()
+    {
+        tracing::warn!(%err, "settings: could not persist last_loaded_version after lifecycle dispatch");
     }
 }

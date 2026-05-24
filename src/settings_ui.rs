@@ -919,6 +919,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn format_hotkey_spec_round_trips_through_global_hotkey() {
         // Whatever spec we produce must parse cleanly via the same path the

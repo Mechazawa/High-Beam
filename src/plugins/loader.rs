@@ -12,9 +12,24 @@ use directories::ProjectDirs;
 
 use crate::plugins::log::{LogLevel, PluginLog};
 use crate::plugins::manifest::Manifest;
-use crate::plugins::runtime::LoadedPlugin;
+use crate::plugins::runtime::{LifecycleReason, LoadedPlugin};
 use crate::sdk::capability::KNOWN_CAPABILITIES;
 use crate::settings::Settings;
+
+/// A plugin loaded successfully, alongside the lifecycle hook (if any) the
+/// caller should fire post-load.
+///
+/// `reason = None` when the plugin's recorded version in
+/// `settings.last_loaded_version` already matches the manifest — the loader
+/// has nothing to announce. `Some(Install)` for plugins the host has never
+/// seen, `Some(Update)` when the manifest version moved on disk. Plugins
+/// without a manifest `version` always get `None` (no way to detect
+/// updates), even on first load — opting out of lifecycle hooks is a
+/// reasonable default for dev plugins.
+pub struct LoadOutcome {
+    pub plugin: Arc<LoadedPlugin>,
+    pub reason: Option<LifecycleReason>,
+}
 
 /// Where to look for plugins.
 #[derive(Debug, Clone)]
@@ -87,7 +102,7 @@ pub fn scan_manifests(options: &LoaderOptions) -> Vec<Manifest> {
 /// The default `settings` of [`Settings::default()`] treats every plugin as
 /// enabled, so callers that don't care about user settings can pass it
 /// directly.
-pub async fn load_all(options: &LoaderOptions, settings: &Settings) -> Vec<Arc<LoadedPlugin>> {
+pub async fn load_all(options: &LoaderOptions, settings: &Settings) -> Vec<LoadOutcome> {
     let plugins_dir = options.plugins_dir.clone();
     let scan = tokio::task::spawn_blocking(move || -> std::io::Result<Vec<PathBuf>> {
         let entries = std::fs::read_dir(&plugins_dir)?;
@@ -122,13 +137,16 @@ pub async fn load_all(options: &LoaderOptions, settings: &Settings) -> Vec<Arc<L
     let mut plugins = Vec::new();
     for path in dirs {
         match load_one(&path, settings).await {
-            Ok(plugin) => {
+            Ok((plugin, reason)) => {
                 tracing::info!(
                     plugin = %plugin.manifest.name,
                     caps = plugin.manifest.capabilities.len(),
                     "plugins: loaded",
                 );
-                plugins.push(Arc::new(plugin));
+                plugins.push(LoadOutcome {
+                    plugin: Arc::new(plugin),
+                    reason,
+                });
             }
             Err(LoadError::Skipped { name, reason }) => {
                 // Deliberate gate (e.g. platform), not an error condition.
@@ -158,15 +176,29 @@ pub async fn load_all(options: &LoaderOptions, settings: &Settings) -> Vec<Arc<L
 /// caller doesn't get to differentiate — anything other than success means
 /// "this plugin can't be live right now", and the previous instance stays in
 /// the registry.
-pub async fn load_one_for_reload(plugin_dir: &Path, settings: &Settings) -> Result<Arc<LoadedPlugin>, String> {
+pub async fn load_one_for_reload(plugin_dir: &Path, settings: &Settings) -> Result<LoadOutcome, String> {
     match load_one(plugin_dir, settings).await {
-        Ok(plugin) => Ok(Arc::new(plugin)),
+        Ok((plugin, reason)) => Ok(LoadOutcome {
+            plugin: Arc::new(plugin),
+            reason,
+        }),
         Err(LoadError::Skipped { reason, .. }) => Err(reason),
         Err(LoadError::Failed(err)) => Err(err.to_string()),
     }
 }
 
-async fn load_one(plugin_dir: &Path, settings: &Settings) -> Result<LoadedPlugin, LoadError> {
+/// Decide whether this load is an `Install`/`Update`/no-change based on the
+/// manifest version vs. what we previously recorded for this plugin.
+fn detect_reason(manifest_version: Option<&str>, recorded: Option<&str>) -> Option<LifecycleReason> {
+    let current = manifest_version?;
+    match recorded {
+        None => Some(LifecycleReason::Install),
+        Some(prev) if prev != current => Some(LifecycleReason::Update),
+        Some(_) => None,
+    }
+}
+
+async fn load_one(plugin_dir: &Path, settings: &Settings) -> Result<(LoadedPlugin, Option<LifecycleReason>), LoadError> {
     let manifest_path = plugin_dir.join("manifest.json");
     let read_path = manifest_path.clone();
     let bytes = tokio::task::spawn_blocking(move || std::fs::read(&read_path))
@@ -233,13 +265,15 @@ async fn load_one(plugin_dir: &Path, settings: &Settings) -> Result<LoadedPlugin
         crate::sdk::settings::merge_options(&manifest.parsed_options().defs, settings.plugin_options(&manifest.name));
 
     let cache_dir = crate::plugins::runtime::default_cache_dir(&manifest.name);
+    let recorded_version = settings.last_loaded_version(&manifest.name).map(str::to_owned);
     let loaded = LoadedPlugin::load_with_log(plugin_dir, manifest, cache_dir, Arc::clone(&log), merged_options)
         .await
         .map_err(|err| {
             log.write(LogLevel::Error, &format!("load failed: {err}"));
             LoadError::Failed(Box::new(err))
         })?;
-    Ok(loaded)
+    let reason = detect_reason(loaded.manifest.version.as_deref(), recorded_version.as_deref());
+    Ok((loaded, reason))
 }
 
 /// Distinguishes a deliberate platform-gate skip (logged at INFO) from a real
@@ -323,7 +357,7 @@ mod tests {
             .expect("tokio rt")
             .block_on(load_all(&opts, &Settings::default()));
 
-        let names: Vec<_> = plugins.iter().map(|p| p.manifest.name.as_str()).collect();
+        let names: Vec<_> = plugins.iter().map(|p| p.plugin.manifest.name.as_str()).collect();
         assert!(
             !names.contains(&"wrong-os"),
             "wrong-os plugin should have been gated out, got {names:?}",
@@ -397,7 +431,7 @@ mod tests {
             .expect("tokio rt")
             .block_on(load_all(&opts, &settings));
 
-        let names: Vec<_> = plugins.iter().map(|p| p.manifest.name.as_str()).collect();
+        let names: Vec<_> = plugins.iter().map(|p| p.plugin.manifest.name.as_str()).collect();
         assert!(
             !names.contains(&"echo"),
             "echo should be skipped when disabled, got {names:?}",
@@ -435,7 +469,7 @@ mod tests {
             .expect("tokio rt")
             .block_on(load_all(&opts, &Settings::default()));
 
-        let names: Vec<_> = plugins.iter().map(|p| p.manifest.name.as_str()).collect();
+        let names: Vec<_> = plugins.iter().map(|p| p.plugin.manifest.name.as_str()).collect();
         assert!(
             !names.contains(&"vault"),
             "vault should be skipped (defaultEnabled: false, no user override), got {names:?}",
@@ -468,13 +502,42 @@ mod tests {
             .expect("tokio rt")
             .block_on(load_all(&opts, &settings));
 
-        let names: Vec<_> = plugins.iter().map(|p| p.manifest.name.as_str()).collect();
+        let names: Vec<_> = plugins.iter().map(|p| p.plugin.manifest.name.as_str()).collect();
         assert!(
             names.contains(&"vault"),
             "vault should load when user explicitly enables it, got {names:?}",
         );
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn detect_reason_install_when_no_recorded_version() {
+        assert!(matches!(
+            detect_reason(Some("0.1.0"), None),
+            Some(LifecycleReason::Install),
+        ));
+    }
+
+    #[test]
+    fn detect_reason_update_on_version_bump() {
+        assert!(matches!(
+            detect_reason(Some("0.2.0"), Some("0.1.0")),
+            Some(LifecycleReason::Update),
+        ));
+    }
+
+    #[test]
+    fn detect_reason_none_on_matching_version() {
+        assert!(detect_reason(Some("0.1.0"), Some("0.1.0")).is_none());
+    }
+
+    #[test]
+    fn detect_reason_none_when_manifest_has_no_version() {
+        // Dev plugins without a `version` opt out of lifecycle hooks — we
+        // can't tell update from no-op.
+        assert!(detect_reason(None, None).is_none());
+        assert!(detect_reason(None, Some("0.1.0")).is_none());
     }
 
     #[test]

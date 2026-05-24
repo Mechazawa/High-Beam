@@ -3,15 +3,11 @@
 //   - `xkcd random`     → uniformly random comic from 1..latest
 //   - `xkcd <number>`   → that comic by number (404 → no results)
 //   - `xkcd <text>`     → fuzzy title search against a cached index
-//   - `xkcd index`      → full archive rebuild from comic #1 (one-shot,
-//                         blocks for ~30–60s on the configured
-//                         concurrency)
 //
-// The title index is cached to `fs.cache` as `xkcd-index.json`. First text
-// search bootstraps the latest 500 comics (~10s); subsequent refreshes
-// are incremental (just the gap between the cached `last_updated` and the
-// current latest); `xkcd index` backfills everything older than the
-// bootstrap window.
+// The title index is cached to `fs.cache` as `xkcd-index.json`. The
+// `onEnable` hook rebuilds the full archive on install / update; in the
+// meantime the first text search bootstraps the latest 500 comics (~10s)
+// and subsequent loads refresh incrementally.
 
 import { openUrl } from "highbeam:actions";
 import { get } from "highbeam:http";
@@ -208,24 +204,6 @@ export async function* query(input, signal) {
         return;
     }
 
-    // `xkcd index` — force a full rebuild of the title index from comic #1.
-    // The bootstrap path only fetches the latest INDEX_SIZE; this verb
-    // backfills the rest so title search covers the entire archive. Blocks
-    // for the duration of the build (~30–60s for ~3000 comics at the
-    // configured concurrency).
-    if (/^index$/i.test(arg)) {
-        const index = await buildIndex(signal, { full: true });
-        yield {
-            key: "xkcd-indexed",
-            title: `Indexed ${index.comics.length} xkcd comics`,
-            subtitle: "Title search now covers the full archive.",
-            weight: 100,
-            pinned: true,
-            action: { kind: "noop" },
-        };
-        return;
-    }
-
     if (/^random$/i.test(arg)) {
         const latest = await fetchLatest(signal);
         const n = 1 + Math.floor(Math.random() * latest.num);
@@ -261,4 +239,12 @@ export async function* query(input, signal) {
             altSubtitle: "→ explainxkcd.com",
         };
     }
+}
+
+// Build the full title index whenever the plugin lights up — first install
+// or after an update. The hook runs in the background and aborts if the
+// daemon tears the runtime down; queries fall back to the on-demand bootstrap
+// while the rebuild is in flight.
+export async function onEnable(_reason, signal) {
+    await buildIndex(signal, { full: true });
 }

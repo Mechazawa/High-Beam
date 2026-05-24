@@ -14,8 +14,8 @@ use std::sync::Arc;
 
 use tokio::sync::RwLock;
 
-use crate::plugins::loader::{self, LoaderOptions};
-use crate::plugins::runtime::LoadedPlugin;
+use crate::plugins::loader::{self, LoadOutcome, LoaderOptions};
+use crate::plugins::runtime::{HookKind, LifecycleReason, LoadedPlugin};
 use crate::settings::Settings;
 
 /// Thread-safe, snapshot-cheap handle to the live plugin set.
@@ -64,17 +64,33 @@ impl PluginRegistry {
 
     /// Re-load every plugin from disk and swap the result in atomically.
     ///
-    /// Returns the list of plugin names that ended up loaded — useful for
-    /// progress reporting.
-    pub async fn reload_all(&self, settings: &Settings) -> Vec<String> {
-        let plugins = loader::load_all(&self.inner.options, settings).await;
-        let names: Vec<String> = plugins.iter().map(|p| p.manifest.name.clone()).collect();
-        *self.inner.plugins.write().await = plugins;
-        names
+    /// Fires `onDisable(Reload)` on every replaced plugin and returns the
+    /// fresh set of `LoadOutcome`s. The caller is responsible for firing
+    /// `onEnable` (with reason `Reload`) and for updating
+    /// `settings.last_loaded_version` after the swap — registry doesn't
+    /// own the settings mutator.
+    pub async fn reload_all(&self, settings: &Settings) -> Vec<LoadOutcome> {
+        let outcomes = loader::load_all(&self.inner.options, settings).await;
+        let fresh: Vec<Arc<LoadedPlugin>> = outcomes.iter().map(|o| Arc::clone(&o.plugin)).collect();
+        let old = {
+            let mut guard = self.inner.plugins.write().await;
+            std::mem::replace(&mut *guard, fresh)
+        };
+        // Fire onDisable on every plugin we just displaced. Fire-and-forget;
+        // the task keeps the old plugin alive via its cloned AsyncContext
+        // until the hook finishes (or the shutdown token fires on Drop).
+        for plugin in old {
+            drop(plugin.run_lifecycle_hook(HookKind::Disable, LifecycleReason::Reload));
+        }
+        outcomes
     }
 
     /// Re-load a single plugin by name (case-insensitive). Other plugins are
     /// left untouched.
+    ///
+    /// Fires `onDisable(Reload)` on the displaced plugin if present; the
+    /// caller is responsible for firing `onEnable(Reload)` on the returned
+    /// plugin.
     ///
     /// # Errors
     ///
@@ -96,24 +112,41 @@ impl PluginRegistry {
                 name: name.to_owned(),
                 reason: err,
             })?;
-        let mut guard = self.inner.plugins.write().await;
-        if let Some(slot) = guard.get_mut(idx) {
-            *slot = Arc::clone(&fresh);
-        } else {
-            guard.push(Arc::clone(&fresh));
+        let displaced = {
+            let mut guard = self.inner.plugins.write().await;
+            if let Some(slot) = guard.get_mut(idx) {
+                Some(std::mem::replace(slot, Arc::clone(&fresh.plugin)))
+            } else {
+                guard.push(Arc::clone(&fresh.plugin));
+                None
+            }
+        };
+        if let Some(old) = displaced {
+            drop(old.run_lifecycle_hook(HookKind::Disable, LifecycleReason::Reload));
         }
-        Ok(fresh)
+        Ok(fresh.plugin)
     }
 
     /// Insert a freshly-loaded plugin into the registry, replacing any
     /// existing entry with the same `name`. Used by the install path after
     /// it lays down a new plugin directory and loads it.
+    ///
+    /// Fires `onDisable(Update)` on the displaced plugin if there was one.
+    /// The caller fires `onEnable` separately because it knows whether the
+    /// install was an `Install` or an `Update`.
     pub async fn install(&self, plugin: Arc<LoadedPlugin>) {
         let name = plugin.manifest.name.clone();
-        let mut guard = self.inner.plugins.write().await;
-        match guard.iter().position(|p| p.manifest.name == name) {
-            Some(idx) => guard[idx] = plugin,
-            None => guard.push(plugin),
+        let displaced = {
+            let mut guard = self.inner.plugins.write().await;
+            if let Some(idx) = guard.iter().position(|p| p.manifest.name == name) {
+                Some(std::mem::replace(&mut guard[idx], plugin))
+            } else {
+                guard.push(plugin);
+                None
+            }
+        };
+        if let Some(old) = displaced {
+            drop(old.run_lifecycle_hook(HookKind::Disable, LifecycleReason::Update));
         }
     }
 }
@@ -203,8 +236,8 @@ mod tests {
             .expect("rt");
 
         // No plugins on disk yet -> reload returns empty list.
-        let names = rt.block_on(reg.reload_all(&Settings::default()));
-        assert!(names.is_empty());
+        let outcomes = rt.block_on(reg.reload_all(&Settings::default()));
+        assert!(outcomes.is_empty());
 
         // Add a plugin and reload -> registry sees it.
         write_plugin(
@@ -213,7 +246,8 @@ mod tests {
             r#"{ "name": "later", "entry": "plugin.js" }"#,
             "export async function* query() {}",
         );
-        let names = rt.block_on(reg.reload_all(&Settings::default()));
+        let outcomes = rt.block_on(reg.reload_all(&Settings::default()));
+        let names: Vec<String> = outcomes.iter().map(|o| o.plugin.manifest.name.clone()).collect();
         assert_eq!(names, vec!["later".to_owned()]);
         let snap = rt.block_on(reg.snapshot());
         assert_eq!(snap.len(), 1);
