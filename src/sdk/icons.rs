@@ -5,6 +5,7 @@
 //! so the Spotlight plugin never crashes on missing icons.
 
 use std::collections::HashMap;
+#[cfg(target_os = "macos")]
 use std::path::Path;
 use std::sync::Mutex;
 

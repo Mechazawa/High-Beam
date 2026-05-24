@@ -28,6 +28,7 @@ struct Keyword {
 }
 
 static KEYWORDS: LazyLock<Vec<Keyword>> = LazyLock::new(|| {
+    #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
     let mut kws = vec![
         Keyword {
             label: "exit High Beam",

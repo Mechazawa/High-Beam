@@ -253,10 +253,10 @@ fn wire_window_callbacks(
     let history_state_for_invoke = Arc::clone(&history_state);
     let settings_for_invoke = settings.clone();
     window.on_invoke_selected(move |meta, control, shift, alt| {
-        let mods = (u8::from(meta) * crate::settings_ui::MOD_META)
-            | (u8::from(control) * crate::settings_ui::MOD_CONTROL)
-            | (u8::from(shift) * crate::settings_ui::MOD_SHIFT)
-            | (u8::from(alt) * crate::settings_ui::MOD_ALT);
+        let mods = (u8::from(meta) * crate::hotkey::MOD_META)
+            | (u8::from(control) * crate::hotkey::MOD_CONTROL)
+            | (u8::from(shift) * crate::hotkey::MOD_SHIFT)
+            | (u8::from(alt) * crate::hotkey::MOD_ALT);
         let alt_held = settings_for_invoke.alt_modifier_held(mods);
         invoke_selected(
             &weak_for_invoke,
@@ -609,11 +609,12 @@ fn handle_query(
                         if id < latest_id.load(Ordering::Relaxed) {
                             continue;
                         }
-                        dispatch::merge_with_snapshot(
+                        dispatch::merge_into_live(
                             &mut live,
                             &mut order,
                             streamed,
                             frecency_snapshot.as_ref(),
+                            frecency::now_seconds(),
                         );
                         if let Ok(mut slot) = latest.lock() {
                             slot.clone_from(&live);

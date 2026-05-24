@@ -6,21 +6,7 @@
 use tokio::sync::oneshot;
 
 use crate::plugins::manifest::Manifest;
-use crate::sdk::capability::KNOWN_CAPABILITIES;
-
-/// Human-readable explanation for each known capability, shown in the
-/// confirmation view next to the raw capability string.
-static CAP_EXPLANATIONS: &[(&str, &str)] = &[
-    ("actions", "open URLs, copy text, run commands, reveal files"),
-    ("http", "make outbound HTTP requests"),
-    ("clipboard.read", "read the system clipboard"),
-    ("clipboard.write", "write to the system clipboard"),
-    ("fs.read", "read files and list directories"),
-    ("fs.cache", "read and write a per-plugin cache directory"),
-    ("system.exec", "run shell commands and capture their output"),
-    ("system.applescript", "execute AppleScript on macOS"),
-    ("icons", "resolve native file / app icons"),
-];
+use crate::sdk::capability::explain_cap;
 
 /// One row in the capability list the confirmation view renders.
 #[derive(Debug, Clone, PartialEq)]
@@ -36,13 +22,9 @@ pub struct CapabilityEntry {
 
 impl CapabilityEntry {
     fn from_cap(cap: &str, is_new: bool) -> Self {
-        let explanation = CAP_EXPLANATIONS
-            .iter()
-            .find(|(k, _)| *k == cap)
-            .map_or_else(|| cap.to_owned(), |(_, v)| (*v).to_owned());
         Self {
             cap: cap.to_owned(),
-            explanation,
+            explanation: explain_cap(cap).to_owned(),
             is_new,
         }
     }
@@ -120,20 +102,6 @@ pub fn new_caps<'a>(remote: &'a [String], installed: &[String]) -> Vec<&'a str> 
 #[must_use]
 pub fn update_needs_prompt(remote_caps: &[String], installed_caps: &[String]) -> bool {
     !new_caps(remote_caps, installed_caps).is_empty()
-}
-
-/// Human-readable explanation for a single known capability.  Falls back to
-/// the raw capability string when it isn't in the known set.
-#[must_use]
-pub fn explain_cap(cap: &str) -> &str {
-    CAP_EXPLANATIONS.iter().find(|(k, _)| *k == cap).map_or(cap, |(_, v)| v)
-}
-
-/// Whether `cap` is in the host's known capability table.  Used to emit a
-/// warning in the confirmation view for unrecognised caps.
-#[must_use]
-pub fn is_known_cap(cap: &str) -> bool {
-    KNOWN_CAPABILITIES.contains(&cap)
 }
 
 #[cfg(test)]

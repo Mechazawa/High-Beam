@@ -93,12 +93,8 @@ impl HookKind {
 }
 
 /// Why a lifecycle hook is firing. Forwarded to the JS hook as the first
-/// argument; the enum is `camelCase` on the JS side to match the existing
+/// argument; the string form is `camelCase` to match the existing
 /// plugin-result serialisation style.
-///
-/// `Enable` / `Disable` are reserved for a future live-toggle path and are
-/// not produced by any current code path — present so the JS API doesn't
-/// need to be widened later.
 #[derive(Debug, Clone, Copy)]
 pub enum LifecycleReason {
     /// First time the host has seen this plugin (no recorded
@@ -108,12 +104,6 @@ pub enum LifecycleReason {
     Update,
     /// Manual `reload` verb (dev iteration).
     Reload,
-    /// Reserved: user flipped the enabled toggle live. Not currently produced.
-    #[allow(dead_code)]
-    Enable,
-    /// Reserved: user flipped the disabled toggle live. Not currently produced.
-    #[allow(dead_code)]
-    Disable,
 }
 
 impl LifecycleReason {
@@ -122,8 +112,6 @@ impl LifecycleReason {
             Self::Install => "install",
             Self::Update => "update",
             Self::Reload => "reload",
-            Self::Enable => "enable",
-            Self::Disable => "disable",
         }
     }
 }

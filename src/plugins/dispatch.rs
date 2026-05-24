@@ -11,7 +11,7 @@ use tokio::sync::mpsc;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
-use crate::frecency::{Snapshot, frecency_modifier, now_seconds};
+use crate::frecency::{Snapshot, frecency_modifier};
 use crate::plugins::result::{PluginResult, RankedResult};
 use crate::plugins::runtime::LoadedPlugin;
 
@@ -129,17 +129,6 @@ fn score_for(entry: &RankedResult, frecency: Option<&Snapshot>, now: i64) -> f64
         .and_then(|snap| snap.get(&entry.plugin_name, &entry.result.key))
         .map_or(1.0, |row| frecency_modifier(row.picks, now - row.last_picked_at));
     weight * modifier
-}
-
-/// Convenience wrapper using the system clock — the snapshot is per-query
-/// but `now` is per-yield.
-pub(crate) fn merge_with_snapshot(
-    live: &mut Vec<RankedResult>,
-    next_order: &mut usize,
-    incoming: StreamedResult,
-    frecency: Option<&Snapshot>,
-) {
-    merge_into_live(live, next_order, incoming, frecency, now_seconds());
 }
 
 #[cfg(test)]

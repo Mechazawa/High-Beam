@@ -6,6 +6,7 @@ pub mod cli;
 pub mod confirm;
 pub mod daemon;
 pub mod frecency;
+pub mod hotkey;
 pub mod ipc;
 pub mod logging;
 pub mod paths;

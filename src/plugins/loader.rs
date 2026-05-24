@@ -13,7 +13,7 @@ use directories::ProjectDirs;
 use crate::plugins::log::{LogLevel, PluginLog};
 use crate::plugins::manifest::Manifest;
 use crate::plugins::runtime::{LifecycleReason, LoadedPlugin};
-use crate::sdk::capability::KNOWN_CAPABILITIES;
+use crate::sdk::capability;
 use crate::settings::Settings;
 
 /// A plugin loaded successfully, alongside the lifecycle hook (if any) the
@@ -222,15 +222,16 @@ async fn load_one(plugin_dir: &Path, settings: &Settings) -> Result<(LoadedPlugi
     }
 
     for cap in &manifest.capabilities {
-        if !KNOWN_CAPABILITIES.contains(&cap.as_str()) {
+        if !capability::is_known_cap(cap) {
+            let known = capability::known_cap_names();
             log.write(
                 LogLevel::Warn,
-                &format!("ignoring unknown capability {cap:?} (known: {KNOWN_CAPABILITIES:?})"),
+                &format!("ignoring unknown capability {cap:?} (known: {known:?})"),
             );
             tracing::warn!(
                 plugin = %manifest.name,
                 capability = %cap,
-                known = ?KNOWN_CAPABILITIES,
+                ?known,
                 "plugins: ignoring unknown capability",
             );
         }
@@ -261,8 +262,7 @@ async fn load_one(plugin_dir: &Path, settings: &Settings) -> Result<(LoadedPlugi
     // Fold the user's TOML overrides onto the manifest defaults so the
     // runtime sees one ready-to-export bag — keeps the SDK module path free
     // of branching on "did the user set a value?".
-    let merged_options =
-        crate::sdk::settings::merge_options(&manifest.parsed_options().defs, settings.plugin_options(&manifest.name));
+    let merged_options = manifest.merged_options(settings.plugin_options(&manifest.name));
 
     let cache_dir = crate::plugins::runtime::default_cache_dir(&manifest.name);
     let recorded_version = settings.last_loaded_version(&manifest.name).map(str::to_owned);

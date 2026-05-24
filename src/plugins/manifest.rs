@@ -3,6 +3,8 @@
 //! Unknown fields are tolerated (no `deny_unknown_fields`) so new fields can
 //! land without breaking older plugins.
 
+use std::collections::HashMap;
+use std::hash::BuildHasher;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -306,6 +308,25 @@ impl Manifest {
             "declares platforms={list:?}, running on {}",
             std::env::consts::OS,
         ))
+    }
+
+    /// Merge this manifest's option defaults with the user's stored overrides.
+    /// User-set values win; otherwise the manifest default applies. Unknown
+    /// user keys are dropped — a plugin author renaming an option shouldn't
+    /// leave stale values floating in the runtime.
+    #[must_use]
+    pub fn merged_options<S: BuildHasher>(
+        &self,
+        user_set: &HashMap<String, JsonValue, S>,
+    ) -> HashMap<String, JsonValue> {
+        self.parsed_options()
+            .defs
+            .iter()
+            .map(|def| {
+                let value = user_set.get(&def.key).cloned().unwrap_or_else(|| def.default_json());
+                (def.key.clone(), value)
+            })
+            .collect()
     }
 }
 
