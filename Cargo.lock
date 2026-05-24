@@ -1994,7 +1994,6 @@ dependencies = [
  "clap",
  "directories",
  "flate2",
- "futures",
  "global-hotkey",
  "image",
  "nucleo-matcher",

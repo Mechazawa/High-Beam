@@ -184,8 +184,6 @@ tokio-util = { version = "0.7", default-features = false, features = ["rt"] }
 # convenience `response.json()` path.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
-futures = { version = "0.3", default-features = false, features = ["std"] }
-
 arboard = "3"
 
 # `open::that(url)` works on macOS (`/usr/bin/open`) and Linux (`xdg-open`).
