@@ -11,12 +11,8 @@ A missing file silently falls back to the bundled default. A malformed
 file logs a warning and still falls back, so a typo can't prevent the
 daemon from starting.
 
-## The bundled default (Yosemite Spotlight)
-
-The default theme approximates macOS Yosemite Spotlight (2014) — light,
-narrow-ish, heavy padding around the input, subtle row separators. The
-authoritative copy lives in `themes/yosemite-spotlight.toml`; copy it as a
-starting point.
+The bundled default lives at `themes/yosemite-spotlight.toml`; copy it
+as a starting point.
 
 ## Token reference
 
@@ -67,15 +63,6 @@ The `size_*` fields are pixels.
 height grows with result count up to a hardcoded cap (~9 rows).
 
 `border_radius` is in pixels.
-
-## Non-goals (v1)
-
-- Custom layouts — themes are tokens, not structural overrides.
-- Per-plugin theming.
-- Hot-reload — restart the daemon to apply changes.
-- Animation / transition customization.
-- Real macOS vibrancy via `NSVisualEffectView`; v1 ships flat translucency
-  via the `background` alpha channel.
 
 ## Example: dark mode
 

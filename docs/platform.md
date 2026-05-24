@@ -114,25 +114,7 @@ No special permissions. Plugins that run subprocesses via
 `highbeam:system.exec` or use `highbeam:actions.exec` rely on whatever
 `PATH` the daemon was started with.
 
-## Known platform limitations
-
-- **macOS Dock / Cmd-Tab**: when launched from `HighBeam.app` the
-  `LSUIElement=1` key in Info.plist hides the daemon from both. When
-  launched via `cargo run` the daemon still appears in the Dock — setting
-  `NSApp.setActivationPolicy(.accessory)` at runtime would also fix the
-  unbundled case, tracked as a TODO in `src/window.rs`.
-- **Linux Wayland global hotkeys**: no portable API yet. The WM keybind +
-  `highbeam --open` flow is the v1 answer.
-- **No real macOS vibrancy**: v1 uses the `background` alpha channel for
-  flat translucency. `NSVisualEffectView` integration is post-v1.
-
 ## Distribution
 
-- macOS: `just bundle` produces a self-signed `.app` + drag-to-Applications
-  `.dmg`. Real distribution to other Macs needs a Developer ID certificate +
-  notarization — see [docs/distribution.md](distribution.md).
-- Linux: four package formats out of `just bundle-linux` — a portable
-  tarball, `.deb` (Ubuntu / Debian), `.pkg.tar.zst` via the Arch
-  `pacman`/PKGBUILD pair, plus an `-bin` AUR template. See
-  [docs/distribution.md](distribution.md).
-- Auto-updater: deferred. v1 is `cargo install` / manual.
+Packaging recipes and code-signing setup are in
+[docs/distribution.md](distribution.md). No auto-updater in v1.

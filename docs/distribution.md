@@ -75,117 +75,30 @@ letters on amber background). To swap in a real icon:
 Pre-generated `.icns` files are also accepted — list them in the `icons`
 array in `Cargo.toml`.
 
-## Signing & distribution
+## Signing
 
-The bundle config uses `signing-identity = "High Beam Self-Signed"` — a
-self-signed identity that lives in your keychain. It identifies the build
-as "yours" (same dev across versions) without Apple's $99/yr program.
-Gatekeeper still doesn't trust self-signed certs by default, so end users
-need a one-time `xattr` step (below) — but that's an artifact of Apple's
-trust model, not of the cert flow.
-
-### Creating the signing cert (one-time)
+Default config uses `signing-identity = "High Beam Self-Signed"` — a
+self-signed identity in your keychain. Generate it once:
 
 ```sh
 ./scripts/create-signing-cert.sh
 ```
 
-This generates an RSA key + self-signed cert with the `codeSigning`
-extended key usage via `openssl`, bundles into pkcs12, and imports into
-your login keychain with `codesign` access granted. The CN is
-`High Beam Self-Signed` to match `Cargo.toml`'s `signing-identity`. Pass
-a name as `$1` to override.
-
-Verify with `security find-identity -p codesigning -v` — you should see
-the new identity listed. From there `just bundle` picks it up
-automatically.
-
-To re-issue (e.g. cert expired after the 10-year window, or you want a
-different CN), delete the old one first:
-
-```sh
-security delete-identity -c "High Beam Self-Signed"
-./scripts/create-signing-cert.sh
-```
-
-### What end users still need
-
-After dragging the .app to `/Applications`, the user runs:
+End users still need one post-install command to strip the download
+quarantine, because Gatekeeper doesn't trust self-signed certs:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/HighBeam.app
 ```
 
-This strips the download quarantine bit so macOS launches the app
-without prompting. `spctl --assess --verbose /Applications/HighBeam.app`
-will still report `rejected` for self-signed bundles — that's expected;
-Gatekeeper trust is strictly a signed-by-Apple-CA-and-notarized story.
-The `xattr` workaround sits beside that reality: it tells macOS the user
-vouched for the launch.
-
-### The trade-off
-
-| Path | Cost | Gatekeeper trust | User friction |
-|------|------|------------------|---------------|
-| Self-signed (current)   | $0      | No                                | One `xattr -dr` command after install |
-| Developer ID + notarize | $99/yr  | Yes — launches cleanly everywhere | None                                  |
-
-For real distribution to other Macs without the `xattr` step, you need:
-
-### 1. Enroll in the Apple Developer Program
-
-$99/yr at <https://developer.apple.com/programs/>. Required to issue any
-Developer ID certificate; this is the cost of admission, not optional.
-
-### 2. Create a Developer ID Application certificate
-
-Inside Xcode → Settings → Accounts → Manage Certificates, click `+` → "Developer ID
-Application". The certificate name is what goes in `signing-identity`, of
-the form `Developer ID Application: Your Name (TEAMID12)`.
-
-### 3. Point cargo-packager at the cert
-
-Update `[package.metadata.packager.macos]` in `Cargo.toml`:
-
-```toml
-signing-identity = "Developer ID Application: Bas Bieling (XXXXXXXXXX)"
-```
-
-The keychain holding the private key must be unlocked when `cargo packager`
-runs.
-
-### 4. Notarize the .dmg
-
-Apple's notarytool inspects the bundle for malware/policy violations and
-issues a ticket. The recommended flow uses a keychain-stored
-app-specific password:
-
-```sh
-# One-time setup: store an app-specific password (created at appleid.apple.com)
-# under a keychain profile name of your choice.
-xcrun notarytool store-credentials high-beam-notary \
-    --apple-id "you@example.com" \
-    --team-id "XXXXXXXXXX"
-
-# Per release:
-xcrun notarytool submit target/release/HighBeam_*.dmg \
-    --keychain-profile high-beam-notary \
-    --wait
-```
-
-### 5. Staple the ticket
-
-Notarization succeeds asynchronously; stapling embeds the ticket into the
-.dmg so Gatekeeper can verify offline.
-
-```sh
-xcrun stapler staple target/release/HighBeam_*.dmg
-```
-
-`cargo packager` can drive notarization automatically when the
-`APPLE_KEYCHAIN_PROFILE` (or `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID`)
-environment variables are set; it currently logs `Skipping app notarization`
-when none are present.
+For Gatekeeper-trusted distribution (no `xattr` step), enroll in the
+Apple Developer Program ($99/yr), issue a Developer ID certificate,
+update `signing-identity` in `Cargo.toml`, and pass notarization
+credentials via `APPLE_KEYCHAIN_PROFILE` (or `APPLE_ID` /
+`APPLE_PASSWORD` / `APPLE_TEAM_ID`) when running `cargo packager` —
+the packager wraps `xcrun notarytool` + `stapler` directly. Apple's
+[Notarizing macOS software](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)
+docs cover the cert + notarytool setup.
 
 ## Linux
 
@@ -297,26 +210,10 @@ hint and exit cleanly when `cargo-generate-rpm` isn't present so
 
 ### Why not Flatpak
 
-Flatpak is a poor fit for High Beam. Every launcher feature we care
-about wants host-OS access that the sandbox blocks:
-
-- The `app-launcher` plugin reads `/usr/share/applications/*.desktop`
-  to enumerate installed apps. Flatpak hides the host filesystem;
-  exposing it via `--filesystem=host` defeats the sandbox.
-- The `kill-process` plugin walks `/proc` and sends signals. Flatpak's
-  PID namespace makes this either impossible (default) or pointless
-  (`--share=process` removes the isolation).
-- The `window-mgmt` plugin shells out to `wmctrl`, `xdotool`, or the
-  KWin/Hyprland IPC sockets. None of these are reliably available
-  inside the sandbox.
-- Global hotkeys rely on the desktop-portal `GlobalShortcuts`
-  interface, which is uneven across compositors and adds permission
-  prompts that defeat the "press one key, launcher appears" UX
-  Spotlight-class tools sell.
-
-Launchers are inherently host-OS integration tools; sandboxing fights
-the value proposition. The four formats above land in the
-`/usr/{bin,share,lib}` namespace that those features expect.
+The sandbox blocks the host-OS access launcher plugins need —
+`/usr/share/applications/*.desktop` reads, `/proc` walks, IPC to
+window managers, global hotkeys. Working around it via
+`--filesystem=host` / `--share=process` defeats the sandbox anyway.
 
 ## Windows
 
@@ -326,108 +223,18 @@ port lands.
 
 ## Release workflow (GitHub Actions)
 
-`.github/workflows/release.yml` automates the whole "tag → built artifacts
-attached to a GitHub Release with AI-written notes" round trip. Local
-`just bundle` still works the same; the workflow exists so you can stop
-running it by hand once tags start flowing.
+`.github/workflows/release.yml` builds macOS + Linux artifacts and
+publishes a GitHub Release on `v*` tag pushes. Tags containing `-rc`,
+`-beta`, or `-alpha` flag as pre-releases.
 
-### Trigger
+Optional secrets:
 
-Tag push only. Nothing fires on branch push or PR.
+| Secret | Purpose |
+|--------|---------|
+| `MACOS_CERT_P12_BASE64` | Base64 of the codesigning `.p12` (cert + key). Missing → ad-hoc-signed bundle, `xattr` step still required. |
+| `MACOS_CERT_PASSWORD` | The PKCS12 passphrase. |
 
-```sh
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-The workflow matches `v*`, so `v0.1.0`, `v1.0.0-rc1`, `v2.3.4` all
-trigger. Tags containing `-rc`, `-beta`, or `-alpha` are auto-flagged as
-GitHub pre-releases.
-
-### What runs
-
-1. **`build-macos`** (macos-latest) — runs `just bundle`, producing
-   `HighBeam_<ver>_<arch>.dmg` and `HighBeam.app`. If the macOS signing
-   secrets are present (see below), the bundle is codesigned with the
-   imported identity; otherwise it ships ad-hoc-signed and end users
-   still need the `xattr -dr com.apple.quarantine` step.
-2. **`build-linux`** (ubuntu-latest) — installs the cargo-packager system
-   deps (`libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libxdo-dev`,
-   `libayatana-appindicator3-dev`, `librsvg2-dev`, `dpkg`, `rpm`) and
-   runs `just bundle-tarball`, `just bundle-deb`, `just bundle-rpm`,
-   `just bundle-arch` to produce a tarball + `.deb` + `.rpm` +
-   `.pkg.tar.zst`.
-3. **`release`** (ubuntu-latest, `needs:` both) — downloads both
-   artifact sets, computes a commit-range changelog (`git log
-   $PREV_TAG..$GITHUB_REF_NAME`), asks GitHub Models to summarise it,
-   and publishes a GitHub Release with all the artifacts attached.
-
-### Required secrets
-
-Set under **GitHub → Settings → Secrets and variables → Actions → New
-repository secret**:
-
-| Secret | Purpose | Behaviour without it |
-|--------|---------|----------------------|
-| `MACOS_CERT_P12_BASE64` | Base64-encoded `.p12` containing your codesigning cert + private key. | macOS bundle ships ad-hoc-signed; end users need `xattr -dr com.apple.quarantine`. |
-| `MACOS_CERT_PASSWORD` | The PKCS12 passphrase. Defaults to `highbeam-signing` per `scripts/create-signing-cert.sh`. | Same as missing `MACOS_CERT_P12_BASE64`. |
-
-The AI summary uses [GitHub Models](https://github.com/marketplace/models)
-through the auto-provisioned `GITHUB_TOKEN` — no separate API key. The
-workflow's `permissions:` block grants `models: read`, which is what
-unlocks the inference endpoint.
-
-The workflow's only hard dependency on secrets is none of them: every
-secret has a documented fallback. A tagged release will publish even if
-both are absent.
-
-### Setting `MACOS_CERT_P12_BASE64`
-
-From the machine that has the cert in its keychain:
-
-```sh
-# Export the identity + private key to a .p12 (Keychain Access → File →
-# Export Items, or via the security CLI). `highbeam-signing-cert.p12` is
-# the conventional filename; the passphrase is `highbeam-signing` if you
-# used the default in scripts/create-signing-cert.sh.
-base64 -i highbeam-signing-cert.p12 -o cert.b64
-
-# Paste the contents of cert.b64 into the GitHub secret input box.
-pbcopy < cert.b64   # macOS shortcut
-
-# Don't leave the base64 file lying around.
-rm cert.b64
-```
-
-Pair it with `MACOS_CERT_PASSWORD` set to whatever passphrase you exported
-the .p12 with.
-
-### Swapping the AI summary model
-
-The model is hardcoded near the top of the inline Python block in the
-"Summarise changelog with GitHub Models" step of `release.yml`:
-
-```python
-"model": "openai/gpt-4o-mini",
-```
-
-Defaults to `openai/gpt-4o-mini` (fast, free, plenty of quality for
-commit-log summaries). Swap to `openai/gpt-4o` for a step up, or any
-other catalog id from <https://github.com/marketplace/models> —
-the endpoint speaks the OpenAI-compatible chat-completions schema, so
-no other code changes are needed.
-
-### Fallback behaviour
-
-The summarisation step is wrapped in two layers of belt-and-braces so
-GitHub Models uptime never blocks a tag from publishing:
-
-1. **Curl returns non-2xx** (rate limit, auth failure, endpoint outage)
-   → `--fail-with-body` makes the script log the error body, then fall
-   back to the raw commit log. Exit 0.
-2. **Endpoint returns 200 but the JSON shape is unexpected** → the
-   response-parsing Python block catches the exception, logs a warning,
-   and falls back to the raw commit log. Exit 0.
-
-In both cases the release still publishes; only the body content
-degrades.
+Release notes are AI-summarised via
+[GitHub Models](https://github.com/marketplace/models) using the
+auto-provisioned `GITHUB_TOKEN`; the workflow falls back to the raw
+commit log on any failure, so missing both secrets still publishes.
