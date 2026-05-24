@@ -327,6 +327,46 @@ impl SettingsController {
         settings.query_history_max_entries()
     }
 
+    /// Cheap clone of the current settings, for read-only consumers (the
+    /// plugin loader, dispatcher). Persist via the controller's own
+    /// `set_*` / `record_loaded_versions` methods rather than mutating the
+    /// snapshot — modifications to the returned `Settings` are discarded.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the settings mutex is poisoned. See
+    /// [`Self::launcher_position`] for the rationale.
+    #[must_use]
+    pub fn snapshot(&self) -> Settings {
+        self.inner.settings.lock().expect("settings lock").clone()
+    }
+
+    /// Record the manifest version each `(plugin, Some(version))` pair was
+    /// last loaded with, then persist once. The lifecycle-hook layer uses
+    /// this so a crash mid-hook can't replay the work on the next boot.
+    /// Empty input is a no-op. A `version` of `None` clears the slot
+    /// (e.g. on uninstall).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the settings mutex is poisoned. See
+    /// [`Self::launcher_position`] for the rationale.
+    pub fn record_loaded_versions(&self, entries: &[(String, Option<String>)]) {
+        if entries.is_empty() {
+            return;
+        }
+        let result = {
+            let mut s = self.inner.settings.lock().expect("settings lock");
+            for (name, version) in entries {
+                s.set_last_loaded_version(name, version.clone());
+            }
+            s.save()
+        };
+        if let Err(err) = result {
+            tracing::warn!(%err, "settings: could not persist last_loaded_version after lifecycle dispatch");
+        }
+    }
+
     /// Record a new launcher window origin and flush to disk. Used by the
     /// window layer after the user finishes a drag; persistence is best-
     /// effort because losing the latest position is preferable to a
