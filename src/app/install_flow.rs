@@ -85,10 +85,10 @@ impl ProgressEmitter {
         let snapshot: Vec<RankedResult> = match self.latest.lock() {
             Ok(mut slot) => {
                 if let Some(existing) = slot.iter_mut().find(|r| r.result.key == next.result.key) {
-                    existing.result = next.result.clone();
+                    existing.result = next.result;
                 } else {
                     let order = slot.len();
-                    slot.push(RankedResult { order, ..next.clone() });
+                    slot.push(RankedResult { order, ..next });
                 }
                 slot.clone()
             }

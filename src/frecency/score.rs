@@ -28,8 +28,12 @@ pub(crate) fn frecency_modifier(picks: u32, age_seconds: i64) -> f64 {
     // past the point where the decay term is effectively zero anyway.
     let clamped = age_seconds.max(0).min(i64::from(i32::MAX));
     let age = f64::from(i32::try_from(clamped).unwrap_or(i32::MAX));
-    let decay = 2.0_f64.powf(-age / HALF_LIFE_SECONDS);
-    1.0 + PICKS_BONUS_PER_PICK * f64::from(picks) * decay
+    // `(x).exp2()` is more accurate than `2.0.powf(x)` for base-2; `mul_add`
+    // is a fused multiply-add with one rounding instead of two. Both flagged
+    // by clippy::nursery; neither changes test outcomes (the approx checks
+    // use 1e-3 / 1e-6 tolerances that comfortably cover the bit-level shift).
+    let decay = (-age / HALF_LIFE_SECONDS).exp2();
+    (PICKS_BONUS_PER_PICK * f64::from(picks)).mul_add(decay, 1.0)
 }
 
 #[cfg(test)]
