@@ -102,7 +102,11 @@ pub async fn load_all(options: &LoaderOptions, settings: &Settings) -> Vec<LoadO
         Ok(entries
             .filter_map(Result::ok)
             .map(|e| e.path())
-            .filter(|p| p.is_dir())
+            // Only directories that look like plugins — has a `manifest.json`.
+            // Filters out `node_modules`, `.git`, hidden dirs, and anything
+            // else a developer might drop under the plugins root without
+            // touching the loader's warning log.
+            .filter(|p| p.is_dir() && p.join("manifest.json").is_file())
             .collect())
     })
     .await;
