@@ -132,6 +132,15 @@ export component SettingsView {
                 background: transparent;
                 border-color: root.border-color;
                 rail-focus := FocusScope {
+                    // Without explicit width/height the FocusScope's
+                    // geometry collapses to its preferred size (0×0 inside
+                    // a non-layout `Rectangle` parent), which kills mouse
+                    // events for the rail rows even though keyboard focus
+                    // still routes through. `parent.width/height` makes
+                    // the FocusScope fill the 260px rail Rectangle and
+                    // hit-testing works again.
+                    width: parent.width;
+                    height: parent.height;
                     key-pressed(event) => {
                         if (event.text == Key.UpArrow) {
                             if (root.rail-focus-index > 0) {

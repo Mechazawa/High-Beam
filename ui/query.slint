@@ -291,13 +291,21 @@ export component QueryWindow inherits Window {
         // Whole-panel drag handle. Mounted first so it sits at the bottom of
         // the z-stack — child TouchAreas (result rows, settings rail, etc.)
         // and the TextInput steal clicks on themselves; the dead space
-        // (input gutter, padding, area between widgets) falls through here
-        // and starts a native window drag. Mouse cursor stays default so
-        // the field still reads as text-editable.
+        // (input gutter, padding, area between widgets) falls through here.
+        // Mouse cursor stays default so the field still reads as
+        // text-editable.
+        //
+        // Initiate the OS drag only on actual cursor MOVEMENT while a
+        // mouse button is held, not on the bare press. Firing on every
+        // press fights child TouchAreas: a press that lands on a rail row
+        // would otherwise tell the compositor "drag pending here" — and
+        // on Wayland subsequent presses then route to the compositor's
+        // drag handler instead of back to the app. The `pressed` guard
+        // ensures we only call `drag_window()` once per gesture.
         TouchArea {
             mouse-cursor: default;
-            pointer-event(event) => {
-                if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
+            moved => {
+                if (self.pressed) {
                     root.request-window-drag();
                 }
             }
