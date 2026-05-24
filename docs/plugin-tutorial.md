@@ -1,27 +1,9 @@
 # Plugin tutorial: build a greetings plugin
 
-This walks you from an empty directory to a working High Beam plugin that says
-hello in a chosen language when the user types `greet <name>`. Plan an hour;
-most of that will be reading. Real authoring time is ~15 minutes once you've
-done it once.
-
-By the end you will have:
-
-- A `plugins/greetings/` directory the daemon loads on startup.
-- A `manifest.json` declaring the capabilities the plugin needs.
-- A `plugin.js` exporting an `async function* query()` that yields rows.
-- A vitest suite covering the trigger and a couple of edge cases.
-- The plugin running live in the launcher.
-
-If you already know the shape and just want a reference, jump to
-[sdk-reference.md](./sdk-reference.md). If you want copy-pasteable recipes for
-specific patterns, jump to [plugin-cookbook.md](./plugin-cookbook.md).
-
-## What you're building
-
-The plugin triggers on the word `greet`. Type `greet Alice` and the launcher
-shows three rows — one English, one Dutch, one Spanish — each of which copies
-the rendered greeting to the clipboard when picked.
+Walks from empty directory → working High Beam plugin that says hello
+in a chosen language. Triggers on the word `greet`. Type `greet Alice`
+and the launcher shows three rows — one English, one Dutch, one Spanish
+— each of which copies the rendered greeting to the clipboard.
 
 ```
 > greet Alice
@@ -165,23 +147,11 @@ export async function* query(input, _signal) {
 }
 ```
 
-The shape worth highlighting:
-
-- **Keyword gate first.** The regex bails before any allocation when the user
-  isn't reaching for this plugin. Every keystroke fans out to every loaded
-  plugin in parallel; cheap rejection paths are how you stay invisible.
-- **Generator yields one row at a time.** The host renders them
-  progressively. For three rows it doesn't matter, but the muscle memory of
-  "yield, don't return an array" pays off when you wire up an HTTP fetch
-  later.
-- **`key` is stable per row.** `greet:en` will always be the English row,
-  regardless of which name the user typed. Frecency keys on
-  `(plugin_name, result.key)`, so a stable key means "pick the English row
-  once" bumps the English row on future runs.
-- **No `weight`, no `pinned`.** The plugin can leave both off and let the
-  default ranking (weight 0 modulated by frecency) sort it out. You'd reach
-  for `pinned: true` if you wanted this to always sit above non-pinned
-  matches from other plugins.
+Worth knowing about that shape: the regex gates cheaply (every
+keystroke fans out to every plugin in parallel, so cheap rejection is
+how a plugin stays invisible), `key` is stable per row so frecency
+bumps the right row across queries, and we leave `weight` / `pinned`
+off to fall through to the default ranking.
 
 ## Step 4 — run it
 
@@ -207,14 +177,9 @@ If they don't:
 
 ## Step 5 — iterate
 
-You'll want a fast feedback loop. Three knobs:
-
-- **`console.log` to plugin.log.** Anything you print goes to
-  `plugins/greetings/plugin.log` with a timestamp and level. Useful for
-  "what's the actual `input` here?" sanity checks.
-- **Restart the daemon to reload.** There's no hot reload in v1. Quit and
-  rerun `cargo run`.
-- **Run query() under vitest.** The fastest loop. See Step 6.
+Fastest feedback loop is vitest (Step 6 below). For ad-hoc debugging,
+`console.log` lands in `plugins/greetings/plugin.log`. Daemon edits
+don't hot-reload in v1 — restart `cargo run`.
 
 Let's add the `greet <lang> <name>` wrinkle — when the user types
 `greet nl Alice`, Dutch should sort to the top.
@@ -393,59 +358,13 @@ cp -r plugins/greetings "$XDG_DATA_HOME/high-beam/plugins/"
 
 Restart High Beam. Type `greet Alice`. Done.
 
-## Step 8 — publish as install-by-URL
-
-Once the plugin is working locally, hand it out via `install <url>`
-instead of asking users to copy directories. The full publishing
-checklist lives in
-[plugin-authoring.md](./plugin-authoring.md#publishing--distribution);
-the short version is:
-
-1. `tar -czf greetings.tar.gz -C plugins/greetings .`
-2. Upload `greetings.tar.gz` and `manifest.json` to any HTTP(S) host
-   (S3, GitHub Releases, your own server).
-3. Add `archiveUrl` + `manifestUrl` to `manifest.json` so the install
-   flow knows where to download from and where to look for updates:
-
-   ```json
-   {
-     "name": "greetings",
-     "version": "1.0.0",
-     "archiveUrl": "https://example.com/greetings/1.0.0/greetings.tar.gz",
-     "manifestUrl": "https://example.com/greetings/manifest.json"
-   }
-   ```
-
-4. Tell your users to type `install https://example.com/greetings/manifest.json`
-   in the launcher. They get a streaming "Installing greetings…" → "Installed
-   greetings v1.0.0" row; the plugin is live immediately, no restart.
-5. When you ship a new version, bump `version` in the hosted manifest +
-   archive. Users run `update` to pick it up.
-
-The installer keeps the previous install at `<name>.backup.<unix_ms>/`
-so a botched ship is recoverable by hand.
-
 ## Where to go next
 
-- [sdk-reference.md](./sdk-reference.md) — complete SDK reference, one section
-  per `highbeam:*` module. Look here when you want to know what a function
-  takes and returns.
-- [plugin-cookbook.md](./plugin-cookbook.md) — recipes for common patterns:
-  fuzzy matching a bundled list, caching expensive computations, HTTP with
-  timeout + abort, cross-platform branching, mocking SDK calls in vitest.
-- [plugin-authoring.md](./plugin-authoring.md) — the overview hub if you
-  need to re-find any of the above.
+- [sdk-reference.md](./sdk-reference.md) — every `highbeam:*` module's
+  signatures and behaviour.
+- [plugin-cookbook.md](./plugin-cookbook.md) — recipes (fuzzy match,
+  HTTP+abort, options, vitest mocking, etc.).
+- [plugin-authoring.md § Publishing](./plugin-authoring.md#publishing--distribution)
+  — ship as `install <url>`.
 
-Real plugins to read for inspiration (all under `plugins/`):
-
-- `echo` — minimal `copy(input)`.
-- `calculator` — pinned inline results, npm-free expression parser.
-- `paper-size` — inlined data, substring filter.
-- `http-codes` — bundled JSON loaded via `fs.readText`.
-- `dnd` — bundled JSON + `match.fuzzy` ranking.
-- `app-launcher` — `fs.readDir` + `icons.forPath` + `match.fuzzy`,
-  cross-platform.
-- `xkcd` — HTTP, `fs.cache` for an index, fuzzy title search.
-- `slow-echo` — streaming + abort.
-- `frecency-demo` — equal-weight rows to demonstrate pick-bumping.
-- `echo-ts` — TypeScript variant with a `tsconfig.json`.
+Real plugins under `plugins/` are the best read for inspiration.

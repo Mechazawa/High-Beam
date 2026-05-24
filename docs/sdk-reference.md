@@ -5,10 +5,9 @@ Complete reference for every `highbeam:*` module. Mirrors the `.d.ts` files in
 (`tests/sdk_shape.rs`) that pins the exported symbols, so signatures in this
 document stay accurate.
 
-For runtime mechanics — how queries dispatch, how cancellation cascades, how
-results merge across plugins — see [internals.md](./internals.md). For
-a step-by-step build, see [plugin-tutorial.md](./plugin-tutorial.md). For
-copy-pasteable patterns, see [plugin-cookbook.md](./plugin-cookbook.md).
+Companion docs: [plugin-tutorial.md](./plugin-tutorial.md) (step-by-step
+build), [plugin-cookbook.md](./plugin-cookbook.md) (recipes),
+[internals.md](./internals.md) (host internals).
 
 ## Conventions
 
@@ -37,11 +36,18 @@ interface Result {
     key: string;             // stable per (plugin, conceptual result)
     title: string;
     subtitle?: string;
+    icon?: string;           // `data:image/<type>;base64,...` URI
     weight?: number;         // 0..100; higher ranks first
     pinned?: boolean;        // sort above non-pinned regardless of weight
     action: Action;
+    altAction?: Action;      // optional alternate (Alt/Shift/Cmd/Ctrl + Enter)
+    altTitle?: string;       // shown in place of `title` while alt-mod held
+    altSubtitle?: string;    // shown in place of `subtitle` while alt-mod held
 }
 
+// Actions plugin code can construct. Host-only variants (quit,
+// openSettings, reloadPlugin, installPlugin, updatePlugins, noop) are
+// produced by the Core built-in only — never by JS plugins.
 type Action =
     | { kind: 'openUrl'; url: string }
     | { kind: 'copy'; text: string }
