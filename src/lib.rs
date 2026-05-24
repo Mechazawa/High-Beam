@@ -17,5 +17,7 @@ pub mod settings_ui;
 pub mod theme;
 pub mod ui;
 pub mod window;
+#[cfg(target_os = "linux")]
+pub mod window_wayland;
 
 pub use ui::QueryWindow;

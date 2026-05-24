@@ -22,6 +22,17 @@ use crate::window;
 pub struct Options {
     /// Open the window immediately after the daemon starts.
     pub open_on_start: bool,
+    /// Single-shot: skip the IPC socket bind and the hotkey listener, and
+    /// quit the event loop on the first dismiss. The launcher behaves as
+    /// an ephemeral process — every WM keybind invocation cold-starts a
+    /// fresh one.
+    pub once: bool,
+    /// `XDG_ACTIVATION_TOKEN` consumed from this process's environment by
+    /// the CLI entry point. Used only when `open_on_start` is true — that's
+    /// the cold-start path where the launching terminal handed us a token.
+    /// The IPC path forwards its own token through the socket; see
+    /// [`crate::ipc::Command::Open`].
+    pub activation_token: Option<String>,
     /// Path to the unix socket we'll bind for single-instance.
     pub socket_path: PathBuf,
     /// Override for the plugins directory. `None` uses the default search
@@ -74,6 +85,12 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
 
     settings_controller.wire(&window);
 
+    // `--once` flips a process-wide flag read by every dismiss path in
+    // `window`. When set, dismissing the launcher also quits the event
+    // loop so the process exits. Set BEFORE `window::configure` registers
+    // the escape/blur callbacks so they see the right value when they fire.
+    window::set_once_mode(options.once);
+
     // Configure the window only after the settings controller exists —
     // `configure` wires the drag/recenter callbacks against the live
     // controller so dragged positions flow into the same on-disk file the
@@ -83,10 +100,20 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     // Keep the host alive for the daemon's lifetime; `Drop` sends Shutdown.
     let _plugin_host = app::start(&window, options.plugins_dir.clone(), settings_controller.clone())?;
 
-    spawn_ipc_listener(&options.socket_path, window.as_weak(), settings_controller.clone())?;
+    // Single-shot mode skips the IPC bind: every invocation is a fresh
+    // process, so there's no "already running" daemon to forward to and
+    // no single-instance lock to maintain.
+    if !options.once {
+        spawn_ipc_listener(&options.socket_path, window.as_weak(), settings_controller.clone())?;
+    }
 
     #[cfg(target_os = "macos")]
-    let _hotkey_guard = {
+    let _hotkey_guard = if options.once {
+        // The hotkey owns an OS-level binding for the daemon's lifetime;
+        // an ephemeral once-shot process registering and unregistering on
+        // every press would race with whatever just sent us the keystroke.
+        None
+    } else {
         let reg = spawn_hotkey_listener(window.as_weak(), &hotkey_spec, settings_controller.clone());
         if let Some(reg) = reg {
             let shared = std::sync::Arc::new(reg);
@@ -102,7 +129,7 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     let _ = hotkey_spec;
 
     if options.open_on_start {
-        window::show(&window, &settings_controller);
+        window::show(&window, &settings_controller, options.activation_token.as_deref());
     }
 
     // `run_event_loop_until_quit` (not `window.run()`) — the daemon must
@@ -120,12 +147,12 @@ fn spawn_ipc_listener(
     let server = Server::bind(socket_path)?;
     thread::Builder::new().name("highbeam-ipc".into()).spawn(move || {
         let result = server.run(move |cmd| match cmd {
-            Command::Open => {
+            Command::Open { activation_token } => {
                 let weak = weak.clone();
                 let settings = settings.clone();
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak.upgrade() {
-                        window::show(&w, &settings);
+                        window::show(&w, &settings, activation_token.as_deref());
                     }
                 });
             }
@@ -248,7 +275,10 @@ fn spawn_hotkey_listener(
                 let settings = settings.clone();
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak.upgrade() {
-                        window::show(&w, &settings);
+                        // The macOS hotkey path doesn't use an activation
+                        // token — `activate_and_make_key` handles focus
+                        // itself via `NSApp.activate`.
+                        window::show(&w, &settings, None);
                     }
                 });
             }

@@ -10,24 +10,46 @@ use std::path::{Path, PathBuf};
 
 /// Commands accepted by the running daemon. Wire format is stable; do not
 /// rename without considering compat with running daemons.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     /// Open the query window (or focus it if already open).
-    Open,
+    ///
+    /// `activation_token` carries an `XDG_ACTIVATION_TOKEN` forwarded from
+    /// the invoking process so the daemon can grab focus on Wayland (the
+    /// analog of macOS's `NSApp.activate(ignoringOtherApps:)`). `None` is
+    /// expected for invocations that have no token to offer — e.g. a WM
+    /// keybind that runs `high-beam --open` from a context where
+    /// `XDG_ACTIVATION_TOKEN` was already consumed, or non-Wayland callers.
+    Open { activation_token: Option<String> },
 }
 
 impl Command {
-    fn as_wire(self) -> &'static str {
+    /// Wire format:
+    /// * `"open"` — no token (legacy + WM keybind path)
+    /// * `"open <token>"` — with token; `<token>` may not contain whitespace
+    ///   (real XDG activation tokens are opaque ASCII without spaces).
+    fn as_wire(&self) -> String {
         match self {
-            Self::Open => "open",
+            Self::Open { activation_token: None } => "open".to_owned(),
+            Self::Open { activation_token: Some(t) } => format!("open {t}"),
         }
     }
 
     fn parse(line: &str) -> Result<Self, ParseError> {
-        match line.trim() {
-            "open" => Ok(Self::Open),
-            other => Err(ParseError::Unknown(other.to_owned())),
+        let trimmed = line.trim();
+        if trimmed == "open" {
+            return Ok(Self::Open { activation_token: None });
         }
+        if let Some(rest) = trimmed.strip_prefix("open ") {
+            let token = rest.trim();
+            if token.is_empty() {
+                return Ok(Self::Open { activation_token: None });
+            }
+            return Ok(Self::Open {
+                activation_token: Some(token.to_owned()),
+            });
+        }
+        Err(ParseError::Unknown(trimmed.to_owned()))
     }
 }
 
@@ -122,7 +144,7 @@ impl Drop for Server {
 /// Returns an [`io::Error`] if connecting or writing fails. The common case
 /// is `ConnectionRefused`/`NotFound` — no daemon listening, caller should
 /// fall back to starting one.
-pub fn send(path: &Path, command: Command) -> io::Result<()> {
+pub fn send(path: &Path, command: &Command) -> io::Result<()> {
     let mut stream = UnixStream::connect(path)?;
     writeln!(stream, "{}", command.as_wire())?;
     stream.flush()?;
@@ -145,10 +167,23 @@ mod tests {
 
     #[test]
     fn command_roundtrip_string() {
-        assert_eq!(Command::Open.as_wire(), "open");
-        assert_eq!(Command::parse("open\n").unwrap(), Command::Open);
-        assert_eq!(Command::parse("  open  ").unwrap(), Command::Open);
+        let bare = Command::Open { activation_token: None };
+        assert_eq!(bare.as_wire(), "open");
+        assert_eq!(Command::parse("open\n").unwrap(), bare);
+        assert_eq!(Command::parse("  open  ").unwrap(), bare);
+        // Empty token after the space degrades to no-token rather than an
+        // empty-string token — the compositor would reject empty anyway.
+        assert_eq!(Command::parse("open ").unwrap(), bare);
         assert!(Command::parse("nope").is_err());
+    }
+
+    #[test]
+    fn command_with_activation_token_roundtrips() {
+        let with_token = Command::Open {
+            activation_token: Some("xdg-foo-bar-123".to_owned()),
+        };
+        assert_eq!(with_token.as_wire(), "open xdg-foo-bar-123");
+        assert_eq!(Command::parse("open xdg-foo-bar-123\n").unwrap(), with_token);
     }
 
     #[test]
@@ -165,10 +200,11 @@ mod tests {
 
         // Tiny race window before the listener is ready.
         thread::sleep(Duration::from_millis(50));
-        send(&path, Command::Open).expect("client send");
+        let cmd = Command::Open { activation_token: None };
+        send(&path, &cmd).expect("client send");
 
         let received = rx.recv_timeout(Duration::from_secs(1)).expect("receive command");
-        assert_eq!(received, Command::Open);
+        assert_eq!(received, cmd);
 
         drop(handle);
         let _ = std::fs::remove_file(&path);

@@ -249,6 +249,23 @@ objc2-app-kit = { version = "0.2", features = [
 objc2-foundation = { version = "0.2", features = ["NSThread"] }
 raw-window-handle = "0.6"
 
+# Linux-only:
+#   * `wayland-client` + `wayland-backend` — share winit's wl_display via
+#     `Backend::from_foreign_display` so we can talk to the same compositor
+#     winit is talking to, without opening a second connection.
+#   * `wayland-protocols` (`staging` feature) — generated bindings for
+#     `xdg_activation_v1`, the focus-grab analog of macOS's
+#     `NSApp.activate(ignoringOtherApps:)`. Used by `window::show` when an
+#     `XDG_ACTIVATION_TOKEN` is in scope (own env on cold start, or
+#     forwarded across IPC for the daemon-already-running path).
+#   * `raw-window-handle` — same role as on macOS, pulls the wl_surface +
+#     wl_display ptrs out of winit; version pinned to winit-0.30's.
+[target.'cfg(target_os = "linux")'.dependencies]
+wayland-client = "0.31"
+wayland-backend = { version = "0.3", features = ["client_system"] }
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+raw-window-handle = "0.6"
+
 [build-dependencies]
 slint-build = "1.16"
 

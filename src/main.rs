@@ -22,14 +22,35 @@ fn main() -> ExitCode {
         }
     };
 
+    // The Wayland focus-grab path needs an `XDG_ACTIVATION_TOKEN` for the
+    // compositor to honor the request. On cold-start the token is consumed
+    // by `daemon::run` directly; on the IPC path we forward it across the
+    // socket so the already-running daemon can use it as the analog of
+    // macOS's `NSApp.activate(ignoringOtherApps:)`. Either way we remove
+    // the env var immediately so child processes (plugins, `open::that(…)`,
+    // etc.) don't inherit a stale token.
+    let activation_token = consume_activation_token();
+
     // `--open` first tries to contact a running daemon; if there isn't one
     // it falls through and starts a daemon that opens immediately.
-    if args.open && ipc::send(&socket_path, Command::Open).is_ok() {
-        return ExitCode::SUCCESS;
+    //
+    // `--once` deliberately skips the IPC fast-path: every invocation
+    // cold-starts a fresh process that exits on dismiss, no single-instance
+    // lock, no socket. That sidesteps the Slint-1.16 Wayland re-show issues
+    // entirely. `--once` implies `--open`.
+    if args.open && !args.once {
+        let cmd = Command::Open {
+            activation_token: activation_token.clone(),
+        };
+        if ipc::send(&socket_path, &cmd).is_ok() {
+            return ExitCode::SUCCESS;
+        }
     }
 
     let options = Options {
-        open_on_start: args.open,
+        open_on_start: args.open || args.once,
+        once: args.once,
+        activation_token,
         socket_path,
         plugins_dir: args.plugins_dir,
     };
@@ -41,4 +62,26 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Read `XDG_ACTIVATION_TOKEN` (Wayland) or `DESKTOP_STARTUP_ID` (X11) from
+/// the process environment and clear them. The freedesktop startup-notify
+/// spec requires the consumer to unset the variable so it isn't inherited
+/// by unrelated child processes — see [`winit::platform::startup_notify`].
+fn consume_activation_token() -> Option<String> {
+    // Prefer the Wayland variable; fall back to the X11 one for the rare
+    // cross-protocol launcher (e.g., XWayland app launching us). The
+    // variable name is opaque to the daemon — it just forwards whichever
+    // it got.
+    let token = std::env::var("XDG_ACTIVATION_TOKEN")
+        .ok()
+        .or_else(|| std::env::var("DESKTOP_STARTUP_ID").ok());
+    // SAFETY: documented as the canonical consume-and-clear pattern for
+    // these vars; running synchronously in `main` before any threads spawn
+    // means no other thread can observe a torn read.
+    unsafe {
+        std::env::remove_var("XDG_ACTIVATION_TOKEN");
+        std::env::remove_var("DESKTOP_STARTUP_ID");
+    }
+    token.filter(|s| !s.is_empty())
 }

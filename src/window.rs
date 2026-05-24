@@ -4,7 +4,10 @@
 //! the .slint file can't express — sizing, native center positioning,
 //! blur-to-close, macOS app activation — lives here.
 
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
+use std::time::Instant;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -16,6 +19,56 @@ use crate::QueryWindow;
 use crate::settings::WindowPosition;
 use crate::settings_ui::SettingsController;
 use crate::theme::Theme;
+
+/// Process-wide single-shot flag. When true, every dismiss path also calls
+/// `slint::quit_event_loop` so the launcher process exits on first dismiss
+/// instead of going dormant for the next hotkey. Set once at daemon
+/// startup via [`set_once_mode`]; reads are race-free because nothing
+/// ever flips it back.
+static ONCE_MODE: AtomicBool = AtomicBool::new(false);
+
+/// Enable single-shot dismiss-quits behaviour. Called once from
+/// `daemon::run` before any dismiss handler is registered.
+pub fn set_once_mode(once: bool) {
+    ONCE_MODE.store(once, Ordering::Relaxed);
+}
+
+fn quit_if_once() {
+    if ONCE_MODE.load(Ordering::Relaxed) {
+        // `Err` here means the event loop wasn't running, which would be
+        // a programming bug — the only callers are dismiss handlers that
+        // only run while the loop is alive. Swallow so we don't poison
+        // shutdown on the way out.
+        let _ = slint::quit_event_loop();
+    }
+}
+
+/// Grace window after `show()` during which a `Focused(false)` event is
+/// treated as compositor noise rather than a user dismiss. On GNOME-Mutter
+/// the activation handoff fires a spurious blur ~1s after we appear (the
+/// launching terminal's prompt redraws, focus-stealing-prevention kicks
+/// in). 1500ms is long enough to swallow that without making the launcher
+/// feel sticky on a deliberate click-away.
+#[cfg(target_os = "linux")]
+const BLUR_GRACE_MS: u64 = 1500;
+
+static EPOCH: OnceLock<Instant> = OnceLock::new();
+static LAST_SHOW_MS: AtomicU64 = AtomicU64::new(0);
+
+fn mark_show_time() {
+    let start = EPOCH.get_or_init(Instant::now);
+    let ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+    LAST_SHOW_MS.store(ms, Ordering::Relaxed);
+}
+
+#[cfg(target_os = "linux")]
+fn ms_since_show() -> u64 {
+    let Some(start) = EPOCH.get() else {
+        return u64::MAX;
+    };
+    let now_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+    now_ms.saturating_sub(LAST_SHOW_MS.load(Ordering::Relaxed))
+}
 
 /// Wire up the `QueryWindow` callbacks and native-window behaviour.
 ///
@@ -65,17 +118,44 @@ pub(crate) fn configure(window: &QueryWindow, settings: SettingsController) {
     // is guaranteed to land on the input. Calling `invoke_focus_input` from
     // `show()` is too early on macOS — the NSWindow isn't yet the key window
     // and the request gets dropped, leaving the user clicking into the field.
+    //
+    // Focused(false) → hide-on-blur runs on both macOS and Linux. The Linux
+    // path is debounced by `BLUR_GRACE_MS` to swallow the spurious blur that
+    // GNOME-Mutter fires ~1s after we appear (during the activation handoff:
+    // the launching terminal's prompt redraws, focus-stealing-prevention
+    // kicks in). The old accesskit-panic concern that kept this disabled is
+    // moot now that `hide()` on Linux routes through `set_is_hidden(true)`
+    // instead of Slint's broken Wayland `hide()`.
     let weak_for_focus = window.as_weak();
     let settings_for_focus = settings;
     window.window().on_winit_window_event(move |_slint_win, event| {
         match event {
             winit::event::WindowEvent::Focused(true) => {
                 if let Some(w) = weak_for_focus.upgrade() {
-                    w.invoke_focus_input();
+                    // Only land focus on the launcher input when the launcher
+                    // is the visible view — otherwise we'd yank focus off the
+                    // settings rail / Done FocusScope every time the window
+                    // regains focus (drag end, click-back, compositor reshuffle),
+                    // and the launcher's invisible TextInput would eat Esc.
+                    if w.get_current_view() == 0 {
+                        w.invoke_focus_input();
+                    }
                 }
             }
             winit::event::WindowEvent::Focused(false) => {
+                #[cfg(target_os = "linux")]
+                if ms_since_show() < BLUR_GRACE_MS {
+                    return EventResult::Propagate;
+                }
                 if let Some(w) = weak_for_focus.upgrade() {
+                    // Settings and confirm views own modal-ish work — a
+                    // native drag transiently steals focus on every platform
+                    // and would auto-dismiss what the user is mid-editing.
+                    // VIEW-QUERY (0) keeps blur-to-dismiss; anything else
+                    // requires Esc.
+                    if w.get_current_view() != 0 {
+                        return EventResult::Propagate;
+                    }
                     hide_and_persist_position(&w, &settings_for_focus);
                 }
             }
@@ -111,19 +191,40 @@ pub(crate) fn apply_theme(window: &QueryWindow, theme: &Theme) {
 /// Idempotent — calling while already visible re-applies position and
 /// re-focuses ("focuses it if already open").
 ///
-/// On macOS, `window.show()` + `invoke_focus_input()` alone isn't enough:
-/// our process isn't necessarily frontmost, the new `NSWindow` isn't yet
-/// the key window, and Slint's focus request gets dropped. We replicate
-/// the Spotlight/Alfred/Raycast pattern: activate the app process and make
-/// the `NSWindow` key + frontmost ourselves before asking Slint for focus.
-pub(crate) fn show(window: &QueryWindow, settings: &SettingsController) {
+/// Focus-grab is platform-specific:
+/// * macOS uses `NSApp.activate(ignoringOtherApps:)` +
+///   `makeKeyAndOrderFront`; no token plumbing.
+/// * Wayland uses `xdg_activation_v1.activate(token, surface)` — the
+///   `activation_token` is forwarded from the invoking process (terminal
+///   keybind, IPC `--open`, etc.). Without it the compositor will not
+///   raise our surface above whatever is currently focused, and on
+///   GNOME-Mutter the launcher silently opens behind the active window.
+/// * X11 / other paths ignore the token; winit handles focus there.
+pub(crate) fn show(window: &QueryWindow, settings: &SettingsController, activation_token: Option<&str>) {
+    // On Linux the previous dismiss may have left us in the `is-hidden`
+    // collapsed-1×1 state instead of going through Slint's hide (which is
+    // broken on Wayland — see `window_wayland`). Flip back BEFORE the show
+    // call so Slint sees the real size when it re-applies layout.
+    #[cfg(target_os = "linux")]
+    window.set_is_hidden(false);
+
     if let Err(err) = window.show() {
         tracing::error!(%err, "failed to show window");
         return;
     }
+    mark_show_time();
     apply_saved_or_centered_position(window, settings);
     #[cfg(target_os = "macos")]
-    macos::activate_and_make_key(window);
+    {
+        let _ = activation_token; // unused on macOS; NSApp.activate covers it
+        macos::activate_and_make_key(window);
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(token) = activation_token {
+        crate::window_wayland::activate_with_token(window, token);
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    let _ = activation_token;
     window.invoke_focus_input();
 }
 
@@ -131,11 +232,27 @@ pub(crate) fn show(window: &QueryWindow, settings: &SettingsController) {
 /// every close path (Esc, blur, programmatic) funnels through here.
 /// Does *not* persist position; use [`hide_and_persist_position`] for the
 /// user-driven close paths.
+///
+/// On Linux this DELIBERATELY does NOT call `Window::hide()`. Slint 1.16's
+/// Wayland hide path destroys the underlying winit window via `suspend()`,
+/// and when the destroy fails (because Slint's renderer holds extra
+/// `Arc<winit::Window>` refs we can't drop from app code) the state still
+/// flips to "None" — so the *next* `show()` won't re-attach the surface
+/// and the launcher silently never opens again. Instead we set an
+/// `is-hidden` flag in the .slint file that collapses the visible content
+/// to 1×1 transparent, keeping Slint's `shown` state intact so subsequent
+/// activations work.
 pub(crate) fn hide(window: &QueryWindow) {
     window.invoke_clear_input();
+    #[cfg(target_os = "linux")]
+    {
+        window.set_is_hidden(true);
+    }
+    #[cfg(not(target_os = "linux"))]
     if let Err(err) = window.hide() {
         tracing::error!(%err, "failed to hide window");
     }
+    quit_if_once();
 }
 
 /// Snapshot the current window position, hand it to a background thread
@@ -148,14 +265,22 @@ pub(crate) fn hide_and_persist_position(window: &QueryWindow, settings: &Setting
     window.invoke_persist_dismiss(window.get_query_text());
 
     if let Some(pos) = capture_outer_position(window) {
-        let settings = settings.clone();
-        if let Err(err) = thread::Builder::new()
-            .name("highbeam-settings-position".into())
-            .spawn(move || {
-                settings.set_launcher_position(pos);
-            })
-        {
-            tracing::warn!(%err, "settings: position-persist thread spawn failed");
+        if ONCE_MODE.load(Ordering::Relaxed) {
+            // In single-shot we're about to `quit_event_loop` and exit
+            // the process — spawning a fire-and-forget thread races the
+            // process death, so do the disk write inline. The user already
+            // committed (Esc/Enter); the extra few ms is invisible.
+            settings.set_launcher_position(pos);
+        } else {
+            let settings = settings.clone();
+            if let Err(err) = thread::Builder::new()
+                .name("highbeam-settings-position".into())
+                .spawn(move || {
+                    settings.set_launcher_position(pos);
+                })
+            {
+                tracing::warn!(%err, "settings: position-persist thread spawn failed");
+            }
         }
     }
     hide(window);

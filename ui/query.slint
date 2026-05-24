@@ -114,6 +114,18 @@ export component QueryWindow inherits Window {
     in-out property <length> window-width: 760px;
     in-out property <length> window-border-radius: 14px;
 
+    // True while the launcher is dismissed but the toplevel surface stays
+    // alive. Used by the Linux dismiss path: Slint 1.16's Wayland `hide()`
+    // tries to destroy the winit window and is broken when the backend
+    // holds extra `Arc<winit::Window>` refs (the destroy fails silently
+    // but state still flips to "None", so subsequent `show()` calls don't
+    // re-attach — see `i-slint-backend-winit-1.16.1/winitwindowadapter.rs:
+    // 1116`). Setting this flag collapses the window to a 1×1 transparent
+    // surface and hides the content, which is indistinguishable from a
+    // real hide visually while keeping Slint's `shown` state intact.
+    // macOS / X11 still use the real `Window::hide()` and ignore this.
+    in-out property <bool> is-hidden: false;
+
     callback query-edited(string);
     callback escape-pressed();
     // Fires from Rust just before the window hides — Esc, focus loss,
@@ -251,6 +263,13 @@ export component QueryWindow inherits Window {
     // list and option inputs both have breathing room.
     property <length> settings-height: 480px;
 
+    // Size is *not* collapsed when `is-hidden` is true — shrinking to 1×1
+    // sends `xdg_toplevel.set_max_size(1,1)` which fails Wayland's min/max
+    // consistency check against the (still-large) layout min that Slint
+    // derives from the child components. Keeping the size and only hiding
+    // the inner content via `visible: !is-hidden` below yields the same
+    // visual result (the window background is `transparent` already, so
+    // an invisible inner Rectangle paints nothing).
     width: root.window-width;
     height: root.current-view == root.VIEW-SETTINGS
         ? settings-height
@@ -259,8 +278,11 @@ export component QueryWindow inherits Window {
             : input-height + (results.length > 0 ? rows-height + 1px : 0);
 
     // Translucent rounded panel sits inside a transparent window so the corner
-    // radius reads cleanly on the desktop.
+    // radius reads cleanly on the desktop. `visible: !is-hidden` paired with
+    // the width/height collapse above makes the dismissed-on-Linux state look
+    // like a real hide without going through Slint's broken Wayland hide.
     Rectangle {
+        visible: !root.is-hidden;
         background: root.background-color;
         border-radius: root.window-border-radius;
         border-width: 1px;
