@@ -103,7 +103,7 @@ async fn resolve_icon(ctx: &Ctx<'_>, path: &str, size: u32) -> JsResult<String> 
     // a real fault, not "no icon found". Surface it as IconError so plugins
     // can distinguish "extraction crashed" from "no usable icon" (which
     // falls back to a transparent PNG below).
-    let (bytes, mime) tokio::task::spawn_blocking(move || extract_icon_bytes(&path_owned, size))
+    let (bytes, mime) = tokio::task::spawn_blocking(move || extract_icon_bytes(&path_owned, size))
         .await
         .map_err(|e| throw_io(ctx, &join_error_message(&e)))?
         .unwrap_or_else(|| (fallback_icon_bytes().to_vec(), "image/png"));
