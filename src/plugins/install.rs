@@ -448,6 +448,16 @@ pub fn move_into_plugins_dir(payload_root: &Path, plugins_dir: &Path, name: &str
     Ok(destination)
 }
 
+/// Recursive copy used as the cross-filesystem fallback for the installer's
+/// rename-into-place step. `entry.file_type()` is `lstat`-equivalent — it
+/// does NOT follow symlinks. This is deliberately defensive: the source is a
+/// freshly-extracted plugin archive (potentially attacker-controlled), so a
+/// symlink inside the staging dir could point at `/etc/passwd` or similar.
+/// Skipping symlinks matches the `..`-traversal rejection the extractors do.
+///
+/// `bundle_install` has the sister implementation that DOES follow symlinks
+/// — its source is the trusted `.app` bundle, where following symlinks is
+/// what keeps the user-dir copy self-contained.
 fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dst)?;
     for entry in std::fs::read_dir(src)? {
@@ -460,6 +470,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
         } else if meta.is_file() {
             std::fs::copy(&from, &to)?;
         }
+        // Symlinks / sockets / devices fall through — see fn docs.
     }
     Ok(())
 }
