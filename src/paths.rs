@@ -90,6 +90,19 @@ pub(crate) fn data_dir() -> Option<PathBuf> {
     project_dirs().ok().map(|d| d.data_dir().to_path_buf())
 }
 
+/// Per-user plugin install directory under [`data_dir`]. The loader scans
+/// this for `manifest.json` files at startup; the installer and the
+/// first-launch bundle-seed lay plugins here.
+pub(crate) fn plugins_dir() -> Option<PathBuf> {
+    data_dir().map(|d| d.join("plugins"))
+}
+
+/// Platform-specific cache directory. macOS: `~/Library/Caches/high-beam/`;
+/// Linux: `$XDG_CACHE_HOME/high-beam/` (default `~/.cache/high-beam/`).
+pub(crate) fn cache_dir() -> Option<PathBuf> {
+    project_dirs().ok().map(|d| d.cache_dir().to_path_buf())
+}
+
 /// Best-effort parent-directory creation for paths we own. Returns `Ok` if the
 /// directory already exists or was created.
 pub(crate) fn ensure_parent_dir(path: &std::path::Path) -> io::Result<()> {

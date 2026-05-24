@@ -81,27 +81,12 @@ pub struct PendingConfirmation {
     pub summary: ConfirmationSummary,
 }
 
-/// Caps in `remote` that are not present in `installed`.
-///
-/// Used to decide whether an update needs a confirmation prompt and to
-/// flag individual rows in the confirmation view.
-#[must_use]
-pub fn new_caps<'a>(remote: &'a [String], installed: &[String]) -> Vec<&'a str> {
-    remote
-        .iter()
-        .filter(|cap| !installed.contains(cap))
-        .map(String::as_str)
-        .collect()
-}
-
-/// Whether a given update requires a confirmation prompt.
-///
-/// Returns `true` when `remote_caps` introduces at least one capability that
-/// is not in `installed_caps`.  The decision is a pure function so it can be
-/// unit-tested without touching the UI.
+/// Whether a given update requires a confirmation prompt — i.e. whether
+/// `remote_caps` introduces a capability that isn't already declared in
+/// `installed_caps`.
 #[must_use]
 pub fn update_needs_prompt(remote_caps: &[String], installed_caps: &[String]) -> bool {
-    !new_caps(remote_caps, installed_caps).is_empty()
+    remote_caps.iter().any(|cap| !installed_caps.contains(cap))
 }
 
 #[cfg(test)]
@@ -110,33 +95,6 @@ mod tests {
 
     fn strs(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| (*s).to_owned()).collect()
-    }
-
-    // --- new_caps ---
-
-    #[test]
-    fn new_caps_empty_when_remote_subset_of_installed() {
-        let installed = strs(&["actions", "http"]);
-        let remote = strs(&["actions"]);
-        assert!(new_caps(&remote, &installed).is_empty());
-    }
-
-    #[test]
-    fn new_caps_returns_caps_in_remote_not_in_installed() {
-        let installed = strs(&["actions"]);
-        let remote = strs(&["actions", "http", "fs.read"]);
-        let mut result = new_caps(&remote, &installed);
-        result.sort_unstable();
-        assert_eq!(result, vec!["fs.read", "http"]);
-    }
-
-    #[test]
-    fn new_caps_all_new_when_installed_empty() {
-        let installed: Vec<String> = Vec::new();
-        let remote = strs(&["actions", "http"]);
-        let mut result = new_caps(&remote, &installed);
-        result.sort_unstable();
-        assert_eq!(result, vec!["actions", "http"]);
     }
 
     // --- update_needs_prompt ---

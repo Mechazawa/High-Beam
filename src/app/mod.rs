@@ -46,9 +46,9 @@ pub struct PluginHost {
 /// Shared state for the install-confirmation gate. Held behind a `Mutex` so
 /// the Slint-thread callbacks and the runtime-thread install task can
 /// co-ordinate without data races.
-pub(crate) type ConfirmState = Arc<Mutex<Option<PendingConfirmation>>>;
+pub(super) type ConfirmState = Arc<Mutex<Option<PendingConfirmation>>>;
 
-pub(crate) enum HostMessage {
+pub(super) enum HostMessage {
     Query { id: u64, input: String },
     Task(actions::HostTask),
     Shutdown,

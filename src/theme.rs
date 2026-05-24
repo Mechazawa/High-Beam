@@ -138,8 +138,7 @@ impl Theme {
 
 /// Path the daemon reads on startup. `None` when the project dir can't be
 /// resolved (no `$HOME` etc.).
-#[must_use]
-pub fn default_theme_path() -> Option<PathBuf> {
+fn default_theme_path() -> Option<PathBuf> {
     paths::config_dir().ok().map(|dir| dir.join("theme.toml"))
 }
 

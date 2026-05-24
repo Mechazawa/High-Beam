@@ -22,18 +22,17 @@ use crate::ui::{PluginOption, PluginSlot};
 /// Display metadata for a plugin, extracted from its manifest and handed to
 /// the settings view so the right pane can show a header.
 #[derive(Debug, Clone, PartialEq)]
-pub struct PluginMetadata {
+struct PluginMetadata {
     /// Human-readable name — `display_name` when present, otherwise `name`.
-    pub display_name: String,
+    display_name: String,
     /// Optional semver string, ready to render with a `v` prefix.
-    pub version: Option<String>,
+    version: Option<String>,
     /// Optional human-readable description.
-    pub description: Option<String>,
+    description: Option<String>,
 }
 
 /// Extract display metadata from a manifest for the settings right pane.
-#[must_use]
-pub fn plugin_metadata(manifest: &Manifest) -> PluginMetadata {
+fn plugin_metadata(manifest: &Manifest) -> PluginMetadata {
     PluginMetadata {
         display_name: manifest.display_name.clone().unwrap_or_else(|| manifest.name.clone()),
         version: manifest.version.clone(),

@@ -765,13 +765,13 @@ fn normalize_async_iterator<'js>(ctx: &Ctx<'js>, value: Value<'js>) -> Result<Ob
 }
 
 /// Resolve the per-plugin cache directory under the host's cache root.
-/// Falls back to a temp-dir-rooted path if `ProjectDirs` can't resolve.
+/// Falls back to a temp-dir-rooted path when the platform cache dir can't
+/// be resolved (e.g. headless test envs without `$HOME`).
 pub(crate) fn default_cache_dir(plugin_name: &str) -> std::path::PathBuf {
-    if let Some(dirs) = directories::ProjectDirs::from("", "", "high-beam") {
-        dirs.cache_dir().join("plugins").join(plugin_name)
-    } else {
-        std::env::temp_dir().join("high-beam").join("plugins").join(plugin_name)
-    }
+    crate::paths::cache_dir()
+        .unwrap_or_else(|| std::env::temp_dir().join("high-beam"))
+        .join("plugins")
+        .join(plugin_name)
 }
 
 /// Resolves `highbeam:*` specifiers; rejects everything else.

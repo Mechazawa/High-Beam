@@ -8,8 +8,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use directories::ProjectDirs;
-
 use crate::plugins::log::{LogLevel, PluginLog};
 use crate::plugins::manifest::Manifest;
 use crate::plugins::runtime::{LifecycleReason, LoadedPlugin};
@@ -57,14 +55,9 @@ impl LoaderOptions {
         if dev.is_dir() {
             return Self { plugins_dir: dev };
         }
-        let platform = platform_plugins_dir().unwrap_or_else(|| PathBuf::from("plugins"));
+        let platform = crate::paths::plugins_dir().unwrap_or_else(|| PathBuf::from("plugins"));
         Self { plugins_dir: platform }
     }
-}
-
-fn platform_plugins_dir() -> Option<PathBuf> {
-    let dirs = ProjectDirs::from("", "", "high-beam")?;
-    Some(dirs.data_dir().join("plugins"))
 }
 
 /// Cheap synchronous scan of `plugins_dir` returning every well-formed

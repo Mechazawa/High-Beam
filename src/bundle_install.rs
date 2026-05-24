@@ -13,13 +13,11 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use directories::ProjectDirs;
-
 /// Install bundled default plugins into the user's plugin directory if the
 /// directory is empty or absent. Errors are logged and swallowed — a failed
 /// install must not prevent the daemon from booting.
 pub fn install_default_plugins_if_needed() {
-    let Some(user_dir) = user_plugins_dir() else {
+    let Some(user_dir) = crate::paths::plugins_dir() else {
         tracing::debug!("bundle-install: no platform plugin dir; skipping");
         return;
     };
@@ -67,11 +65,6 @@ pub fn install_default_plugins_if_needed() {
             "bundle-install: copy failed; user must install plugins manually",
         ),
     }
-}
-
-fn user_plugins_dir() -> Option<PathBuf> {
-    let dirs = ProjectDirs::from("", "", "high-beam")?;
-    Some(dirs.data_dir().join("plugins"))
 }
 
 /// Resolve the bundled plugin dir relative to the running executable.

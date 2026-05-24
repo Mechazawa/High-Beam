@@ -212,12 +212,11 @@ impl Snapshot {
     }
 }
 
-/// Resolve the on-disk path for the frecency DB. Returns `None` if
-/// `ProjectDirs` won't resolve.
+/// Resolve the on-disk path for the frecency DB. Returns `None` if the
+/// platform data directory can't be resolved.
 #[must_use]
 pub(crate) fn default_db_path() -> Option<PathBuf> {
-    let dirs = directories::ProjectDirs::from("", "", "high-beam")?;
-    Some(dirs.data_dir().join("frecency.sqlite"))
+    crate::paths::data_dir().map(|d| d.join("frecency.sqlite"))
 }
 
 #[cfg(test)]
