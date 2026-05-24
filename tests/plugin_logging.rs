@@ -13,7 +13,7 @@ use high_beam::plugins::manifest::Manifest;
 use high_beam::plugins::runtime::LoadedPlugin;
 use tokio_util::sync::CancellationToken;
 
-fn unique_tmp_dir(label: &str) -> PathBuf {
+fn fresh_tmp(label: &str) -> PathBuf {
     let mut p = std::env::temp_dir();
     p.push(format!(
         "high-beam-log-test-{label}-{}-{}",
@@ -65,7 +65,7 @@ fn assert_well_formed_lines(body: &str) {
 
 #[test]
 fn console_log_writes_to_plugin_log() {
-    let dir = unique_tmp_dir("console");
+    let dir = fresh_tmp("console");
     write_plugin(
         &dir,
         r#"{"name":"console-test","entry":"plugin.js","timeoutMs":2000,"capabilities":["actions"]}"#,
@@ -102,7 +102,7 @@ export async function* query(input, _signal) {
 
 #[test]
 fn query_exception_is_logged() {
-    let dir = unique_tmp_dir("throws");
+    let dir = fresh_tmp("throws");
     write_plugin(
         &dir,
         r#"{"name":"throws","entry":"plugin.js","timeoutMs":2000,"capabilities":[]}"#,
@@ -135,7 +135,7 @@ export async function* query(input, _signal) {
 
 #[test]
 fn timeout_is_logged_at_warn() {
-    let dir = unique_tmp_dir("timeout");
+    let dir = fresh_tmp("timeout");
     write_plugin(
         &dir,
         // 50ms budget vs setTimeout(1000) — the host timer task cancels and
@@ -173,7 +173,7 @@ fn tight_sync_loop_still_hits_timeout() {
     // Regression: a `while(true){}` body never yields, so a tokio-scheduled
     // watchdog on the same executor never wakes. The watchdog now runs on
     // the blocking pool; this proves the deadline still fires.
-    let dir = unique_tmp_dir("tight-loop");
+    let dir = fresh_tmp("tight-loop");
     write_plugin(
         &dir,
         r#"{"name":"tightloop","entry":"plugin.js","timeoutMs":50,"capabilities":[]}"#,
@@ -218,7 +218,7 @@ export async function* query(_input, _signal) {
 fn capability_violation_at_load_writes_to_plugin_log() {
     // Plugin imports `highbeam:http` without declaring `http`. The loader
     // must reject AND write the failure into plugin.log so users can debug.
-    let dir = unique_tmp_dir("capviolation");
+    let dir = fresh_tmp("capviolation");
     write_plugin(
         &dir,
         r#"{"name":"capviolation","entry":"plugin.js","timeoutMs":2000,"capabilities":[]}"#,
@@ -233,7 +233,7 @@ export async function* query(input, _signal) {
 
     // The loader scans a parent and treats each child as a plugin dir;
     // re-home the bad plugin under a scratch parent so siblings can't bleed in.
-    let scratch_parent = unique_tmp_dir("cap-parent");
+    let scratch_parent = fresh_tmp("cap-parent");
     let plugin_dir = scratch_parent.join("capviolation");
     fs::create_dir_all(&plugin_dir).expect("mk plugin dir");
     fs::rename(dir.join("manifest.json"), plugin_dir.join("manifest.json")).unwrap();

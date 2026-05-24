@@ -4,7 +4,7 @@
 //! and verifies the reloaded `LoadedPlugin` reflects the new code without
 //! restarting the runtime thread.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -14,15 +14,8 @@ use high_beam::plugins::runtime::LoadedPlugin;
 use high_beam::settings::Settings;
 use tokio_util::sync::CancellationToken;
 
-fn fresh_tmp(tag: &str) -> PathBuf {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("clock")
-        .as_nanos();
-    let p = std::env::temp_dir().join(format!("high-beam-reload-test-{tag}-{now}"));
-    std::fs::create_dir_all(&p).expect("mkdir tmp");
-    p
-}
+mod common;
+use common::fresh_tmp;
 
 fn write_plugin(root: &Path, name: &str, manifest: &str, entry: &str) {
     let dir = root.join(name);

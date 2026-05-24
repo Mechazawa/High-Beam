@@ -3,13 +3,15 @@
 //! `src/` because rquickjs evaluation needs a real tokio runtime.
 
 use std::fs;
-use std::path::PathBuf;
 use std::time::Duration;
 
 use high_beam::plugins::manifest::Manifest;
 use high_beam::plugins::result::{Action, PluginResult};
 use high_beam::plugins::runtime::LoadedPlugin;
 use tokio_util::sync::CancellationToken;
+
+mod common;
+use common::fresh_tmp;
 
 const ECHO_PLUGIN: &str = r#"
 import { copy } from "highbeam:actions";
@@ -55,19 +57,6 @@ export async function* query(input, signal) {
 }
 "#;
 
-fn unique_tmp_dir(label: &str) -> PathBuf {
-    let mut p = std::env::temp_dir();
-    p.push(format!(
-        "high-beam-test-{label}-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_nanos())
-    ));
-    fs::create_dir_all(&p).expect("create tmp plugin dir");
-    p
-}
-
 fn write_plugin(dir: &std::path::Path, manifest_json: &str, source: &str) {
     fs::write(dir.join("manifest.json"), manifest_json).expect("write manifest");
     fs::write(dir.join("plugin.js"), source).expect("write plugin.js");
@@ -90,7 +79,7 @@ async fn drain(rx: &mut tokio::sync::mpsc::UnboundedReceiver<PluginResult>) -> V
 
 #[test]
 fn echo_plugin_yields_expected_result() {
-    let dir = unique_tmp_dir("echo");
+    let dir = fresh_tmp("echo");
     write_plugin(
         &dir,
         r#"{"name":"echo","entry":"plugin.js","timeoutMs":2000,"capabilities":["actions"]}"#,
@@ -124,7 +113,7 @@ fn echo_plugin_yields_expected_result() {
 
 #[test]
 fn missing_actions_capability_rejects_import() {
-    let dir = unique_tmp_dir("nocap");
+    let dir = fresh_tmp("nocap");
     write_plugin(
         &dir,
         r#"{"name":"nocap","entry":"plugin.js","capabilities":[]}"#,
@@ -150,7 +139,7 @@ fn missing_actions_capability_rejects_import() {
 
 #[test]
 fn forbidden_import_specifier_rejected() {
-    let dir = unique_tmp_dir("forbidden");
+    let dir = fresh_tmp("forbidden");
     write_plugin(
         &dir,
         r#"{"name":"forbidden","entry":"plugin.js","capabilities":["actions"]}"#,
@@ -176,7 +165,7 @@ fn forbidden_import_specifier_rejected() {
 
 #[test]
 fn slow_streaming_plugin_yields_progressively() {
-    let dir = unique_tmp_dir("slow-stream");
+    let dir = fresh_tmp("slow-stream");
     write_plugin(
         &dir,
         r#"{"name":"slow","entry":"plugin.js","timeoutMs":5000,"capabilities":["actions"]}"#,
@@ -210,7 +199,7 @@ fn slow_streaming_plugin_yields_progressively() {
 
 #[test]
 fn abort_stops_in_flight_streaming_query() {
-    let dir = unique_tmp_dir("abort-stream");
+    let dir = fresh_tmp("abort-stream");
     write_plugin(
         &dir,
         r#"{"name":"abort","entry":"plugin.js","timeoutMs":5000,"capabilities":["actions"]}"#,

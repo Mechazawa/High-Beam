@@ -8,6 +8,9 @@ use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Error as JsError
 
 use high_beam::sdk::fs::{FsModule, install};
 
+mod common;
+use common::fresh_tmp;
+
 struct OnlyFs;
 
 impl Resolver for OnlyFs {
@@ -33,18 +36,6 @@ fn rt() -> tokio::runtime::Runtime {
         .expect("tokio rt")
 }
 
-fn tmp_dir(label: &str) -> PathBuf {
-    let p = std::env::temp_dir().join(format!(
-        "hb-sdk-fs-{label}-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_nanos())
-    ));
-    std::fs::create_dir_all(&p).unwrap();
-    p
-}
-
 async fn run_script(can_read: bool, can_cache: bool, cache_dir: PathBuf, src: Vec<u8>) -> String {
     let async_rt = AsyncRuntime::new().expect("rt");
     async_rt.set_loader(OnlyFs, OnlyFs).await;
@@ -67,7 +58,7 @@ async fn run_script(can_read: bool, can_cache: bool, cache_dir: PathBuf, src: Ve
 
 #[test]
 fn read_text_without_cap_throws() {
-    let dir = tmp_dir("no-cap");
+    let dir = fresh_tmp("no-cap");
     let cache = dir.join("cache");
     let rt = rt();
     let outcome = rt.block_on(run_script(
@@ -92,7 +83,7 @@ fn read_text_without_cap_throws() {
 
 #[test]
 fn read_text_with_cap_returns_file_contents() {
-    let dir = tmp_dir("read-text");
+    let dir = fresh_tmp("read-text");
     let file = dir.join("hello.txt");
     std::fs::write(&file, "hello world").unwrap();
     let path_str = file.to_string_lossy().into_owned();
@@ -111,7 +102,7 @@ fn read_text_with_cap_returns_file_contents() {
 
 #[test]
 fn read_dir_recursive_yields_nested_entries() {
-    let dir = tmp_dir("readdir-rec");
+    let dir = fresh_tmp("readdir-rec");
     std::fs::create_dir_all(dir.join("nested")).unwrap();
     std::fs::write(dir.join("a.txt"), "a").unwrap();
     std::fs::write(dir.join("nested/b.txt"), "b").unwrap();
@@ -139,7 +130,7 @@ fn read_dir_recursive_yields_nested_entries() {
 
 #[test]
 fn write_cache_then_read_cache_roundtrips() {
-    let dir = tmp_dir("cache-rt");
+    let dir = fresh_tmp("cache-rt");
     let cache = dir.join("cache");
     let src = br"
         import { writeCache, readCache } from 'highbeam:fs';
@@ -160,7 +151,7 @@ fn write_cache_then_read_cache_roundtrips() {
 
 #[test]
 fn read_cache_returns_null_for_missing() {
-    let dir = tmp_dir("cache-miss");
+    let dir = fresh_tmp("cache-miss");
     let cache = dir.join("cache");
     let src = br"
         import { readCache } from 'highbeam:fs';
@@ -178,7 +169,7 @@ fn read_cache_returns_null_for_missing() {
 
 #[test]
 fn write_cache_rejects_path_traversal() {
-    let dir = tmp_dir("cache-traversal");
+    let dir = fresh_tmp("cache-traversal");
     let cache = dir.join("cache");
     let src = br"
         import { writeCache } from 'highbeam:fs';

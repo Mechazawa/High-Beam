@@ -7,7 +7,6 @@
 use std::io::Read;
 use std::io::Write;
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
 
@@ -16,15 +15,8 @@ use flate2::write::GzEncoder;
 use high_beam::plugins::install::{self, ArchiveFormat, InstallError, cross_check_embedded, manifest_for_write};
 use high_beam::plugins::manifest::Manifest;
 
-fn fresh_tmp(tag: &str) -> PathBuf {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("clock")
-        .as_nanos();
-    let p = std::env::temp_dir().join(format!("high-beam-install-itest-{tag}-{now}"));
-    std::fs::create_dir_all(&p).expect("mkdir tmp");
-    p
-}
+mod common;
+use common::fresh_tmp;
 
 fn build_tar_gz(entries: &[(&str, &[u8])]) -> Vec<u8> {
     let gz_buf = Vec::new();
