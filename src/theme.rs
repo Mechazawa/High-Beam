@@ -250,12 +250,7 @@ fn byte_at(hex: &str, offset: usize) -> Option<u8> {
 }
 
 fn expand_nibble(byte: u8) -> Option<u8> {
-    let nibble = match byte {
-        b'0'..=b'9' => byte - b'0',
-        b'a'..=b'f' => byte - b'a' + 10,
-        b'A'..=b'F' => byte - b'A' + 10,
-        _ => return None,
-    };
+    let nibble = u8::try_from((byte as char).to_digit(16)?).ok()?;
     Some(nibble << 4 | nibble)
 }
 

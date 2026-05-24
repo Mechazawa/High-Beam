@@ -641,7 +641,7 @@ fn log_hook_outcome(
     match outcome {
         Ok(()) => log.write(
             LogLevel::Info,
-            &format!("hook {label}({reason_str}) completed in {:.1}s", elapsed.as_secs_f32(),),
+            &format!("hook {label}({reason_str}) completed in {:.1}s", elapsed.as_secs_f32()),
         ),
         Err(PluginError::Cancelled) => log.write(LogLevel::Info, &format!("hook {label}({reason_str}) cancelled")),
         Err(err) => {

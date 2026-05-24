@@ -26,7 +26,7 @@ pub(crate) fn frecency_modifier(picks: u32, age_seconds: i64) -> f64 {
     // Convert via i32 first so the cast-precision lint stays happy
     // (i32 → f64 is lossless). Ages past ~68 years saturate, which is well
     // past the point where the decay term is effectively zero anyway.
-    let clamped = age_seconds.max(0).min(i64::from(i32::MAX));
+    let clamped = age_seconds.clamp(0, i64::from(i32::MAX));
     let age = f64::from(i32::try_from(clamped).unwrap_or(i32::MAX));
     // `(x).exp2()` is more accurate than `2.0.powf(x)` for base-2; `mul_add`
     // is a fused multiply-add with one rounding instead of two. Both flagged
