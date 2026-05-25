@@ -224,14 +224,18 @@ const QUERY_RE = /^\s*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*(\S+?)\s+(?:to\s+)?(\
 function parseQuery(input) {
     const match = QUERY_RE.exec(input);
     if (!match) return null;
+
     const value = Number(match[1]);
     if (!Number.isFinite(value)) return null;
+
     const fromKey = resolveUnit(match[2]);
     const toKey = resolveUnit(match[3]);
     if (!fromKey || !toKey) return null;
+
     const from = UNITS[fromKey];
     const to = UNITS[toKey];
     if (from.category !== to.category) return null;
+
     return { value, fromKey, toKey, from, to };
 }
 
@@ -242,6 +246,7 @@ function convert({ value, from, to }) {
     const fromOffset = from.offset ?? 0;
     const toOffset = to.offset ?? 0;
     const base = value * from.scale + fromOffset;
+
     return (base - toOffset) / to.scale;
 }
 
@@ -251,16 +256,19 @@ function convert({ value, from, to }) {
 function formatNumber(value) {
     if (!Number.isFinite(value)) return null;
     if (value === 0) return "0";
+
     const abs = Math.abs(value);
     if (abs >= 1e15 || abs < 1e-4) {
         return Number(value.toPrecision(6))
             .toExponential()
             .replace(/e\+?(-?)0*(\d)/, "e$1$2");
     }
+
     // toPrecision then Number() trims insignificant trailing zeros without
     // dragging us into exponential form for ordinary magnitudes.
     const rounded = Number(value.toPrecision(6));
     if (Number.isInteger(rounded)) return String(rounded);
+
     return String(rounded);
 }
 
@@ -282,13 +290,17 @@ function displayUnit(key) {
 
 export async function* query(input, _signal) {
     if (!input || !input.trim()) return;
+
     const parsed = parseQuery(input);
     if (!parsed) return;
+
     const result = convert(parsed);
     const text = formatNumber(result);
     if (text === null) return;
+
     const unit = displayUnit(parsed.toKey);
     const title = `${text} ${unit}`;
+
     yield {
         key: `unit:${parsed.value}:${parsed.fromKey}:${parsed.toKey}`,
         title,

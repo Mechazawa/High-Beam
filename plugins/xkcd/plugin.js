@@ -39,6 +39,7 @@ async function fetchLatest(signal) {
     if (!res.ok) {
         throw new Error(`xkcd latest fetched HTTP ${res.status}`);
     }
+
     return res.json();
 }
 
@@ -48,6 +49,7 @@ async function fetchComic(num, signal) {
     if (!res.ok) {
         throw new Error(`xkcd ${num} fetched HTTP ${res.status}`);
     }
+
     return res.json();
 }
 
@@ -68,14 +70,17 @@ function resultFor(comic) {
 
 async function readCachedIndex() {
     if (cachedIndex) return cachedIndex;
+
     const raw = await readCache(CACHE_NAME);
     if (!raw) return null;
+
     try {
         const text = typeof raw === "string"
             ? raw
             : new TextDecoder().decode(raw);
         const parsed = JSON.parse(text);
         if (!parsed || !Array.isArray(parsed.comics)) return null;
+
         cachedIndex = parsed;
         return parsed;
     } catch {
@@ -85,6 +90,7 @@ async function readCachedIndex() {
 
 function indexIsFresh(index) {
     if (!index || typeof index.last_updated !== "number") return false;
+
     return Date.now() - index.last_updated < CACHE_TTL_MS;
 }
 
@@ -195,6 +201,7 @@ async function getIndex(signal) {
 export async function* query(input, signal) {
     const match = TRIGGER.exec(input);
     if (!match) return;
+
     const arg = (match[1] ?? "").trim();
     if (!arg) return;
 
@@ -215,6 +222,7 @@ export async function* query(input, signal) {
     if (/^\d+$/.test(arg)) {
         const n = Number(arg);
         if (!Number.isFinite(n) || n < 1) return;
+
         const comic = await fetchComic(n, signal);
         if (comic) yield resultFor(comic);
         return;
@@ -222,11 +230,13 @@ export async function* query(input, signal) {
 
     const index = await getIndex(signal);
     if (signal?.aborted) return;
+
     const ranked = fuzzy(index.comics, arg, {
         key: (c) => c.title,
         threshold: 0.05,
         limit: 10,
     });
+
     for (const { item } of ranked) {
         yield {
             key: `xkcd-${item.num}`,

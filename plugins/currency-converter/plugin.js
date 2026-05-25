@@ -108,7 +108,9 @@ async function readCachedRates(base) {
     } catch {
         return null;
     }
+
     if (!raw) return null;
+
     try {
         const text = typeof raw === "string"
             ? raw
@@ -140,16 +142,20 @@ function cacheIsFresh(cache, cacheSecondsOverride) {
 
 async function fetchRates(base, signal) {
     const res = await get(API_URL(base), { signal });
+
     if (!res.ok) {
         throw new Error(`open.er-api.com returned HTTP ${res.status}`);
     }
+
     const data = res.json();
+
     if (!data || data.result !== "success") {
-        throw new Error(`open.er-api.com result=${data && data.result}`);
+        throw new Error(`open.er-api.com result=${data?.result}`);
     }
     if (!data.rates || typeof data.rates !== "object") {
         throw new Error("open.er-api.com response missing rates");
     }
+
     const fetchedAt = Date.now();
     const nextUpdateMs = data.time_next_update_utc
         ? Date.parse(data.time_next_update_utc)
@@ -164,20 +170,24 @@ async function fetchRates(base, signal) {
         last_update_ms: Number.isFinite(lastUpdateMs) ? lastUpdateMs : fetchedAt,
         next_update_ms: Number.isFinite(nextUpdateMs) ? nextUpdateMs : null,
     };
+
     try {
         await writeCache(CACHE_NAME(base), JSON.stringify(payload));
     } catch {
         // Persisting the cache is best-effort; serving the in-flight result
         // is more important than guaranteeing the on-disk snapshot.
     }
+
     return payload;
 }
 
 async function getRates(base, cacheSecondsOverride, signal) {
     const cached = await readCachedRates(base);
+
     if (cached && cacheIsFresh(cached, cacheSecondsOverride)) {
         return { rates: cached, stale: false };
     }
+
     try {
         const fresh = await fetchRates(base, signal);
         return { rates: fresh, stale: false };
@@ -245,6 +255,7 @@ function failureRow(parsed, message) {
 
 export async function* query(input, signal) {
     if (!input) return;
+
     const parsed = parseQuery(input);
     if (!parsed) return;
 
@@ -290,6 +301,7 @@ export async function* query(input, signal) {
     }
 
     const rate = rates.rates[target];
+
     if (typeof rate !== "number" || !Number.isFinite(rate)) {
         yield failureRow(parsed, `unknown currency code: ${target}`);
         return;

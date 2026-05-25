@@ -136,6 +136,7 @@ async function getApps() {
     if (appsCache === null) {
         appsCache = await collectApps();
     }
+
     return appsCache;
 }
 
@@ -180,6 +181,7 @@ export async function* query(input, _signal) {
             weight: match.score * 100,
             action: actionFor(app),
         };
+
         if (icon) result.icon = icon;
         yield result;
     }

@@ -48,11 +48,13 @@ async function getPanes() {
     if (panesCache === null) {
         panesCache = await collectPanes();
     }
+
     return panesCache;
 }
 
 export async function* query(input, _signal) {
     if (!isMacOS()) return;
+
     const trimmed = input?.trim();
     if (!trimmed) return;
 
@@ -76,6 +78,7 @@ export async function* query(input, _signal) {
             action: exec("open", [pane.path]),
         };
         if (icon) result.icon = icon;
+
         yield result;
     }
 }

@@ -21,6 +21,7 @@ function parsePsOutput(stdout) {
     // with a numeric PID is silently dropped — handles wrapped warnings and
     // accidental stderr bleed.
     let seenHeader = false;
+
     for (const rawLine of lines) {
         const line = rawLine.trim();
         if (line.length === 0) continue;
@@ -56,11 +57,13 @@ function parseTrigger(input) {
     // `kill` with no separator and no further chars is fine (empty query);
     // `killer` is not — require a word boundary.
     if (rest.length > 0 && !/^\s/.test(rest)) return null;
+
     return rest.trim();
 }
 
 export async function* query(input, signal) {
     if (!isMacOS() && !isLinux()) return;
+
     const queryText = parseTrigger(input);
     if (queryText === null) return;
     if (queryText.length === 0) return;
@@ -75,6 +78,7 @@ export async function* query(input, signal) {
         // ps failing (e.g. signal aborted) is non-actionable; drop silently.
         return;
     }
+
     if (signal?.aborted) return;
     if (result.code !== 0) return;
 
@@ -87,6 +91,7 @@ export async function* query(input, signal) {
 
     for (const match of matches) {
         const proc = match.item;
+
         yield {
             key: String(proc.pid),
             title: proc.name,

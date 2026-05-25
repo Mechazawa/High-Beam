@@ -71,11 +71,14 @@ function buildUrl(engine, query) {
 function matchEnginePrefix(input) {
     const match = /^(\S+)\s+(.+)$/.exec(input);
     if (!match) return null;
+
     const [, rawPrefix, rest] = match;
     const engine = PREFIX_INDEX.get(rawPrefix.toLowerCase());
     if (!engine) return null;
+
     const query = rest.trim();
     if (!query) return null;
+
     return { engine, query };
 }
 
@@ -88,6 +91,7 @@ export async function* query(input, _signal) {
     if (matched) {
         const { engine, query: searchQuery } = matched;
         const url = buildUrl(engine, searchQuery);
+
         yield {
             key: `web-search:${engine.id}`,
             title: `Search ${engine.label} for "${searchQuery}"`,
@@ -108,6 +112,7 @@ export async function* query(input, _signal) {
     // pinned/high-weight results from sibling plugins so it only surfaces
     // when nothing else has a better answer.
     const url = buildUrl(GOOGLE, trimmed);
+
     yield {
         key: "web-search:fallback",
         title: `Search Google for "${trimmed}"`,

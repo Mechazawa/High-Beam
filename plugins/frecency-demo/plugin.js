@@ -11,6 +11,7 @@ export async function* query(_input, _signal) {
         weight: 50,
         action: copy("alpha"),
     };
+
     yield {
         key: "beta",
         title: "Beta",
@@ -18,6 +19,7 @@ export async function* query(_input, _signal) {
         weight: 50,
         action: copy("beta"),
     };
+
     yield {
         key: "gamma",
         title: "Gamma",

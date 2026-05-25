@@ -56,6 +56,7 @@ export async function* query(input, _signal) {
 
     for (const [name, info] of Object.entries(PAPER_SIZES)) {
         if (!name.toLowerCase().includes(needle)) continue;
+
         yield {
             key: name,
             title: name,

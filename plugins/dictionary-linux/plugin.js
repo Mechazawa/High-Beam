@@ -139,15 +139,13 @@ function truncate(text, max) {
 
 function parseTrigger(input) {
     if (typeof input !== "string") return null;
+
     const lower = input.toLowerCase();
-    for (const prefix of TRIGGERS) {
-        if (lower.startsWith(prefix)) {
-            const word = input.slice(prefix.length).trim();
-            if (!word) return null;
-            return word;
-        }
-    }
-    return null;
+    const prefix = TRIGGERS.find((p) => lower.startsWith(p));
+    if (!prefix) return null;
+
+    const word = input.slice(prefix.length).trim();
+    return word || null;
 }
 
 async function runWordNet(word, signal) {
@@ -228,12 +226,14 @@ function existsOnlyResult(word) {
 
 export async function* query(input, signal) {
     if (!isLinux()) return;
+
     const word = parseTrigger(input);
     if (!word) return;
     if (signal?.aborted) return;
 
     if (await which("wn", signal)) {
         const senses = await runWordNet(word, signal);
+
         if (signal?.aborted) return;
         if (senses.length > 0) {
             for (let i = 0; i < Math.min(senses.length, MAX_RESULTS); i++) {
@@ -246,6 +246,7 @@ export async function* query(input, signal) {
 
     if (await which("dict", signal)) {
         const defs = await runDict(word, signal);
+
         if (signal?.aborted) return;
         if (defs.length > 0) {
             for (let i = 0; i < Math.min(defs.length, MAX_RESULTS); i++) {
@@ -257,6 +258,7 @@ export async function* query(input, signal) {
 
     if (await which("grep", signal)) {
         const exists = await runGrep(word, signal);
+
         if (signal?.aborted) return;
         if (exists) {
             yield existsOnlyResult(word);

@@ -56,20 +56,20 @@ function subtitleFor(item) {
 // item-index -> best score for that field.
 function scoreField(items, q, project, threshold) {
     // Materialise as { idx, hay } so we can map back to the original item.
-    const haystack = [];
-    for (let i = 0; i < items.length; i += 1) {
-        const hay = project(items[i]);
-        if (hay) haystack.push({ idx: i, hay });
-    }
+    const haystack = items
+        .map((item, i) => ({ idx: i, hay: project(item) }))
+        .filter(({ hay }) => hay);
     const ranked = fuzzy(haystack, q, {
         key: (h) => h.hay,
         threshold,
     });
+
     const out = new Map();
     for (const { item, score } of ranked) {
         const prev = out.get(item.idx);
         if (prev === undefined || score > prev) out.set(item.idx, score);
     }
+
     return out;
 }
 
@@ -96,15 +96,15 @@ function rank(items, q) {
         ...tagScores.keys(),
     ]);
 
-    const ranked = [];
-    for (const idx of seen) {
-        const nScore = (nameScores.get(idx) ?? 0) * NAME_WEIGHT;
-        const aScore = (aliasScores.get(idx) ?? 0) * ALIAS_WEIGHT;
-        const tScore = (tagScores.get(idx) ?? 0) * TAG_WEIGHT;
-        const score = Math.max(nScore, aScore, tScore);
-        if (score <= 0) continue;
-        ranked.push({ item: items[idx], score });
-    }
+    const ranked = [...seen]
+        .map((idx) => {
+            const nScore = (nameScores.get(idx) ?? 0) * NAME_WEIGHT;
+            const aScore = (aliasScores.get(idx) ?? 0) * ALIAS_WEIGHT;
+            const tScore = (tagScores.get(idx) ?? 0) * TAG_WEIGHT;
+            return { item: items[idx], score: Math.max(nScore, aScore, tScore) };
+        })
+        .filter(({ score }) => score > 0);
+
     ranked.sort((a, b) => b.score - a.score);
     return ranked;
 }
@@ -113,6 +113,7 @@ export async function* query(input, _signal) {
     const trigger = buildTrigger();
     const match = trigger.exec(input);
     if (!match) return;
+
     const q = (match[1] ?? "").trim();
     if (!q) return;
 
@@ -123,8 +124,9 @@ export async function* query(input, _signal) {
     let yielded = 0;
     for (const { item, score } of ranked) {
         if (yielded >= MAX_RESULTS) return;
+
         const subtitle = subtitleFor(item);
-        const baseKey = (item.a && item.a[0]) ? item.a[0] : item.n;
+        const baseKey = item.a?.[0] || item.n;
         yield {
             key: `emoji:${baseKey}`,
             title: `${item.c}  ${item.n}`,
@@ -137,9 +139,9 @@ export async function* query(input, _signal) {
         if (!includeSkin || !item.s) continue;
         // Expand into the five Fitzpatrick variants. Each gets a fractionally
         // lower weight so the base form stays on top.
-        for (let i = 0; i < SKIN_TONES.length; i += 1) {
+        for (const [i, { mod, label }] of SKIN_TONES.entries()) {
             if (yielded >= MAX_RESULTS) return;
-            const { mod, label } = SKIN_TONES[i];
+
             const variant = item.c + mod;
             yield {
                 key: `emoji:${baseKey}:${label}`,

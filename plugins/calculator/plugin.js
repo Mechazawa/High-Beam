@@ -239,6 +239,7 @@ export async function* query(input, _signal) {
     const trimmed = input.trimStart();
     const forced = trimmed.startsWith("=");
     const expression = forced ? trimmed.slice(1) : input;
+
     if (!expression.trim()) {
         if (!forced) return;
         yield {
@@ -251,6 +252,7 @@ export async function* query(input, _signal) {
         };
         return;
     }
+
     let value;
     let error;
     try {
@@ -258,6 +260,7 @@ export async function* query(input, _signal) {
     } catch (err) {
         error = err;
     }
+
     if (error === undefined && Number.isFinite(value)) {
         const text = formatResult(value);
         const row = {
@@ -273,6 +276,7 @@ export async function* query(input, _signal) {
         return;
     }
     if (!forced) return;
+
     // Divide-by-zero / overflow produce non-finite numbers without throwing,
     // so we describe those separately from real parser exceptions.
     const reason = error ? errorReason(error) : nonFiniteReason(value);
@@ -287,7 +291,7 @@ export async function* query(input, _signal) {
 }
 
 function errorReason(err) {
-    const msg = err && err.message ? String(err.message) : "parse error";
+    const msg = err?.message ? String(err.message) : "parse error";
     return msg.length > 80 ? `${msg.slice(0, 77)}...` : msg;
 }
 

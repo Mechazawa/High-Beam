@@ -152,6 +152,7 @@ function scriptFor(verb) {
 // canonical title or any alias.
 function matchesPrefix(verb, normalizedInput) {
     if (verb.title.startsWith(normalizedInput)) return true;
+
     const aliases = verb.aliases ?? [];
     return aliases.some((alias) => alias.startsWith(normalizedInput));
 }
@@ -165,6 +166,7 @@ function subtitleFor(verb) {
 
 export async function* query(input, _signal) {
     if (!isMacOS()) return;
+
     const trimmed = input?.trim();
     if (!trimmed) return;
 

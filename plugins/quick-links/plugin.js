@@ -25,6 +25,7 @@ function loadLinks() {
     if (!linksPromise) {
         linksPromise = readText(DATA_PATH).then((text) => JSON.parse(text));
     }
+
     return linksPromise;
 }
 
@@ -46,8 +47,10 @@ export async function* query(input, _signal) {
     if (!argTrimmed) return;
 
     const links = await loadLinks();
+
     for (const link of links) {
         if (link.prefix !== prefix) continue;
+
         yield {
             key: `${link.prefix}:${argTrimmed}`,
             title: `${link.prefix} ${argTrimmed}`,

@@ -31,6 +31,7 @@ function readKeyword() {
     if (typeof raw === "string" && raw.trim().length > 0) {
         return raw.trim();
     }
+
     return DEFAULT_KEYWORD;
 }
 
@@ -44,12 +45,14 @@ function readCacheSeconds() {
     if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0) {
         return raw;
     }
+
     return DEFAULT_CACHE_SECONDS;
 }
 
 function readVaultPath() {
     const raw = getString("vault_path");
     if (typeof raw !== "string") return "";
+
     return raw.trim();
 }
 
@@ -58,6 +61,7 @@ function readVaultName(vaultPath) {
     if (typeof raw === "string" && raw.trim().length > 0) {
         return raw.trim();
     }
+
     return basename(stripTrailingSlash(vaultPath));
 }
 
@@ -65,6 +69,7 @@ function stripTrailingSlash(path) {
     if (path.length > 1 && path.endsWith("/")) {
         return path.slice(0, -1);
     }
+
     return path;
 }
 
@@ -77,12 +82,15 @@ function basename(path) {
 // keyword so `obsfoo` isn't treated as a trigger.
 function parseTrigger(input, keyword) {
     if (typeof input !== "string") return null;
+
     const trimmed = input.trimStart();
     const lowerKeyword = keyword.toLowerCase();
     const lower = trimmed.toLowerCase();
     if (!lower.startsWith(lowerKeyword)) return null;
+
     const rest = trimmed.slice(keyword.length);
     if (rest.length > 0 && !/^\s/.test(rest)) return null;
+
     return rest.trim();
 }
 
@@ -92,6 +100,7 @@ function shouldSkipDir(name) {
     // the conventional archive directory.
     if (name.startsWith(".")) return true;
     if (name === "_archive") return true;
+
     return false;
 }
 
@@ -102,6 +111,7 @@ async function collectNotes(vaultPath, signal) {
     const root = stripTrailingSlash(vaultPath);
     const notes = [];
     const queue = [root];
+
     while (queue.length > 0) {
         if (signal?.aborted) return notes;
         const dir = queue.shift();
@@ -135,6 +145,7 @@ function relativePath(root, path) {
     if (path.startsWith(`${root}/`)) {
         return path.slice(root.length + 1);
     }
+
     return path;
 }
 
@@ -143,6 +154,7 @@ function relativePath(root, path) {
 function folderOf(relPath) {
     const slash = relPath.lastIndexOf("/");
     if (slash < 0) return "/";
+
     return `${relPath.slice(0, slash)}/`;
 }
 
@@ -163,8 +175,10 @@ async function readOnDiskCache(vaultPath, ttlMs) {
     } catch {
         return null;
     }
+
     const text = decodeCacheBlob(raw);
     if (!text) return null;
+
     try {
         const parsed = JSON.parse(text);
         if (!parsed || typeof parsed !== "object") return null;
@@ -174,6 +188,7 @@ async function readOnDiskCache(vaultPath, ttlMs) {
         if (ttlMs > 0 && Date.now() - parsed.fetchedAt > ttlMs) {
             return null;
         }
+
         return parsed;
     } catch {
         return null;
@@ -198,15 +213,18 @@ async function getNotes(vaultPath, ttlMs, signal) {
     ) {
         return memoryCache.notes;
     }
+
     const disk = await readOnDiskCache(vaultPath, ttlMs);
     if (disk) {
         memoryCache = disk;
         return disk.notes;
     }
+
     const notes = await collectNotes(vaultPath, signal);
     const payload = { vaultPath, fetchedAt: Date.now(), notes };
     memoryCache = payload;
     await writeOnDiskCache(payload);
+
     return notes;
 }
 
@@ -224,6 +242,7 @@ function buildObsidianUrl(vaultName, vaultPath, relPath) {
         params.set("path", vaultPath);
     }
     params.set("file", file);
+
     return `obsidian://open?${params.toString()}`;
 }
 
@@ -254,6 +273,7 @@ export async function* query(input, signal) {
         if (parsed === null) return;
         queryText = parsed;
     }
+
     if (queryText.length === 0) return;
 
     if (vaultPath.length === 0) {
@@ -270,10 +290,11 @@ export async function* query(input, signal) {
         threshold: FUZZY_THRESHOLD,
         limit: RESULT_LIMIT,
     });
-
     const vaultName = readVaultName(vaultPath);
+
     for (const { item, score } of ranked) {
         if (signal?.aborted) return;
+
         yield {
             key: `obsidian:${item.path}`,
             title: item.name,

@@ -104,6 +104,7 @@ async function captureClipboard(maxHistory, maxEntryBytes) {
     } catch {
         return;
     }
+
     if (typeof current !== "string") return;
     if (current.trim().length === 0) return;
     if (utf8ByteLength(current) > maxEntryBytes) return;
@@ -194,9 +195,11 @@ export async function* query(input, signal) {
         // ordering is preserved across plugins that yield around the same
         // weight; the host stable-sorts ties.
         const max = Math.min(history.length, maxHistory);
+
         for (let i = 0; i < max; i += 1) {
             if (signal?.aborted) return;
             const weight = Math.max(10, 90 - i);
+
             yield resultFor(history[i], weight);
         }
         return;
@@ -207,6 +210,7 @@ export async function* query(input, signal) {
         threshold: 0.05,
         limit: maxHistory,
     });
+
     for (const { item, score } of ranked) {
         if (signal?.aborted) return;
         yield resultFor(item, Math.round(score * 100));

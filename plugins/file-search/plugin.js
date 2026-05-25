@@ -31,6 +31,7 @@ function parseQuery(input) {
     if (!match) return null;
     const body = (match[1] ?? "").trim();
     if (!body) return null;
+
     return body;
 }
 
@@ -44,6 +45,7 @@ async function runMdfind(query, signal) {
         { signal },
     );
     if (result.code !== 0) return { paths: [], failed: true };
+
     return { paths: parsePaths(result.stdout), failed: false };
 }
 
@@ -64,6 +66,7 @@ async function runLocate(query, signal) {
     // Only flag "missing" when stdout is empty AND exit is non-zero — that's
     // how ENOENT manifests via the host (code: null or 127).
     const missing = paths.length === 0 && result.code !== 0;
+
     return { paths, missing };
 }
 
@@ -93,11 +96,13 @@ async function resolveIcon(path) {
 
 export async function* query(input, signal) {
     if (!isMacOS() && !isLinux()) return;
+
     const body = parseQuery(input);
     if (!body) return;
 
     let paths;
     let missingLocate = false;
+
     if (isMacOS()) {
         const res = await runMdfind(body, signal);
         paths = res.paths;
@@ -142,6 +147,7 @@ export async function* query(input, signal) {
             action: openUrl(path),
         };
         if (icon) result.icon = icon;
+
         yield result;
     }
 }

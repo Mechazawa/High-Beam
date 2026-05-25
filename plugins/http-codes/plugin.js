@@ -16,6 +16,7 @@ function loadCodes() {
     if (!codesPromise) {
         codesPromise = readText(DATA_PATH).then((text) => JSON.parse(text));
     }
+
     return codesPromise;
 }
 
@@ -28,13 +29,14 @@ export async function* query(input, _signal) {
     // Clamp at 100 — the host caps pinned weight at 100, and the user can
     // type more than 3 digits.
     const weight = Math.min(100 * (prefix.length / 3), 100);
-
     let yielded = 0;
+
     for (const { key, title, description } of codes) {
         if (yielded >= MAX_RESULTS) return;
         const code = String(key);
         if (!code.startsWith(prefix)) continue;
         yielded += 1;
+
         yield {
             key: code,
             title: `${code} - ${title}`,

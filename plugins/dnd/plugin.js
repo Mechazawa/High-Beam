@@ -34,6 +34,7 @@ function subtitleFor(spell) {
 export async function* query(input, _signal) {
     const match = TRIGGER.exec(input);
     if (!match) return;
+
     const q = (match[1] ?? "").trim();
     if (!q) return;
 

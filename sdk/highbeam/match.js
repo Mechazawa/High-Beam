@@ -6,6 +6,7 @@ function matchOne(haystack, query) {
     if (query.length === 0) {
         return { score: 1, highlights: [] };
     }
+
     const hayLower = haystack.toLowerCase();
     const qLower = query.toLowerCase();
     const highlights = [];
@@ -16,6 +17,7 @@ function matchOne(haystack, query) {
     let consecutive = 0;
     let maxConsecutive = 0;
     let startedAtZero = false;
+
     while (hi < hayLower.length && qi < qLower.length) {
         if (hayLower[hi] === qLower[qi]) {
             if (runStart === -1) {
@@ -39,9 +41,11 @@ function matchOne(haystack, query) {
     if (qi < qLower.length) {
         return null;
     }
+
     if (runStart !== -1) {
         highlights.push([runStart, hi]);
     }
+
     const coverage = qLower.length / Math.max(hayLower.length, 1);
     const prefixBonus = startedAtZero ? 0.15 : 0;
     const runBonus = Math.min(0.25, (maxConsecutive - 1) * 0.05);
@@ -50,27 +54,36 @@ function matchOne(haystack, query) {
         0,
         Math.min(1, coverage * 0.7 + prefixBonus + runBonus - fragmentationPenalty + 0.05),
     );
+
     return { score, highlights };
 }
 
 export function fuzzy(items, query, opts) {
     const key = opts?.key;
+
     if (typeof key !== 'function') {
         throw new TypeError('match.fuzzy: opts.key must be a function');
     }
+
     const threshold = opts?.threshold ?? 0;
     const limit = opts?.limit;
     const results = [];
+
     for (const item of items) {
         const haystack = key(item);
         const m = matchOne(haystack, query);
+
         if (m === null) continue;
         if (m.score < threshold) continue;
+
         results.push({ item, score: m.score, highlights: m.highlights });
     }
+
     results.sort((a, b) => b.score - a.score);
+
     if (typeof limit === 'number') {
         results.length = Math.min(results.length, limit);
     }
+
     return results;
 }
