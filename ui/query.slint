@@ -1,0 +1,424 @@
+// Query input + result rows + settings view. The single source of truth for
+// what's displayed sits on the Rust side; Slint-side state is just
+// `query-text`, `results`, `selected-index`, and `current-view`.
+//
+// The window switches between two views: the launcher (`current-view ==
+// VIEW-QUERY`) and the settings screen (`current-view == VIEW-SETTINGS`).
+// Cmd+, opens settings from the launcher; Esc returns to the launcher (or
+// hides if already on the launcher).
+//
+// Colors and dimensions exposed as `in-out` tokens at the top of `QueryWindow`.
+// Defaults match the bundled yosemite-spotlight theme so a theme-free run is
+// visually identical to the pre-theming build. Layout-load-bearing constants
+// (row height, icon size, input padding) remain inline — theming layout is
+// out of scope for v1.
+
+import { ResultRow, PluginSlot, PluginOption, ConfirmCapRow } from "types.slint";
+import { LauncherView } from "launcher_view.slint";
+import { SettingsView } from "settings_view.slint";
+import { ConfirmView } from "confirm_view.slint";
+
+export component QueryWindow inherits Window {
+    title: "High Beam";
+    no-frame: true;
+    always-on-top: true;
+    background: transparent;
+    default-font-size: 18px;
+    default-font-family: root.font-family;
+
+    in-out property <string> query-text;
+    in-out property <[ResultRow]> results: [];
+    in-out property <int> selected-index: 0;
+    in-out property <int> max-rows: 9;
+
+    // View state. 0 = launcher (query), 1 = settings, 2 = install confirm.
+    property <int> VIEW-QUERY: 0;
+    property <int> VIEW-SETTINGS: 1;
+    property <int> VIEW-CONFIRM: 2;
+    in-out property <int> current-view: 0;
+
+    // Settings view state.
+    in-out property <[PluginSlot]> plugin-slots: [];
+    in-out property <int> selected-plugin-index: 0;
+    in-out property <[PluginOption]> plugin-options: [];
+    // Metadata for the selected plugin — populated by Rust in refresh-options.
+    // Empty strings mean the field is absent; the pane hides those rows.
+    in-out property <string> selected-plugin-version: "";
+    in-out property <string> selected-plugin-description: "";
+    // True when the "Global" rail entry is selected — the right pane then
+    // shows the app-wide settings instead of plugin options. Defaulted to
+    // true so opening settings lands on Global rather than a random plugin.
+    in-out property <bool> showing-global: true;
+    in-out property <string> hotkey-value: "Shift+Space";
+    in-out property <string> alt-action-modifier: "Alt";
+    // Resolved Slint-side flag name corresponding to the configured alt
+    // modifier, accounting for macOS's Cmd↔Ctrl flag swap. Rust pushes
+    // it via `set-alt-action-modifier-flag` whenever the setting changes.
+    // Values: "alt" | "shift" | "control" | "meta".
+    in-out property <string> alt-action-modifier-flag: "alt";
+    // True while the user is holding the configured alt-action modifier.
+    // Updated on every key event by `update-alt-modifier-state` below;
+    // forwarded into LauncherView so result rows can swap labels live.
+    in-out property <bool> alt-modifier-active: false;
+
+    // Recompute `alt-modifier-active` from a fresh modifier snapshot.
+    // Called from every place key state can change (TextInput key-pressed
+    // / key-released in the launcher view). Slint can't branch on the
+    // host OS, hence Rust hands us the resolved flag name.
+    public function update-alt-modifier-state(meta: bool, control: bool, shift: bool, alt: bool) {
+        if (root.alt-action-modifier-flag == "alt") {
+            root.alt-modifier-active = alt;
+        } else if (root.alt-action-modifier-flag == "shift") {
+            root.alt-modifier-active = shift;
+        } else if (root.alt-action-modifier-flag == "control") {
+            root.alt-modifier-active = control;
+        } else if (root.alt-action-modifier-flag == "meta") {
+            root.alt-modifier-active = meta;
+        }
+    }
+    // Keyboard rail selection: 0 = Global, 1 = plugin[0], 2 = plugin[1], etc.
+    // Distinct from `selected-plugin-index` so arrow-key nav can sit on Global
+    // without mutating the plugin selection state behind it.
+    in-out property <int> rail-focus-index: 0;
+
+    // Install-confirmation view state. Populated by Rust before switching to
+    // VIEW-CONFIRM; cleared on install or cancel.
+    in-out property <string> confirm-plugin-name: "";
+    in-out property <string> confirm-display-name: "";
+    in-out property <string> confirm-version: "";
+    in-out property <string> confirm-description: "";
+    in-out property <string> confirm-manifest-url: "";
+    in-out property <[ConfirmCapRow]> confirm-capabilities: [];
+    // 0 = Install button focused, 1 = Cancel button focused.
+    in-out property <int> confirm-focus-index: 0;
+
+    // Fires when the user clicks Install or presses Enter on the Install button.
+    callback confirm-install();
+    // Fires when the user clicks Cancel or presses Escape.
+    callback confirm-cancel();
+
+    // Theme tokens. Defaults reproduce the bundled yosemite-spotlight theme so
+    // a missing theme.toml is byte-identical to the pre-theming build.
+    in-out property <color> background-color: #ffffffea;
+    in-out property <color> foreground-color: #1d1d1f;
+    in-out property <color> muted-color: #86868b;
+    // `highlight` is part of the documented token surface but not yet bound in
+    // markup — kept so user themes can set it without parse errors.
+    in-out property <color> highlight-color: #0a84ff;
+    in-out property <color> selection-color: #0a84ff33;
+    in-out property <color> border-color: #00000010;
+    in-out property <string> font-family: "";
+    in-out property <length> font-size-query: 32px;
+    in-out property <length> font-size-title: 14px;
+    in-out property <length> font-size-subtitle: 12px;
+    in-out property <length> window-width: 760px;
+    in-out property <length> window-border-radius: 14px;
+
+    // True while the launcher is dismissed but the toplevel surface stays
+    // alive. Used by the Linux dismiss path: Slint 1.16's Wayland `hide()`
+    // tries to destroy the winit window and is broken when the backend
+    // holds extra `Arc<winit::Window>` refs (the destroy fails silently
+    // but state still flips to "None", so subsequent `show()` calls don't
+    // re-attach — see `i-slint-backend-winit-1.16.1/winitwindowadapter.rs:
+    // 1116`). Setting this flag collapses the window to a 1×1 transparent
+    // surface and hides the content, which is indistinguishable from a
+    // real hide visually while keeping Slint's `shown` state intact.
+    // macOS / X11 still use the real `Window::hide()` and ignore this.
+    in-out property <bool> is-hidden: false;
+
+    callback query-edited(string);
+    callback escape-pressed();
+    // Fires from Rust just before the window hides — Esc, focus loss,
+    // action-induced hide all go through it. Carries the current input text
+    // so app.rs can decide whether to persist it to query history.
+    callback persist-dismiss(string);
+    // Fires when the user presses Enter on the highlighted row. The Rust side
+    // looks up the corresponding result and runs its action.
+    // Modifier flags ride along so Rust can pick `altAction` when the
+    // configured alt modifier is held at Enter / click time.
+    callback invoke-selected(bool, bool, bool, bool);
+    // History cycling — Up only acts on history when the input is empty (so
+    // regular Up keeps navigating results once the user has typed). Down only
+    // acts on history while previewing. Rust owns the state machine and
+    // writes the cycled text back via `set_query_text` + `set-input-text`.
+    callback history-up();
+    callback history-down();
+    // Whether the input currently shows a history preview (cycled, not yet
+    // committed). The input is rendered with the muted text colour while
+    // this is true; the first edit or Enter commits and flips this back.
+    in-out property <bool> is-history-preview: false;
+
+    // Settings-related callbacks. Rust persists state, then pushes the
+    // re-rendered slots/options back through the `in-out` properties.
+    callback open-settings();
+    callback close-settings();
+    callback select-plugin(int);
+    callback toggle-plugin(string, bool);
+    callback set-option-string(string, string, string);
+    callback set-option-bool(string, string, bool);
+    callback set-option-int(string, string, int);
+    // Enum click cycles to the next choice — Rust needs to push the new
+    // value back to refresh the visual. Separate from `set-option-string`
+    // so text-input edits don't trigger the same write-back-to-the-
+    // property dance (which yanks TextInput focus on every keystroke).
+    callback cycle-option-enum(string, string);
+    // Global-pane callbacks. `capture-hotkey` fires on every keypress
+    // inside the hotkey FocusScope; Rust formats + validates the spec and
+    // returns `true` when it actually accepted (so Slint knows to exit
+    // capture mode) or `false` to keep listening (modifier-only press,
+    // bare key with no modifier, unmapped special key, etc.).
+    // `reset-hotkey-to-default` fires on Escape inside capture mode.
+    // `select-global` flips the rail selection to the global entry.
+    callback capture-hotkey(bool, bool, bool, bool, string) -> bool;
+    callback reset-hotkey-to-default();
+    callback cycle-alt-action-modifier();
+    callback select-global();
+    // Whether the hotkey field is currently listening for a key combo —
+    // drives the prompt text + highlighted border in the global pane.
+    in-out property <bool> capturing-hotkey: false;
+    // Drag/position callbacks. Slint's frameless-window drag isn't built-in,
+    // so we hand off to winit's `drag_window()` on the Rust side. The
+    // launcher background fires `request-window-drag` on left-button-down;
+    // the OS owns the move loop from that point.
+    callback request-window-drag();
+    // Settings → Global → "Recenter window" — clears any saved position and
+    // re-centers the currently visible window. No-op if nothing was saved.
+    callback recenter-window();
+    // Settings → Global → "Open config directory" — opens the platform
+    // config dir in Finder / xdg-open. The directory holds settings.toml,
+    // theme.toml, and the per-plugin user-edited files.
+    callback open-config-dir();
+
+    // Focus is managed explicitly via `focus-input()` which is invoked from
+    // Rust (both from `show()` and the winit `Focused(true)` handler). The
+    // original `forward-focus: input` kept the TextInput as the window-level
+    // focus target; with the launcher as a sub-component we rely on the winit
+    // handler in window.rs instead — it calls `invoke_focus_input()` on every
+    // `Focused(true)` event, which achieves the same result.
+
+    public function focus-input() {
+        launcher.focus-input();
+    }
+
+    // Reset the input's own `text` directly. The binding `text: root.query-text`
+    // is one-way and gets severed the moment the TextInput writes to its own
+    // `text` (which happens on every keystroke via the `edited` callback). After
+    // that, mutating `query-text` from Rust no longer propagates back into the
+    // input. Assigning `input.text` here side-steps the broken binding so the
+    // displayed content actually clears.
+    public function clear-input() {
+        launcher.clear-input();
+    }
+
+    // Replace the visible input text with `text` without firing
+    // `query-edited`. The history-cycle path dispatches the plugin query
+    // directly so it can keep the cycle cursor alive; if we re-entered via
+    // `query-edited` the edit-while-cycling state machine would clobber it.
+    public function set-input-text(text: string) {
+        launcher.set-input-text(text);
+    }
+
+    // Switch between launcher and settings views. Public so Rust can invoke
+    // (from the Core `settings` verb action).
+    public function show-settings() {
+        root.current-view = root.VIEW-SETTINGS;
+        root.open-settings();
+        // Land focus on the rail FocusScope so arrow-key nav is live the
+        // moment the settings view appears.
+        settings.focus-rail();
+    }
+    public function show-query() {
+        root.current-view = root.VIEW-QUERY;
+        launcher.focus-input();
+    }
+
+    // Switch to the install-confirmation view. Rust populates the
+    // `confirm-*` properties before calling this.
+    public function show-confirm() {
+        root.current-view = root.VIEW-CONFIRM;
+        root.confirm-focus-index = 0;
+        confirm.focus-confirm();
+    }
+
+    // Apply `rail-focus-index` to the visual selection + fire the matching
+    // controller callback. Centralised so arrow keys, clicks, and any future
+    // jump-to-entry all produce the same observable state change.
+    public function sync-rail-selection() {
+        if (root.rail-focus-index <= 0) {
+            root.showing-global = true;
+            root.select-global();
+        } else {
+            root.showing-global = false;
+            root.selected-plugin-index = root.rail-focus-index - 1;
+            root.select-plugin(root.selected-plugin-index);
+        }
+    }
+
+    // Derived: how tall the rows area should be. Each row is ~52px (padding
+    // included). 9 rows max keeps the window from swallowing the whole screen.
+    property <int> visible-row-count: min(results.length, max-rows);
+    property <length> rows-height: visible-row-count * 56px;
+    property <length> input-height: 80px;
+    // Settings view geometry: wider + taller than the launcher so the plugin
+    // list and option inputs both have breathing room.
+    property <length> settings-height: 480px;
+
+    // Size is *not* collapsed when `is-hidden` is true — shrinking to 1×1
+    // sends `xdg_toplevel.set_max_size(1,1)` which fails Wayland's min/max
+    // consistency check against the (still-large) layout min that Slint
+    // derives from the child components. Keeping the size and only hiding
+    // the inner content via `visible: !is-hidden` below yields the same
+    // visual result (the window background is `transparent` already, so
+    // an invisible inner Rectangle paints nothing).
+    width: root.window-width;
+    height: root.current-view == root.VIEW-SETTINGS
+        ? settings-height
+        : root.current-view == root.VIEW-CONFIRM
+            ? settings-height
+            : input-height + (results.length > 0 ? rows-height + 1px : 0);
+
+    // Translucent rounded panel sits inside a transparent window so the corner
+    // radius reads cleanly on the desktop. `visible: !is-hidden` paired with
+    // the width/height collapse above makes the dismissed-on-Linux state look
+    // like a real hide without going through Slint's broken Wayland hide.
+    Rectangle {
+        visible: !root.is-hidden;
+        background: root.background-color;
+        border-radius: root.window-border-radius;
+        border-width: 1px;
+        border-color: root.border-color;
+
+        // Whole-panel drag handle. Mounted first so it sits at the bottom of
+        // the z-stack — child TouchAreas (result rows, settings rail, etc.)
+        // and the TextInput steal clicks on themselves; the dead space
+        // (input gutter, padding, area between widgets) falls through here.
+        // Mouse cursor stays default so the field still reads as
+        // text-editable.
+        //
+        // Initiate the OS drag only on actual cursor MOVEMENT while a
+        // mouse button is held, not on the bare press. Firing on every
+        // press fights child TouchAreas: a press that lands on a rail row
+        // would otherwise tell the compositor "drag pending here" — and
+        // on Wayland subsequent presses then route to the compositor's
+        // drag handler instead of back to the app. The `pressed` guard
+        // ensures we only call `drag_window()` once per gesture.
+        TouchArea {
+            mouse-cursor: default;
+            moved => {
+                if (self.pressed) {
+                    root.request-window-drag();
+                }
+            }
+        }
+
+        // ---- Launcher view ----
+        // Instantiated with `visible:` (rather than `if:`) so the launcher's
+        // `input` element remains in scope for `focus-input()`, `clear-input()`,
+        // and `set-input-text()` regardless of which view is currently showing.
+        launcher := LauncherView {
+            visible: root.current-view == root.VIEW-QUERY;
+            // Components don't auto-fill their slot the way layouts do;
+            // pin to the panel's box so the results list spans the full
+            // launcher width.
+            width: parent.width;
+            height: parent.height;
+
+            results <=> root.results;
+            selected-index <=> root.selected-index;
+            max-rows <=> root.max-rows;
+            query-text <=> root.query-text;
+            is-history-preview <=> root.is-history-preview;
+            alt-modifier-active <=> root.alt-modifier-active;
+
+            foreground-color: root.foreground-color;
+            muted-color: root.muted-color;
+            selection-color: root.selection-color;
+            border-color: root.border-color;
+            font-size-query: root.font-size-query;
+            font-size-title: root.font-size-title;
+            font-size-subtitle: root.font-size-subtitle;
+
+            query-edited(s) => { root.query-edited(s); }
+            escape-pressed => { root.escape-pressed(); }
+            key-state-changed(meta, ctrl, shift, alt) => {
+                root.update-alt-modifier-state(meta, ctrl, shift, alt);
+            }
+            invoke-selected(meta, control, shift, alt) => { root.invoke-selected(meta, control, shift, alt); }
+            history-up => { root.history-up(); }
+            history-down => { root.history-down(); }
+            show-settings => { root.show-settings(); }
+        }
+
+        // ---- Settings view ----
+        // Instantiated with `visible:` so `rail-focus` stays in scope for
+        // `show-settings()` which calls `settings.focus-rail()`.
+        settings := SettingsView {
+            visible: root.current-view == root.VIEW-SETTINGS;
+            width: parent.width;
+            height: parent.height;
+
+            plugin-slots <=> root.plugin-slots;
+            selected-plugin-index <=> root.selected-plugin-index;
+            plugin-options <=> root.plugin-options;
+            selected-plugin-version <=> root.selected-plugin-version;
+            selected-plugin-description <=> root.selected-plugin-description;
+            showing-global <=> root.showing-global;
+            rail-focus-index <=> root.rail-focus-index;
+            hotkey-value <=> root.hotkey-value;
+            capturing-hotkey <=> root.capturing-hotkey;
+            alt-action-modifier <=> root.alt-action-modifier;
+
+            foreground-color: root.foreground-color;
+            muted-color: root.muted-color;
+            highlight-color: root.highlight-color;
+            selection-color: root.selection-color;
+            border-color: root.border-color;
+            font-size-title: root.font-size-title;
+            font-size-subtitle: root.font-size-subtitle;
+
+            close-settings => { root.close-settings(); }
+            show-query => { root.show-query(); }
+            select-plugin(i) => { root.select-plugin(i); }
+            toggle-plugin(name, enabled) => { root.toggle-plugin(name, enabled); }
+            set-option-string(plugin, key, val) => { root.set-option-string(plugin, key, val); }
+            set-option-bool(plugin, key, val) => { root.set-option-bool(plugin, key, val); }
+            set-option-int(plugin, key, val) => { root.set-option-int(plugin, key, val); }
+            cycle-option-enum(plugin, key) => { root.cycle-option-enum(plugin, key); }
+            capture-hotkey(meta, ctrl, shift, alt, text) => { return root.capture-hotkey(meta, ctrl, shift, alt, text); }
+            reset-hotkey-to-default => { root.reset-hotkey-to-default(); }
+            cycle-alt-action-modifier => { root.cycle-alt-action-modifier(); }
+            select-global => { root.select-global(); }
+            recenter-window => { root.recenter-window(); }
+            open-config-dir => { root.open-config-dir(); }
+            sync-rail-selection => { root.sync-rail-selection(); }
+        }
+
+        // ---- Install-confirmation view ----
+        // Instantiated with `visible:` so `confirm-focus` stays in scope for
+        // `show-confirm()` which calls `confirm.focus-confirm()`.
+        confirm := ConfirmView {
+            visible: root.current-view == root.VIEW-CONFIRM;
+            width: parent.width;
+            height: parent.height;
+
+            confirm-plugin-name <=> root.confirm-plugin-name;
+            confirm-display-name <=> root.confirm-display-name;
+            confirm-version <=> root.confirm-version;
+            confirm-description <=> root.confirm-description;
+            confirm-manifest-url <=> root.confirm-manifest-url;
+            confirm-capabilities <=> root.confirm-capabilities;
+            confirm-focus-index <=> root.confirm-focus-index;
+
+            foreground-color: root.foreground-color;
+            muted-color: root.muted-color;
+            highlight-color: root.highlight-color;
+            selection-color: root.selection-color;
+            border-color: root.border-color;
+            font-size-title: root.font-size-title;
+            font-size-subtitle: root.font-size-subtitle;
+
+            confirm-install => { root.confirm-install(); }
+            confirm-cancel => { root.confirm-cancel(); }
+        }
+    }
+}

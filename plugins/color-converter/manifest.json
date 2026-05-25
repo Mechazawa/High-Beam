@@ -1,0 +1,13 @@
+{
+  "name": "color-converter",
+  "displayName": "Color Converter",
+  "version": "0.1.0",
+  "description": "Convert between hex / rgb / hsl color formats — type any color literal",
+  "timeoutMs": 100,
+  "memoryMb": 16,
+  "capabilities": [
+    "actions"
+  ],
+  "manifestUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/color-converter/manifest.json",
+  "entryUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/color-converter/plugin.js"
+}

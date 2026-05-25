@@ -1,0 +1,11 @@
+{
+  "name": "high-beam-plugin-echo-ts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "prepare": "tsc"
+  }
+}

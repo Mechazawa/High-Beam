@@ -1,0 +1,74 @@
+# vitest for every default plugin that ships a package.json + test script.
+# Matrix-per-plugin so a single failing plugin doesn't mask others, and
+# runs go parallel.
+#
+# Plugin list is hardcoded — if a new plugin lands under `plugins/` with
+# its own package.json, append it to the matrix below. `frecency-demo`
+# and `slow-echo` are intentionally absent: they have no package.json
+# (pure JS demos, no JS-side tests).
+name: Plugins
+
+# Path-filtered: plugin tests only run when something they actually
+# exercise has changed. `sdk/**` covers the highbeam SDK that every
+# plugin imports from, and the workflow file itself is included so
+# CI changes still trigger a self-test.
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'plugins/**'
+      - 'sdk/**'
+      - '.github/workflows/plugins.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'plugins/**'
+      - 'sdk/**'
+      - '.github/workflows/plugins.yml'
+
+concurrency:
+  group: plugins-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  vitest:
+    name: vitest (${{ matrix.plugin }})
+    runs-on: macos-latest
+    timeout-minutes: 10
+
+    strategy:
+      fail-fast: false
+      matrix:
+        plugin:
+          - app-launcher
+          - calculator
+          - clipboard-history
+          - currency-converter
+          - dnd
+          - echo
+          - echo-ts
+          - emoji-picker
+          - http-codes
+          - obsidian
+          - paper-size
+          - xkcd
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          # Single workspace lockfile at plugins/ — vitest + typescript hoist
+          # to the root, every plugin shares the install.
+          cache: 'npm'
+          cache-dependency-path: plugins/package-lock.json
+
+      - name: npm ci (workspace root)
+        working-directory: plugins
+        run: npm ci
+
+      - name: npm test
+        working-directory: plugins
+        run: npm test --workspace=${{ matrix.plugin }} --if-present

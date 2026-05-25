@@ -1,0 +1,252 @@
+// Install-confirmation modal. Shown when `current-view == VIEW-CONFIRM`.
+//
+// Displays plugin metadata, capability list, and Install / Cancel buttons.
+// Enter confirms; Escape cancels.
+//
+// `confirm-focus` must be reachable from `QueryWindow.show-confirm()`,
+// which is forwarded via the `focus-confirm` public function below.
+
+import { ScrollView } from "std-widgets.slint";
+import { ConfirmCapRow } from "types.slint";
+
+export component ConfirmView {
+    // Plugin metadata populated by Rust before switching to VIEW-CONFIRM.
+    in-out property <string> confirm-plugin-name: "";
+    in-out property <string> confirm-display-name: "";
+    in-out property <string> confirm-version: "";
+    in-out property <string> confirm-description: "";
+    in-out property <string> confirm-manifest-url: "";
+    in-out property <[ConfirmCapRow]> confirm-capabilities: [];
+    // 0 = Install button focused, 1 = Cancel button focused.
+    in-out property <int> confirm-focus-index: 0;
+
+    // Theme tokens
+    in property <color> foreground-color;
+    in property <color> muted-color;
+    in property <color> highlight-color;
+    in property <color> selection-color;
+    in property <color> border-color;
+    in property <length> font-size-title;
+    in property <length> font-size-subtitle;
+
+    // Callbacks
+    callback confirm-install();
+    callback confirm-cancel();
+
+    // Called by QueryWindow.show-confirm() to land focus on the button row.
+    public function focus-confirm() {
+        confirm-focus.focus();
+    }
+
+    VerticalLayout {
+        // Header bar.
+        Rectangle {
+            height: 48px;
+            background: transparent;
+            HorizontalLayout {
+                padding-left: 20px;
+                padding-right: 20px;
+                padding-top: 12px;
+                padding-bottom: 12px;
+                Text {
+                    text: "Install Plugin";
+                    color: root.foreground-color;
+                    font-size: 18px;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: root.border-color;
+        }
+
+        // Body: scrollable plugin info + capability list.
+        ScrollView {
+            VerticalLayout {
+                padding: 16px;
+                spacing: 10px;
+
+                // Plugin name + version.
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    Text {
+                        text: root.confirm-display-name;
+                        color: root.foreground-color;
+                        font-size: 16px;
+                        vertical-alignment: center;
+                    }
+                    if root.confirm-version != "": Text {
+                        text: "v" + root.confirm-version;
+                        color: root.muted-color;
+                        font-size: root.font-size-subtitle;
+                        vertical-alignment: center;
+                    }
+                }
+
+                // Description.
+                if root.confirm-description != "": Text {
+                    text: root.confirm-description;
+                    color: root.muted-color;
+                    font-size: root.font-size-subtitle;
+                    wrap: word-wrap;
+                }
+
+                // Source URL.
+                Text {
+                    text: root.confirm-manifest-url;
+                    color: root.muted-color;
+                    font-size: root.font-size-subtitle;
+                    overflow: elide;
+                }
+
+                // Capability list header.
+                if root.confirm-capabilities.length > 0: Text {
+                    text: "Capabilities requested:";
+                    color: root.foreground-color;
+                    font-size: root.font-size-title;
+                }
+
+                // One row per capability.
+                for cap-row in confirm-capabilities: Rectangle {
+                    height: 44px;
+                    background: cap-row.is-new
+                        ? root.highlight-color.with-alpha(0.08)
+                        : transparent;
+                    border-radius: 4px;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        padding-top: 4px;
+                        padding-bottom: 4px;
+                        spacing: 8px;
+                        alignment: start;
+                        VerticalLayout {
+                            alignment: center;
+                            // "new" badge for caps that weren't in the previously installed version.
+                            if cap-row.is-new: Text {
+                                text: "+ new";
+                                color: root.highlight-color;
+                                font-size: root.font-size-subtitle;
+                            }
+                            Text {
+                                text: cap-row.cap;
+                                color: root.foreground-color;
+                                font-size: root.font-size-title;
+                            }
+                            Text {
+                                text: cap-row.explanation;
+                                color: root.muted-color;
+                                font-size: root.font-size-subtitle;
+                                overflow: elide;
+                            }
+                        }
+                    }
+                }
+
+                if root.confirm-capabilities.length == 0: Text {
+                    text: "This plugin requests no capabilities.";
+                    color: root.muted-color;
+                    font-size: root.font-size-subtitle;
+                }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: root.border-color;
+        }
+
+        // Button row: Install (focused first) and Cancel.
+        // A single FocusScope captures keyboard so Enter / Escape
+        // work regardless of which button is visually highlighted.
+        confirm-focus := FocusScope {
+            height: 52px;
+
+            key-pressed(event) => {
+                if (event.text == Key.Return) {
+                    if (root.confirm-focus-index == 0) {
+                        root.confirm-install();
+                    } else {
+                        root.confirm-cancel();
+                    }
+                    return accept;
+                }
+                if (event.text == Key.Escape) {
+                    root.confirm-cancel();
+                    return accept;
+                }
+                if (event.text == Key.LeftArrow || event.text == Key.UpArrow) {
+                    root.confirm-focus-index = 0;
+                    return accept;
+                }
+                if (event.text == Key.RightArrow || event.text == Key.DownArrow) {
+                    root.confirm-focus-index = 1;
+                    return accept;
+                }
+                reject
+            }
+
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                padding-top: 10px;
+                padding-bottom: 10px;
+                spacing: 12px;
+                alignment: end;
+
+                // Cancel button.
+                TouchArea {
+                    width: 90px;
+                    height: 32px;
+                    clicked => {
+                        root.confirm-focus-index = 1;
+                        root.confirm-cancel();
+                    }
+                    Rectangle {
+                        background: root.confirm-focus-index == 1
+                            ? root.muted-color.with-alpha(0.2)
+                            : root.muted-color.with-alpha(0.08);
+                        border-radius: 6px;
+                        border-width: root.confirm-focus-index == 1 ? 1px : 0px;
+                        border-color: root.foreground-color;
+                        Text {
+                            text: "Cancel";
+                            color: root.foreground-color;
+                            font-size: root.font-size-title;
+                            vertical-alignment: center;
+                            horizontal-alignment: center;
+                        }
+                    }
+                }
+
+                // Install button — receives initial focus.
+                TouchArea {
+                    width: 90px;
+                    height: 32px;
+                    clicked => {
+                        root.confirm-focus-index = 0;
+                        root.confirm-install();
+                    }
+                    Rectangle {
+                        background: root.confirm-focus-index == 0
+                            ? root.highlight-color
+                            : root.highlight-color.with-alpha(0.7);
+                        border-radius: 6px;
+                        border-width: root.confirm-focus-index == 0 ? 1px : 0px;
+                        border-color: root.highlight-color;
+                        Text {
+                            text: "Install";
+                            color: white;
+                            font-size: root.font-size-title;
+                            vertical-alignment: center;
+                            horizontal-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

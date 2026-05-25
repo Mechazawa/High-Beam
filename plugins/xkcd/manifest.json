@@ -1,0 +1,16 @@
+{
+  "name": "xkcd",
+  "displayName": "xkcd",
+  "version": "0.1.0",
+  "description": "Find xkcd comics — `xkcd <num>`, `xkcd latest`, `xkcd random`, `xkcd <text>` (title search). The full title index rebuilds automatically on install / update.",
+  "debounceMs": 200,
+  "timeoutMs": 120000,
+  "memoryMb": 32,
+  "capabilities": [
+    "actions",
+    "http",
+    "fs.cache"
+  ],
+  "manifestUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/xkcd/manifest.json",
+  "entryUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/xkcd/plugin.js"
+}

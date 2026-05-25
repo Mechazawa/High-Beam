@@ -1,0 +1,10 @@
+{
+  "name": "dnd",
+  "displayName": "D&D 5e",
+  "version": "0.1.0",
+  "description": "Search D&D 5e spells — type 'spell <name>' or '5e spell <name>'",
+  "debounceMs": 50,
+  "timeoutMs": 200,
+  "memoryMb": 64,
+  "capabilities": ["actions", "fs.read"]
+}

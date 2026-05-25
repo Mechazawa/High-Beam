@@ -1,0 +1,276 @@
+[package]
+name = "high-beam"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+build = "build.rs"
+description = "Native Rust keyboard launcher (Spotlight / Alfred / Raycast / Ulauncher class)."
+authors = ["Bas Bieling"]
+homepage = "https://github.com/Mechazawa/high-beam"
+
+# `cargo packager` (the Tauri team's bundler) reads this table to produce
+# `target/release/HighBeam.app` + `target/release/HighBeam_<ver>_*.dmg`.
+# Install once with `cargo install cargo-packager --locked`, then
+# `just bundle` produces both artifacts.
+[package.metadata.packager]
+product-name = "HighBeam"
+identifier = "at.ioexception.highbeam"
+# `binaries` tells the packager which build outputs to bundle; the path is
+# relative to `out-dir` and resolved against the cargo target dir at runtime.
+binaries = [{ path = "high-beam", main = true }]
+icons = ["bundle/icon.icns", "bundle/icon.png"]
+# The plugins land in `Contents/Resources/plugins/<name>/...` at bundle
+# time; `src/daemon.rs::install_default_plugins_if_needed` copies them to
+# the user's plugin dir on first launch. Dev-only fixtures
+# (`echo`, `echo-ts`, `slow-echo`, `frecency-demo`) deliberately stay out
+# of the shipped bundle.
+# When `src` resolves to a single file, cargo-packager uses `target`
+# verbatim as the destination filename inside Contents/Resources — so each
+# entry spells out its full target path. Dev-only files (package.json,
+# vitest configs, node_modules, *.test.*, lockfiles) stay out of the
+# bundle by simply not being listed.
+resources = [
+    { src = "plugins/app-launcher/manifest.json",      target = "plugins/app-launcher/manifest.json" },
+    { src = "plugins/app-launcher/plugin.js",          target = "plugins/app-launcher/plugin.js" },
+    { src = "plugins/calculator/manifest.json",        target = "plugins/calculator/manifest.json" },
+    { src = "plugins/calculator/plugin.js",            target = "plugins/calculator/plugin.js" },
+    { src = "plugins/color-converter/manifest.json",   target = "plugins/color-converter/manifest.json" },
+    { src = "plugins/color-converter/plugin.js",       target = "plugins/color-converter/plugin.js" },
+    { src = "plugins/dictionary-linux/manifest.json",  target = "plugins/dictionary-linux/manifest.json" },
+    { src = "plugins/dictionary-linux/plugin.js",      target = "plugins/dictionary-linux/plugin.js" },
+    { src = "plugins/dictionary-macos/manifest.json",  target = "plugins/dictionary-macos/manifest.json" },
+    { src = "plugins/dictionary-macos/plugin.js",      target = "plugins/dictionary-macos/plugin.js" },
+    { src = "plugins/dnd/manifest.json",               target = "plugins/dnd/manifest.json" },
+    { src = "plugins/dnd/plugin.js",                   target = "plugins/dnd/plugin.js" },
+    { src = "plugins/dnd/5eSpells.json",               target = "plugins/dnd/5eSpells.json" },
+    { src = "plugins/file-search/manifest.json",       target = "plugins/file-search/manifest.json" },
+    { src = "plugins/file-search/plugin.js",           target = "plugins/file-search/plugin.js" },
+    { src = "plugins/http-codes/manifest.json",        target = "plugins/http-codes/manifest.json" },
+    { src = "plugins/http-codes/plugin.js",            target = "plugins/http-codes/plugin.js" },
+    { src = "plugins/http-codes/http.json",            target = "plugins/http-codes/http.json" },
+    { src = "plugins/kill-process/manifest.json",      target = "plugins/kill-process/manifest.json" },
+    { src = "plugins/kill-process/plugin.js",          target = "plugins/kill-process/plugin.js" },
+    { src = "plugins/paper-size/manifest.json",        target = "plugins/paper-size/manifest.json" },
+    { src = "plugins/paper-size/plugin.js",            target = "plugins/paper-size/plugin.js" },
+    { src = "plugins/prefpanes/manifest.json",         target = "plugins/prefpanes/manifest.json" },
+    { src = "plugins/prefpanes/plugin.js",             target = "plugins/prefpanes/plugin.js" },
+    { src = "plugins/quick-links/manifest.json",       target = "plugins/quick-links/manifest.json" },
+    { src = "plugins/quick-links/plugin.js",           target = "plugins/quick-links/plugin.js" },
+    { src = "plugins/quick-links/links.json",          target = "plugins/quick-links/links.json" },
+    { src = "plugins/unit-conversions/manifest.json",  target = "plugins/unit-conversions/manifest.json" },
+    { src = "plugins/unit-conversions/plugin.js",      target = "plugins/unit-conversions/plugin.js" },
+    { src = "plugins/web-search/manifest.json",        target = "plugins/web-search/manifest.json" },
+    { src = "plugins/web-search/plugin.js",            target = "plugins/web-search/plugin.js" },
+    { src = "plugins/window-mgmt/manifest.json",       target = "plugins/window-mgmt/manifest.json" },
+    { src = "plugins/window-mgmt/plugin.js",           target = "plugins/window-mgmt/plugin.js" },
+    { src = "plugins/xkcd/manifest.json",              target = "plugins/xkcd/manifest.json" },
+    { src = "plugins/xkcd/plugin.js",                  target = "plugins/xkcd/plugin.js" },
+    { src = "plugins/clipboard-history/manifest.json", target = "plugins/clipboard-history/manifest.json" },
+    { src = "plugins/clipboard-history/plugin.js",     target = "plugins/clipboard-history/plugin.js" },
+    { src = "plugins/currency-converter/manifest.json",target = "plugins/currency-converter/manifest.json" },
+    { src = "plugins/currency-converter/plugin.js",    target = "plugins/currency-converter/plugin.js" },
+    { src = "plugins/emoji-picker/manifest.json",      target = "plugins/emoji-picker/manifest.json" },
+    { src = "plugins/emoji-picker/plugin.js",          target = "plugins/emoji-picker/plugin.js" },
+    { src = "plugins/emoji-picker/emoji-data.json",    target = "plugins/emoji-picker/emoji-data.json" },
+    { src = "plugins/obsidian/manifest.json",          target = "plugins/obsidian/manifest.json" },
+    { src = "plugins/obsidian/plugin.js",              target = "plugins/obsidian/plugin.js" },
+    { src = "themes/yosemite-spotlight.toml",                   target = "themes/yosemite-spotlight.toml" },
+]
+# `app`+`dmg` are macOS; `deb`/`pacman` are Linux. cargo-packager only
+# emits the format(s) valid for the current host OS — running on macOS
+# produces .app + .dmg, running on Linux produces .deb + the pacman
+# (.tar.gz + PKGBUILD) pair. The Justfile recipes drive per-format
+# builds explicitly via `--formats <name>` so a missing tool on the
+# host (dpkg-deb, makepkg, etc.) only fails that one recipe.
+#
+# .rpm is NOT in this list: cargo-packager 0.11.x doesn't ship an rpm
+# backend. We document the rpm path via `cargo-generate-rpm` in
+# docs/distribution.md; the `bundle-rpm` Justfile recipe defers to
+# that.
+formats = ["app", "dmg", "deb", "pacman"]
+
+[package.metadata.packager.linux]
+# Synthesise the .desktop entry from the values cargo-packager already
+# knows (product_name, identifier, etc.) so deb / pacman builds land an
+# app-menu entry even if the packaging/linux/highbeam.desktop file
+# isn't separately installed. The hand-maintained .desktop in
+# packaging/linux/ is what the tarball + AUR PKGBUILD use; this flag
+# covers the cargo-packager-driven formats.
+generate-desktop-entry = true
+
+[package.metadata.packager.deb]
+# Runtime deps for the .deb. `libxkbcommon0` is winit's Wayland/X11
+# keymap backend; `libssl3` covers reqwest's rustls fallback to the
+# system roots loader; `libfontconfig1` is freedesktop-icons'
+# fontconfig probe used by the Linux icon fetcher. Names are
+# Debian-style (lowercase + suffix digits) — these resolve on
+# Debian 12 / Ubuntu 22.04+.
+depends = ["libxkbcommon0", "libssl3", "libfontconfig1"]
+section = "utils"
+priority = "optional"
+
+[package.metadata.packager.pacman]
+# Arch package names — note the differences from Debian: `openssl` not
+# `libssl3`, `libxkbcommon` without the `0` SONAME suffix, `fontconfig`
+# not `libfontconfig1`.
+depends = ["openssl", "libxkbcommon", "fontconfig"]
+conflicts = ["high-beam-bin"]
+provides = ["high-beam"]
+
+[package.metadata.packager.macos]
+# Self-signed identity. See `docs/distribution.md` for how to create the
+# matching keychain cert via Keychain Access. End users still need to run
+# `xattr -dr com.apple.quarantine /Applications/HighBeam.app` post-install
+# because Gatekeeper only trusts Apple-CA-issued Developer ID certs.
+signing-identity = "High Beam Self-Signed"
+# Hides the daemon from the Dock and Cmd-Tab. Pairs with the runtime
+# `NSApp.setActivationPolicy(.accessory)` fallback for `cargo run`.
+background-app = true
+minimum-system-version = "14.0"
+info-plist-path = "bundle/Info.plist"
+
+[package.metadata.packager.dmg]
+# Default drag-to-Applications layout; cargo-packager auto-adds the
+# Applications shortcut symlink when no app-folder-position is set, so we
+# only need to position the .app itself.
+window-size = { width = 660, height = 400 }
+app-position = { x = 180, y = 170 }
+application-folder-position = { x = 480, y = 170 }
+
+# Release-profile knobs for the bundled binary. The launcher is mostly idle
+# between keystrokes, so single-digit-ms wins from cross-crate optimisation
+# add up over a session of hundreds of queries.
+#
+# * `lto = "fat"` + `codegen-units = 1` — give LLVM the whole program for
+#   inlining; pays ~3–5 min compile time per release for ~10–15% smaller
+#   binary + measurable hot-path speedup.
+# * `strip = true` — strip debug symbols from the shipped binary. Halves
+#   the .app payload; symbols stay in `target/release/deps/*.dSYM` so
+#   stack traces from a crash report can still be resolved locally.
+# * `panic` is deliberately left at the default `unwind` — a panicking
+#   plugin task (icon extractor, archive extractor, etc.) must surface as
+#   a `JoinError` the dispatcher can recover from, not take the daemon
+#   down. `panic = "abort"` would silently regress that.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true
+
+[dependencies]
+# `unstable-winit-030` exposes focus/blur events and the underlying winit
+# window so we can set native properties .slint can't express.
+slint = { version = "1.16", features = ["unstable-winit-030"] }
+clap = { version = "4", features = ["derive"] }
+directories = "6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# QuickJS embedding for plugins. Features:
+#   * `loader`   — Resolver/Loader traits for the `highbeam:` import scheme
+#   * `futures`  — AsyncRuntime + `Promise::into_future` to drive `async
+#                  function* query()` without manual job-queue pumping
+#   * `macro`    — `#[rquickjs::module]` ergonomics for host modules
+#   * `parallel` — required by `futures` for Send-able runtime handles
+rquickjs = { version = "0.11", features = ["loader", "futures", "macro", "parallel"] }
+
+# Single-threaded tokio drives the AsyncRuntime per query.
+tokio = { version = "1", features = ["rt", "macros", "time", "sync", "process", "io-util"] }
+
+# `CancellationToken` is how we cascade aborts into in-flight I/O.
+tokio-util = { version = "0.7", default-features = false, features = ["rt"] }
+
+# `rustls-tls` keeps openssl out of the dep tree; `json` is for the
+# convenience `response.json()` path.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+
+arboard = "3"
+
+# `open::that(url)` works on macOS (`/usr/bin/open`) and Linux (`xdg-open`).
+open = "5"
+
+# `bundled` ships SQLite with the binary so we don't depend on whatever the
+# host OS happens to have. The frecency table sees single-digit-ms reads/
+# writes from one thread; a plain `Mutex<Connection>` suffices.
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# `nucleo-matcher` exposes per-match char indices so we can round-trip
+# highlight ranges to JS.
+nucleo-matcher = "0.3"
+
+base64 = "0.22"
+
+# Default features pull in every format `image` supports — we only ship PNG
+# and JPEG icons, so disabling defaults trims the transitive tree.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+
+# `parse` for theme.toml reads; `display` adds write-back for settings.toml.
+toml = { version = "0.8", default-features = false, features = ["parse", "display"] }
+
+# `chrono` is already in the transitive tree via slint; clock + std is all
+# the plugin.log writer needs.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+# Semver comparison for plugin update checks. Plain string equality bites on
+# leading-zero / metadata variations; the crate is tiny and well-trodden.
+semver = "1"
+
+# Plugin archive extraction. `flate2` decompresses `.tar.gz`; `tar` unwraps
+# the resulting stream; `zip` covers the `.zip` path. Default features are
+# trimmed where it matters — `zip`'s bzip2/zstd backends would balloon the
+# binary for formats we don't accept.
+tar = "0.4"
+flate2 = "1"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+# Host-side structured logging. `tracing` is the event/macro surface; the
+# `fmt`+`env-filter` subscriber gives us level-routed stderr output with
+# `RUST_LOG`-style filtering. Per-plugin logs still go through `PluginLog`.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "std"] }
+
+# macOS-only:
+#   * `global-hotkey` — only crate that works on modern macOS for app-level
+#     global hotkeys without an Accessibility prompt
+#   * `objc2*` — `NSApp.activate(ignoringOtherApps:)` +
+#     `NSWindow.makeKeyAndOrderFront` for the focus dance in `window::show`
+#   * `raw-window-handle` — pulls the `NSView` ptr out of winit; pinned to
+#     winit-0.30's versions to avoid a second objc2 family in the dep tree
+[target.'cfg(target_os = "macos")'.dependencies]
+global-hotkey = "0.8"
+objc2 = "0.5"
+objc2-app-kit = { version = "0.2", features = [
+    "NSApplication",
+    "NSView",
+    "NSWindow",
+] }
+objc2-foundation = { version = "0.2", features = ["NSThread"] }
+raw-window-handle = "0.6"
+
+# Linux-only:
+#   * `wayland-client` + `wayland-backend` — share winit's wl_display via
+#     `Backend::from_foreign_display` so we can talk to the same compositor
+#     winit is talking to, without opening a second connection.
+#   * `wayland-protocols` (`staging` feature) — generated bindings for
+#     `xdg_activation_v1`, the focus-grab analog of macOS's
+#     `NSApp.activate(ignoringOtherApps:)`. Used by `window::show` when an
+#     `XDG_ACTIVATION_TOKEN` is in scope (own env on cold start, or
+#     forwarded across IPC for the daemon-already-running path).
+#   * `raw-window-handle` — same role as on macOS, pulls the wl_surface +
+#     wl_display ptrs out of winit; version pinned to winit-0.30's.
+[target.'cfg(target_os = "linux")'.dependencies]
+wayland-client = "0.31"
+wayland-backend = { version = "0.3", features = ["client_system"] }
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+raw-window-handle = "0.6"
+
+# XDG icon-theme lookup for `.desktop` Icon= names. Walks the active GTK
+# theme → parents → hicolor → /usr/share/pixmaps and returns the best file
+# match for a requested size. Light deps (xdg, dirs, ini_core) and no async
+# runtime — we call it from `spawn_blocking` since lookups touch the disk.
+freedesktop-icons = "0.4"
+
+[build-dependencies]
+slint-build = "1.16"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }

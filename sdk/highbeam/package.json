@@ -1,0 +1,49 @@
+{
+    "name": "@high-beam/sdk",
+    "version": "0.1.0",
+    "description": "TypeScript declarations and Node-compatible test stubs for the highbeam:* plugin SDK.",
+    "type": "module",
+    "types": "index.d.ts",
+    "license": "MIT",
+    "private": true,
+    "exports": {
+        ".": {
+            "types": "./index.d.ts"
+        },
+        "./actions": {
+            "types": "./actions.d.ts",
+            "import": "./actions.js"
+        },
+        "./clipboard": {
+            "types": "./clipboard.d.ts",
+            "import": "./clipboard.js"
+        },
+        "./http": {
+            "types": "./http.d.ts",
+            "import": "./http.js"
+        },
+        "./fs": {
+            "types": "./fs.d.ts",
+            "import": "./fs.js"
+        },
+        "./icons": {
+            "types": "./icons.d.ts",
+            "import": "./icons.js"
+        },
+        "./match": {
+            "types": "./match.d.ts",
+            "import": "./match.js"
+        },
+        "./system": {
+            "types": "./system.d.ts",
+            "import": "./system.js"
+        },
+        "./platform": {
+            "types": "./platform.d.ts",
+            "import": "./platform.js"
+        }
+    },
+    "peerDependencies": {
+        "vitest": ">=1.0.0"
+    }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "calculator",
+  "displayName": "Calculator",
+  "version": "0.1.0",
+  "description": "Evaluate math expressions. Supports + - * / % ** parens unary - and common functions.",
+  "timeoutMs": 100,
+  "memoryMb": 16,
+  "capabilities": [
+    "actions"
+  ],
+  "manifestUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/calculator/manifest.json",
+  "entryUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/calculator/plugin.js"
+}

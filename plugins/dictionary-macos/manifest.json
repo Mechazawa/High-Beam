@@ -1,0 +1,16 @@
+{
+  "name": "dictionary-macos",
+  "displayName": "Dictionary (macOS)",
+  "version": "0.1.0",
+  "description": "Look up a word in macOS Dictionary.app — `define <word>` or `dict <word>`",
+  "timeoutMs": 100,
+  "memoryMb": 16,
+  "platforms": [
+    "macos"
+  ],
+  "capabilities": [
+    "actions"
+  ],
+  "manifestUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/dictionary-macos/manifest.json",
+  "entryUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/dictionary-macos/plugin.js"
+}

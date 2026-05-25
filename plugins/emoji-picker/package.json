@@ -1,0 +1,8 @@
+{
+  "name": "@high-beam-plugin/emoji-picker",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  }
+}

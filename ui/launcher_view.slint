@@ -1,0 +1,277 @@
+// Launcher / query view. Shown when `current-view == VIEW-QUERY`.
+//
+// All `root.foo` references from the original launcher-view block are
+// surfaced as explicit `in`, `out`, or `in-out` properties and callbacks
+// so the parent `QueryWindow` can bind and forward them.
+//
+// The `input` element id must remain accessible from the parent so that
+// `QueryWindow`'s public functions (`focus-input`, `clear-input`,
+// `set-input-text`) can reach it. Those functions are exposed here as
+// `public function`s and delegated upward via the named instantiation
+// id in `query.slint`.
+
+import { ResultRow } from "types.slint";
+
+export component LauncherView {
+    // Data
+    in-out property <[ResultRow]> results: [];
+    in-out property <int> selected-index: 0;
+    in-out property <int> max-rows: 9;
+    in-out property <string> query-text;
+    in-out property <bool> is-history-preview: false;
+    // True while the user is holding the configured alt-action modifier.
+    // Drives the title/subtitle swap so each row telegraphs what the
+    // modifier will trigger right now.
+    in property <bool> alt-modifier-active: false;
+
+    // Theme tokens
+    in property <color> foreground-color;
+    in property <color> muted-color;
+    in property <color> selection-color;
+    in property <color> border-color;
+    in property <length> font-size-query;
+    in property <length> font-size-title;
+    in property <length> font-size-subtitle;
+
+    // Callbacks forwarded to the parent
+    callback query-edited(string);
+    callback escape-pressed();
+    // Fires from key-pressed AND key-released so the parent can update
+    // the alt-modifier-active flag (which drives per-row label swap).
+    callback key-state-changed(bool, bool, bool, bool);
+    // Modifier flags ride along so Rust can pick the result's `altAction`
+    // when the configured alt modifier is held.
+    callback invoke-selected(bool, bool, bool, bool);
+    callback history-up();
+    callback history-down();
+    callback show-settings();
+
+    // Derived geometry — mirrors the root's `visible-row-count` + `rows-height`.
+    property <int> visible-row-count: min(results.length, max-rows);
+    property <length> rows-height: visible-row-count * 56px;
+
+    // Public functions called by `QueryWindow`'s own public functions.
+    public function focus-input() {
+        input.focus();
+    }
+
+    public function clear-input() {
+        input.text = "";
+        root.query-text = "";
+        root.results = [];
+        root.selected-index = 0;
+    }
+
+    public function set-input-text(text: string) {
+        input.text = text;
+        root.query-text = text;
+    }
+
+    VerticalLayout {
+        // Input area
+        Rectangle {
+            height: 80px;
+            input := TextInput {
+                x: 20px;
+                y: 0;
+                width: parent.width - 40px;
+                height: parent.height;
+                font-size: root.font-size-query;
+                color: root.is-history-preview ? root.muted-color : root.foreground-color;
+                single-line: true;
+                vertical-alignment: center;
+                text: root.query-text;
+
+                edited => {
+                    root.query-text = self.text;
+                    root.query-edited(self.text);
+                }
+
+                key-released(event) => {
+                    // Re-sync the alt-modifier-active flag when the user
+                    // lets go of the modifier key so the label swap snaps
+                    // back to the primary text.
+                    root.key-state-changed(
+                        event.modifiers.meta,
+                        event.modifiers.control,
+                        event.modifiers.shift,
+                        event.modifiers.alt,
+                    );
+                    reject
+                }
+
+                key-pressed(event) => {
+                    // Sync alt-modifier-active before any branching so the
+                    // first key event after a modifier press shows the
+                    // alt labels (including the modifier-only press itself).
+                    root.key-state-changed(
+                        event.modifiers.meta,
+                        event.modifiers.control,
+                        event.modifiers.shift,
+                        event.modifiers.alt,
+                    );
+                    // Cmd+, (macOS) / Ctrl+, (Linux) opens the settings view.
+                    if (event.text == "," && (event.modifiers.meta || event.modifiers.control)) {
+                        root.show-settings();
+                        return accept;
+                    }
+                    if (event.text == Key.Escape) {
+                        root.escape-pressed();
+                        return accept;
+                    }
+                    // Up cycles history when input is empty or already previewing;
+                    // otherwise it moves the selection up the result list.
+                    if (event.text == Key.UpArrow) {
+                        if (self.text == "" || root.is-history-preview) {
+                            root.history-up();
+                            return accept;
+                        }
+                        if (root.selected-index > 0) {
+                            root.selected-index -= 1;
+                        }
+                        return accept;
+                    }
+                    // Down walks newer through history while previewing;
+                    // otherwise navigates results.
+                    if (event.text == Key.DownArrow) {
+                        if (root.is-history-preview) {
+                            root.history-down();
+                            return accept;
+                        }
+                        if (root.selected-index < root.results.length - 1) {
+                            root.selected-index += 1;
+                        }
+                        return accept;
+                    }
+                    if (event.text == Key.Return) {
+                        // While previewing, Enter commits the preview as the live
+                        // query (the Rust side fires the plugin pipeline). Otherwise:
+                        // invoke the selected row.
+                        if (root.is-history-preview) {
+                            root.query-edited(self.text);
+                            return accept;
+                        }
+                        if (root.results.length > 0) {
+                            root.invoke-selected(
+                                event.modifiers.meta,
+                                event.modifiers.control,
+                                event.modifiers.shift,
+                                event.modifiers.alt,
+                            );
+                        }
+                        return accept;
+                    }
+                    reject
+                }
+            }
+
+            // Faux placeholder: only visible when the input is empty.
+            Text {
+                x: 20px;
+                y: 0;
+                width: parent.width - 40px;
+                height: parent.height;
+                text: "Query…";
+                font-size: root.font-size-query;
+                color: root.muted-color;
+                vertical-alignment: center;
+                visible: root.query-text == "";
+            }
+        }
+
+        // Separator line — only visible when there are results.
+        Rectangle {
+            height: results.length > 0 ? 1px : 0;
+            background: root.border-color;
+        }
+
+        // Result rows
+        Rectangle {
+            height: rows-height;
+            clip: true;
+            visible: results.length > 0;
+
+            VerticalLayout {
+                spacing: 0px;
+                for row[idx] in results: TouchArea {
+                    height: 56px;
+                    pointer-event(event) => {
+                        if (event.kind == PointerEventKind.up && event.button == PointerEventButton.left) {
+                            root.selected-index = idx;
+                            root.invoke-selected(
+                                event.modifiers.meta,
+                                event.modifiers.control,
+                                event.modifiers.shift,
+                                event.modifiers.alt,
+                            );
+                        }
+                    }
+                    Rectangle {
+                        background: idx == root.selected-index ? root.selection-color : transparent;
+                        HorizontalLayout {
+                            padding-left: 20px;
+                            padding-right: 20px;
+                            padding-top: 8px;
+                            padding-bottom: 8px;
+                            spacing: 12px;
+                            alignment: start;
+
+                            // Icon slot — fixed 36x36 regardless of whether the row
+                            // has an icon, so the title column lines up across rows.
+                            Rectangle {
+                                width: 36px;
+                                height: 36px;
+                                y: (parent.height - self.height) / 2;
+                                border-radius: 4px;
+                                border-width: row.has-icon ? 0px : 1px;
+                                border-color: root.muted-color.with-alpha(0.25);
+                                Image {
+                                    x: 0; y: 0;
+                                    width: parent.width;
+                                    height: parent.height;
+                                    source: row.icon;
+                                    image-fit: contain;
+                                }
+                            }
+
+                            VerticalLayout {
+                                spacing: 2px;
+                                alignment: center;
+                                Text {
+                                    // Swap to alt-title while the alt-action
+                                    // modifier is held, but only when this
+                                    // row's plugin supplied one. Otherwise
+                                    // keep the primary so generic rows
+                                    // don't flicker.
+                                    text: root.alt-modifier-active && row.has-alt-title ? row.alt-title : row.title;
+                                    color: root.foreground-color;
+                                    font-size: root.font-size-title;
+                                    // Pin the height so swapping text content
+                                    // doesn't reflow the `alignment: center`
+                                    // parent. Generous multiplier keeps
+                                    // ascenders / descenders inside the box.
+                                    height: root.font-size-title * 1.4;
+                                    overflow: elide;
+                                }
+
+                                // Always reserve the subtitle slot so the
+                                // alt-modifier swap doesn't jiggle the row
+                                // when one of primary / alt is empty. We
+                                // hide the Text via `visible:` rather than
+                                // `if:` to keep the layout slot allocated.
+                                Text {
+                                    text: root.alt-modifier-active && row.has-alt-subtitle ? row.alt-subtitle : row.subtitle;
+                                    color: root.muted-color;
+                                    font-size: root.font-size-subtitle;
+                                    height: root.font-size-subtitle * 1.4;
+                                    overflow: elide;
+                                    visible: row.has-subtitle || (root.alt-modifier-active && row.has-alt-subtitle);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

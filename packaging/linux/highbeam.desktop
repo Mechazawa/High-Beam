@@ -1,0 +1,18 @@
+[Desktop Entry]
+Type=Application
+Name=High Beam
+GenericName=Application Launcher
+Comment=Keyboard launcher in the Spotlight / Alfred / Raycast class
+# `--open` is the canonical "summon the window" verb: it talks to the
+# daemon's IPC socket if one exists, otherwise it starts the daemon and
+# opens the window itself. Bind this same command to a WM shortcut for
+# the global-hotkey path.
+Exec=/usr/bin/highbeam --open
+Icon=highbeam
+Terminal=false
+Categories=Utility;Launcher;
+Keywords=launcher;spotlight;alfred;raycast;
+StartupNotify=false
+# Don't hide from the app menu — appearing there is half the point of
+# the .desktop file (the other half is xdg-mime / categories metadata).
+NoDisplay=false

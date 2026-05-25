@@ -1,0 +1,124 @@
+# Two parallel jobs (not a matrix): macOS is the primary target with
+# the full lint/test/release-build gate, Linux is the secondary path
+# covering the same checks on `ubuntu-latest`. Kept as separate jobs
+# instead of a matrix because the macOS step would otherwise need
+# guards around platform-specific tooling (qlmanage for `just icon`,
+# the macOS keychain for signing) and the Linux job conversely needs
+# system-package install steps that don't apply to macOS.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+# Cancel superseded runs on the same ref. Saves runner-minutes when a PR
+# is force-pushed during review.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cargo:
+    name: cargo (macos)
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # rust-toolchain.toml pins channel=stable + clippy + rustfmt, so
+      # dtolnay/rust-toolchain@stable resolves to the same toolchain that
+      # local devs run. No `with: toolchain:` override on purpose.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      # Keys cache by Cargo.lock + rustc version; hits on most PRs.
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install just
+        uses: taiki-e/install-action@just
+
+      # Step order mirrors `just check` (fmt → lint → test) plus the extras
+      # the local dev policy asks for (pedantic clippy + release build).
+
+      - name: cargo fmt --check
+        run: cargo fmt -- --check
+
+      # `just lint` is strict clippy with -D warnings -A clippy::pedantic.
+      - name: just lint
+        run: just lint
+
+      # Local policy is "zero pedantic findings or addressed inline". CI
+      # enforces strict (fail on pedantic) so the bar can't drift on PRs.
+      # We override `just lint-pedantic` here to add -D warnings — the
+      # Justfile recipe runs advisory-only for local iteration.
+      - name: clippy pedantic (strict)
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      # `cargo test` over `cargo nextest run` on purpose — matches what
+      # local devs run, consistency over a marginal speed win.
+      - name: cargo test --all
+        run: cargo test --all
+
+      # Sanity check that the production profile compiles too. Caught
+      # locally by `just run --release` but devs rarely do that.
+      - name: cargo build --release
+        run: cargo build --release
+
+  cargo-linux:
+    name: cargo (linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install just
+        uses: taiki-e/install-action@just
+
+      # Linux build needs system libs that don't ship in the Ubuntu
+      # runner image by default. libxkbcommon is winit's keymap
+      # backend; libssl-dev backs reqwest's rustls system-roots
+      # loader (rustls itself is vendored; the -dev package is for
+      # the system cert store linkage); libfontconfig1-dev backs
+      # freedesktop-icons' fontconfig probe used by the Linux icon
+      # fetcher. pkg-config keeps these discoverable.
+      - name: Install Linux build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libxkbcommon-dev libssl-dev libfontconfig1-dev
+
+      - name: cargo fmt --check
+        run: cargo fmt -- --check
+
+      - name: just lint
+        run: just lint
+
+      - name: clippy pedantic (strict)
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: cargo test --all
+        run: cargo test --all
+
+      - name: cargo build --release
+        run: cargo build --release
+
+      # Linux package builds (just bundle-linux: deb / pacman / rpm /
+      # tarball) are NOT in CI v1 — they need dpkg-deb, makepkg
+      # (Arch-only), and cargo-generate-rpm. Verifying their config
+      # parses is enough for now; the maintainer runs them locally
+      # before tagging releases. Track in the Roadmap.

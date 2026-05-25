@@ -1,0 +1,11 @@
+{
+    "name": "echo-ts",
+    "displayName": "Echo (TypeScript)",
+    "version": "0.1.0",
+    "description": "TypeScript variant of the echo plugin. The shipped JS is what the host runs; the .ts source lives alongside for plugin authors to learn from.",
+    "entry": "plugin.js",
+    "timeoutMs": 500,
+    "memoryMb": 32,
+    "capabilities": ["actions"],
+    "defaultEnabled": false
+}

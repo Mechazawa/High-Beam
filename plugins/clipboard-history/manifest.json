@@ -1,0 +1,46 @@
+{
+  "name": "clipboard-history",
+  "displayName": "Clipboard History",
+  "version": "1.0.0",
+  "description": "Passively captures clipboard text on every keystroke and recalls it via `clip <query>`. History is plain JSON in the plugin's cache dir — delete `history.json` to clear it.",
+  "entry": "plugin.js",
+  "debounceMs": 50,
+  "timeoutMs": 750,
+  "memoryMb": 32,
+  "platforms": [
+    "macos",
+    "linux"
+  ],
+  "capabilities": [
+    "actions",
+    "clipboard.read",
+    "clipboard.write",
+    "fs.cache"
+  ],
+  "options": [
+    {
+      "key": "keyword",
+      "type": "string",
+      "label": "Trigger keyword",
+      "default": "clip"
+    },
+    {
+      "key": "max_history",
+      "type": "int",
+      "label": "Max history entries",
+      "default": 50,
+      "min": 1,
+      "max": 500
+    },
+    {
+      "key": "max_entry_bytes",
+      "type": "int",
+      "label": "Skip clipboard entries larger than this (bytes)",
+      "default": 10240,
+      "min": 64,
+      "max": 1048576
+    }
+  ],
+  "manifestUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/clipboard-history/manifest.json",
+  "entryUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/clipboard-history/plugin.js"
+}

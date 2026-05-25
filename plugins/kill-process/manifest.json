@@ -1,0 +1,19 @@
+{
+  "name": "kill-process",
+  "displayName": "Kill Process",
+  "version": "0.1.0",
+  "description": "Find and kill a running process by name — type `kill <name>`",
+  "debounceMs": 100,
+  "timeoutMs": 500,
+  "memoryMb": 32,
+  "platforms": [
+    "macos",
+    "linux"
+  ],
+  "capabilities": [
+    "actions",
+    "system.exec"
+  ],
+  "manifestUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/kill-process/manifest.json",
+  "entryUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/kill-process/plugin.js"
+}

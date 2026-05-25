@@ -1,0 +1,48 @@
+# Maintainer: Bas Bieling <mega@ioexception.at>
+#
+# `-bin` variant: pulls the prebuilt release tarball produced by
+# `just bundle-tarball` (uploaded to GitHub Releases) rather than
+# building from source. Compiling rquickjs + slint + a full Rust
+# toolchain on the AUR user's machine is wasted work when we already
+# ship an `x86_64-unknown-linux-gnu` binary in CI.
+pkgname=high-beam-bin
+_pkgname=high-beam
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Native Rust keyboard launcher (Spotlight / Alfred / Raycast class)"
+arch=('x86_64')
+url="https://github.com/Mechazawa/high-beam"
+license=('MIT')
+# Runtime deps mirror `[package.metadata.packager.pacman].depends` in
+# Cargo.toml. Keep the two in sync when you bump them.
+depends=('openssl' 'libxkbcommon' 'fontconfig')
+optdepends=(
+    'xdotool: improves window-management plugin coverage on X11'
+)
+provides=('high-beam')
+conflicts=('high-beam')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/Mechazawa/high-beam/releases/download/v$pkgver/highbeam-$pkgver-linux-x86_64.tar.gz")
+# `SKIP` keeps the template usable before a release ships. Fill in the
+# real sha256 (`sha256sum highbeam-*.tar.gz`) at release-tag time, then
+# regenerate .SRCINFO and push.
+sha256sums=('SKIP')
+
+package() {
+    cd "$srcdir/highbeam-$pkgver-linux-x86_64"
+
+    install -Dm755 bin/highbeam "$pkgdir/usr/bin/highbeam"
+
+    # Bundled plugins + themes — `bundle_install.rs` copies these into
+    # the user's $XDG_DATA_HOME on first launch.
+    install -dm755 "$pkgdir/usr/share/highbeam"
+    cp -r share/highbeam/plugins "$pkgdir/usr/share/highbeam/"
+    cp -r share/highbeam/themes  "$pkgdir/usr/share/highbeam/"
+
+    install -Dm644 share/applications/highbeam.desktop \
+        "$pkgdir/usr/share/applications/highbeam.desktop"
+
+    install -Dm644 lib/systemd/user/highbeam.service \
+        "$pkgdir/usr/lib/systemd/user/highbeam.service"
+
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE" 2>/dev/null || true
+}

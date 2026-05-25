@@ -1,0 +1,11 @@
+{
+  "name": "echo",
+  "displayName": "Echo",
+  "version": "0.1.0",
+  "description": "Echo plugin — yields a single result that copies the current input to the clipboard. Used to smoke-test the plugin runtime.",
+  "entry": "plugin.js",
+  "timeoutMs": 500,
+  "memoryMb": 32,
+  "capabilities": ["actions"],
+  "defaultEnabled": false
+}
