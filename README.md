@@ -42,7 +42,8 @@ Core built-in handles `settings`, `install <manifest-url>`, `reload`,
 Single-directory `manifest.json` + `plugin.js`. Reference plugins
 under `plugins/`; bundled ones get seeded on first launch. Authoring
 guide: [docs/plugin-authoring.md](docs/plugin-authoring.md). API
-reference: [docs/sdk-reference.md](docs/sdk-reference.md).
+reference: [docs/sdk-reference.md](docs/sdk-reference.md). Dynamic,
+stateful screens: [docs/views.md](docs/views.md).
 
 ## Theming
 
