@@ -423,13 +423,18 @@ impl LoadedPlugin {
 
         tokio::spawn(async move {
             async_with!(context => |ctx| {
-                if let Err(err) = crate::sdk::view::install_runtime(&ctx, bridge).catch(&ctx) {
+                if let Err(err) = crate::sdk::view::install_runtime(&ctx, Arc::clone(&bridge)).catch(&ctx) {
                     tracing::error!(plugin = %plugin_name, handle, %err, "views: install runtime failed");
+                    // Ask the host to pop the frame + drop the
+                    // close-signal entry; otherwise view_close_signals
+                    // would keep a stale token until session end.
+                    (bridge.close_request)(handle);
                     return;
                 }
 
                 if let Err(err) = crate::sdk::view::invoke_init(&ctx, handle, &props_json).catch(&ctx) {
                     tracing::error!(plugin = %plugin_name, handle, %err, "views: init failed");
+                    (bridge.close_request)(handle);
                     return;
                 }
 
