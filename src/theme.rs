@@ -1,8 +1,19 @@
 //! User-editable theme loaded from `theme.toml` in the platform config dir.
 //!
+//! Each theme describes two appearances in one file. Top-level sections
+//! (`[colors]`, `[font]`, `[window]`) hold the base values; nested
+//! sub-tables (`[colors.dark]`, `[colors.light]`, `[font.dark]`, ...)
+//! override those for the matching system appearance. Anything a mode
+//! sub-table doesn't set falls back to the base — so the simplest theme
+//! file still parses and looks identical in both modes.
+//!
+//! The user's [`crate::settings::Settings::theme_mode`] decides which
+//! variant `apply_theme` paints. Reload is restart-only; in `Auto` mode a
+//! background watcher (see [`crate::dark_mode`]) repaints on system flips
+//! without a restart.
+//!
 //! Token surface mirrors `QueryWindow`'s `in-out` properties. Missing or
 //! malformed file falls back to the bundled yosemite-spotlight default.
-//! Reload is restart-only.
 
 use std::fs;
 use std::path::PathBuf;
@@ -10,12 +21,55 @@ use std::path::PathBuf;
 use serde::Deserialize;
 use slint::Color;
 
+use crate::dark_mode::SystemAppearance;
 use crate::paths;
 
-/// Resolved theme tokens. Defaults reproduce the bundled yosemite-spotlight
-/// theme; partial user overrides merge against them.
-#[derive(Debug, Clone, PartialEq, Default)]
+/// User's chosen theme-mode preference. `Auto` follows the OS appearance
+/// (the default); `Dark` / `Light` pin to one variant regardless of system
+/// state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ThemeMode {
+    #[default]
+    Auto,
+    Dark,
+    Light,
+}
+
+impl ThemeMode {
+    /// The on-disk string spelling — kept in one place so the loader and
+    /// the writer agree on case.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Dark => "dark",
+            Self::Light => "light",
+        }
+    }
+}
+
+/// Resolved theme — both appearance variants are fully merged at load
+/// time, so [`Theme::variant_for`] is a cheap lookup. Defaults reproduce
+/// the bundled yosemite-spotlight theme (light values for light, dark
+/// values for dark); partial user overrides merge against them.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Theme {
+    pub dark: ThemeVariant,
+    pub light: ThemeVariant,
+}
+
+impl Default for Theme {
+    /// Forwards to [`Self::default_bundled`] so the auto-derived path can't
+    /// accidentally produce a theme where the dark variant is silently
+    /// equal to the light one.
+    fn default() -> Self {
+        Self::default_bundled()
+    }
+}
+
+/// One concrete appearance — what `window::apply_theme` actually paints.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ThemeVariant {
     pub colors: Colors,
     pub font: Font,
     pub window: Window,
@@ -45,6 +99,8 @@ pub struct Window {
     pub border_radius: f32,
 }
 
+/// Light-mode defaults — also serve as the `base` everywhere no override
+/// is provided.
 impl Default for Colors {
     fn default() -> Self {
         // These hex literals are the runtime source of truth — the bundled
@@ -60,6 +116,26 @@ impl Default for Colors {
             highlight: parse("#0a84ff"),
             selection: parse("#0a84ff33"),
             border: parse("#00000010"),
+        }
+    }
+}
+
+impl Colors {
+    /// Hardcoded dark counterpart of [`Self::default`] — the runtime
+    /// source of truth for the dark variant of the bundled theme.
+    /// Hand-picked to track the macOS Spotlight dark aesthetic: near-black
+    /// translucent panel, light text, same blue accents.
+    #[must_use]
+    fn default_dark() -> Self {
+        let parse =
+            |hex: &str| parse_hex_color(hex).unwrap_or_else(|| panic!("default dark theme: invalid hex {hex:?}"));
+        Self {
+            background: parse("#1d1d1faa"),
+            foreground: parse("#f5f5f7"),
+            muted: parse("#86868b"),
+            highlight: parse("#0a84ff"),
+            selection: parse("#0a84ff33"),
+            border: parse("#ffffff10"),
         }
     }
 }
@@ -93,21 +169,37 @@ impl Theme {
     pub fn load_or_default() -> Self {
         let Some(path) = default_theme_path() else {
             tracing::warn!("theme: could not resolve config dir; using default");
-            return Self::default();
+            return Self::default_bundled();
         };
 
         match fs::read_to_string(&path) {
             Ok(text) => Self::from_toml_or_default(&text, &path),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Self::default(),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Self::default_bundled(),
             Err(err) => {
                 tracing::warn!(path = %path.display(), %err, "theme: could not read; using default");
-                Self::default()
+                Self::default_bundled()
             }
         }
     }
 
+    /// In-Rust fallback when the file is missing or unreadable. Light
+    /// variant uses [`Colors::default`]; dark variant uses
+    /// [`Colors::default_dark`]. Font/window are appearance-agnostic, so
+    /// both variants share the base values.
+    #[must_use]
+    pub fn default_bundled() -> Self {
+        Self {
+            dark: ThemeVariant {
+                colors: Colors::default_dark(),
+                font: Font::default(),
+                window: Window::default(),
+            },
+            light: ThemeVariant::default(),
+        }
+    }
+
     /// Parse with fallback. Parse errors (malformed TOML, bad hex) log and
-    /// return the default so the app stays startable.
+    /// return the bundled default so the app stays startable.
     #[must_use]
     pub fn from_toml_or_default(text: &str, source: &std::path::Path) -> Self {
         match Self::from_toml(text) {
@@ -118,7 +210,7 @@ impl Theme {
                     %err,
                     "theme: malformed config; using default",
                 );
-                Self::default()
+                Self::default_bundled()
             }
         }
     }
@@ -132,12 +224,73 @@ impl Theme {
     /// value isn't a parseable hex literal.
     pub fn from_toml(text: &str) -> Result<Self, String> {
         let raw: RawTheme = toml::from_str(text).map_err(|e| e.to_string())?;
-        let defaults = Self::default();
-        let colors = raw.colors.unwrap_or_default().apply(&defaults.colors)?;
-        let font = raw.font.unwrap_or_default().apply(&defaults.font);
-        let window = raw.window.unwrap_or_default().apply(&defaults.window);
+        let defaults = Self::default_bundled();
+        let raw_colors = raw.colors.unwrap_or_default();
+        let raw_font = raw.font.unwrap_or_default();
+        let raw_window = raw.window.unwrap_or_default();
 
-        Ok(Self { colors, font, window })
+        // Snapshot the "user wrote at least one base colour" bit before we
+        // move `raw_colors.base` into `apply` below — it decides whether the
+        // dark variant inherits from the user's base (yes, they customised
+        // it) or from the hardcoded dark defaults (no, leave dark alone).
+        let user_set_base_colors = raw_colors.has_base_override();
+
+        // Base = light defaults overridden by the user's flat fields. We
+        // intentionally use the *light* defaults here as the shared base
+        // (instead of e.g. averaging or special-casing): a user who only
+        // writes `[colors]` and skips `[colors.dark]` keeps the historic
+        // light-only behaviour for both appearances.
+        let base_colors = raw_colors.base.apply(&defaults.light.colors, "colors")?;
+        let base_font = raw_font.base.apply(&defaults.light.font);
+        let base_window = raw_window.base.apply(&defaults.light.window);
+
+        let dark_colors_base = if user_set_base_colors {
+            base_colors.clone()
+        } else {
+            defaults.dark.colors.clone()
+        };
+        let dark = ThemeVariant {
+            colors: match raw_colors.dark {
+                Some(d) => d.apply(&dark_colors_base, "colors.dark")?,
+                None => dark_colors_base,
+            },
+            font: match raw_font.dark {
+                Some(d) => d.apply(&base_font),
+                None => base_font.clone(),
+            },
+            window: match raw_window.dark {
+                Some(d) => d.apply(&base_window),
+                None => base_window.clone(),
+            },
+        };
+
+        let light = ThemeVariant {
+            colors: match raw_colors.light {
+                Some(l) => l.apply(&base_colors, "colors.light")?,
+                None => base_colors,
+            },
+            font: match raw_font.light {
+                Some(l) => l.apply(&base_font),
+                None => base_font,
+            },
+            window: match raw_window.light {
+                Some(l) => l.apply(&base_window),
+                None => base_window,
+            },
+        };
+
+        Ok(Self { dark, light })
+    }
+
+    /// Pick the variant to paint, given the user's preference and the
+    /// current system appearance. `Auto` follows the system; `Dark` /
+    /// `Light` pin regardless.
+    #[must_use]
+    pub fn variant_for(&self, mode: ThemeMode, system: SystemAppearance) -> &ThemeVariant {
+        match (mode, system) {
+            (ThemeMode::Dark, _) | (ThemeMode::Auto, SystemAppearance::Dark) => &self.dark,
+            (ThemeMode::Light, _) | (ThemeMode::Auto, SystemAppearance::Light) => &self.light,
+        }
     }
 }
 
@@ -156,6 +309,32 @@ struct RawTheme {
 
 #[derive(Debug, Default, Deserialize)]
 struct RawColors {
+    /// Flat fields of `[colors]` inline via flatten — keeps the on-disk
+    /// shape (base keys + sub-tables side by side) without duplicating
+    /// the field list.
+    #[serde(flatten)]
+    base: RawColorsOverride,
+    dark: Option<RawColorsOverride>,
+    light: Option<RawColorsOverride>,
+}
+
+impl RawColors {
+    /// True iff the user wrote at least one base flat field. Used to
+    /// decide whether to seed the dark variant from the user's base
+    /// (yes, they customised the base) or from the hardcoded dark
+    /// defaults (no, leave the dark palette alone).
+    fn has_base_override(&self) -> bool {
+        self.base.background.is_some()
+            || self.base.foreground.is_some()
+            || self.base.muted.is_some()
+            || self.base.highlight.is_some()
+            || self.base.selection.is_some()
+            || self.base.border.is_some()
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawColorsOverride {
     background: Option<String>,
     foreground: Option<String>,
     muted: Option<String>,
@@ -164,49 +343,65 @@ struct RawColors {
     border: Option<String>,
 }
 
-impl RawColors {
-    fn apply(self, defaults: &Colors) -> Result<Colors, String> {
+impl RawColorsOverride {
+    fn apply(self, base: &Colors, prefix: &str) -> Result<Colors, String> {
         Ok(Colors {
-            background: parse_optional(self.background, defaults.background, "colors.background")?,
-            foreground: parse_optional(self.foreground, defaults.foreground, "colors.foreground")?,
-            muted: parse_optional(self.muted, defaults.muted, "colors.muted")?,
-            highlight: parse_optional(self.highlight, defaults.highlight, "colors.highlight")?,
-            selection: parse_optional(self.selection, defaults.selection, "colors.selection")?,
-            border: parse_optional(self.border, defaults.border, "colors.border")?,
+            background: parse_optional(self.background, base.background, &format!("{prefix}.background"))?,
+            foreground: parse_optional(self.foreground, base.foreground, &format!("{prefix}.foreground"))?,
+            muted: parse_optional(self.muted, base.muted, &format!("{prefix}.muted"))?,
+            highlight: parse_optional(self.highlight, base.highlight, &format!("{prefix}.highlight"))?,
+            selection: parse_optional(self.selection, base.selection, &format!("{prefix}.selection"))?,
+            border: parse_optional(self.border, base.border, &format!("{prefix}.border"))?,
         })
     }
 }
 
 #[derive(Debug, Default, Deserialize)]
 struct RawFont {
+    #[serde(flatten)]
+    base: RawFontOverride,
+    dark: Option<RawFontOverride>,
+    light: Option<RawFontOverride>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawFontOverride {
     family: Option<String>,
     size_query: Option<f32>,
     size_title: Option<f32>,
     size_subtitle: Option<f32>,
 }
 
-impl RawFont {
-    fn apply(self, defaults: &Font) -> Font {
+impl RawFontOverride {
+    fn apply(self, base: &Font) -> Font {
         Font {
-            family: self.family.unwrap_or_else(|| defaults.family.clone()),
-            size_query: self.size_query.unwrap_or(defaults.size_query),
-            size_title: self.size_title.unwrap_or(defaults.size_title),
-            size_subtitle: self.size_subtitle.unwrap_or(defaults.size_subtitle),
+            family: self.family.unwrap_or_else(|| base.family.clone()),
+            size_query: self.size_query.unwrap_or(base.size_query),
+            size_title: self.size_title.unwrap_or(base.size_title),
+            size_subtitle: self.size_subtitle.unwrap_or(base.size_subtitle),
         }
     }
 }
 
 #[derive(Debug, Default, Deserialize)]
 struct RawWindow {
+    #[serde(flatten)]
+    base: RawWindowOverride,
+    dark: Option<RawWindowOverride>,
+    light: Option<RawWindowOverride>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawWindowOverride {
     width: Option<f32>,
     border_radius: Option<f32>,
 }
 
-impl RawWindow {
-    fn apply(self, defaults: &Window) -> Window {
+impl RawWindowOverride {
+    fn apply(self, base: &Window) -> Window {
         Window {
-            width: self.width.unwrap_or(defaults.width),
-            border_radius: self.border_radius.unwrap_or(defaults.border_radius),
+            width: self.width.unwrap_or(base.width),
+            border_radius: self.border_radius.unwrap_or(base.border_radius),
         }
     }
 }
@@ -262,19 +457,47 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn default_theme_matches_yosemite_spotlight_values() {
-        let theme = Theme::default();
-        assert_eq!(theme.colors.background, Color::from_argb_u8(0xEA, 0xFF, 0xFF, 0xFF));
-        assert_eq!(theme.colors.foreground, Color::from_argb_u8(0xFF, 0x1D, 0x1D, 0x1F));
-        assert_eq!(theme.colors.muted, Color::from_argb_u8(0xFF, 0x86, 0x86, 0x8B));
-        assert_eq!(theme.colors.highlight, Color::from_argb_u8(0xFF, 0x0A, 0x84, 0xFF));
-        assert_eq!(theme.colors.selection, Color::from_argb_u8(0x33, 0x0A, 0x84, 0xFF));
-        assert_eq!(theme.colors.border, Color::from_argb_u8(0x10, 0x00, 0x00, 0x00));
-        assert!((theme.font.size_query - 32.0).abs() < f32::EPSILON);
-        assert!((theme.font.size_title - 14.0).abs() < f32::EPSILON);
-        assert!((theme.font.size_subtitle - 12.0).abs() < f32::EPSILON);
-        assert!((theme.window.width - 760.0).abs() < f32::EPSILON);
-        assert!((theme.window.border_radius - 14.0).abs() < f32::EPSILON);
+    fn default_light_variant_matches_yosemite_spotlight_values() {
+        let theme = Theme::default_bundled();
+        let light = &theme.light;
+        assert_eq!(light.colors.background, Color::from_argb_u8(0xEA, 0xFF, 0xFF, 0xFF));
+        assert_eq!(light.colors.foreground, Color::from_argb_u8(0xFF, 0x1D, 0x1D, 0x1F));
+        assert_eq!(light.colors.muted, Color::from_argb_u8(0xFF, 0x86, 0x86, 0x8B));
+        assert_eq!(light.colors.highlight, Color::from_argb_u8(0xFF, 0x0A, 0x84, 0xFF));
+        assert_eq!(light.colors.selection, Color::from_argb_u8(0x33, 0x0A, 0x84, 0xFF));
+        assert_eq!(light.colors.border, Color::from_argb_u8(0x10, 0x00, 0x00, 0x00));
+        assert!((light.font.size_query - 32.0).abs() < f32::EPSILON);
+        assert!((light.font.size_title - 14.0).abs() < f32::EPSILON);
+        assert!((light.font.size_subtitle - 12.0).abs() < f32::EPSILON);
+        assert!((light.window.width - 760.0).abs() < f32::EPSILON);
+        assert!((light.window.border_radius - 14.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn default_dark_variant_differs_from_light() {
+        let theme = Theme::default_bundled();
+        assert_ne!(
+            theme.dark.colors, theme.light.colors,
+            "dark + light defaults should not be identical — the whole point is the swap"
+        );
+        // Spot-check a couple of expected swaps.
+        assert_eq!(
+            theme.dark.colors.background,
+            Color::from_argb_u8(0xAA, 0x1D, 0x1D, 0x1F)
+        );
+        assert_eq!(
+            theme.dark.colors.foreground,
+            Color::from_argb_u8(0xFF, 0xF5, 0xF5, 0xF7)
+        );
+    }
+
+    #[test]
+    fn default_dark_and_light_share_appearance_agnostic_tokens() {
+        // Font + window aren't appearance-bound by default — same family
+        // and same width regardless of dark/light.
+        let theme = Theme::default_bundled();
+        assert_eq!(theme.dark.font, theme.light.font);
+        assert_eq!(theme.dark.window, theme.light.window);
     }
 
     #[test]
@@ -304,22 +527,32 @@ mod tests {
     }
 
     #[test]
-    fn from_toml_partial_override_keeps_defaults_for_missing_fields() {
+    fn from_toml_partial_base_override_keeps_defaults_for_missing_fields() {
         let text = "[colors]\nbackground = \"#000000\"\n";
         let theme = Theme::from_toml(text).expect("partial override parses");
-        // overridden
-        assert_eq!(theme.colors.background, Color::from_argb_u8(0xFF, 0x00, 0x00, 0x00));
-        // untouched
-        assert_eq!(theme.colors.foreground, Theme::default().colors.foreground);
-        assert_eq!(theme.font.family, Theme::default().font.family);
-        assert!(theme.font.family.is_empty(), "default family is empty");
-        assert!((theme.window.width - 760.0).abs() < f32::EPSILON);
+        // Overridden — applies to both variants because the user didn't
+        // write a [colors.dark] / [colors.light] sub-table.
+        assert_eq!(
+            theme.light.colors.background,
+            Color::from_argb_u8(0xFF, 0x00, 0x00, 0x00)
+        );
+        assert_eq!(
+            theme.dark.colors.background,
+            Color::from_argb_u8(0xFF, 0x00, 0x00, 0x00)
+        );
+        // Untouched fields keep the light defaults in both variants.
+        assert_eq!(theme.light.colors.foreground, Colors::default().foreground);
+        assert_eq!(theme.dark.colors.foreground, Colors::default().foreground);
+        assert_eq!(theme.light.font.family, Font::default().family);
     }
 
     #[test]
-    fn from_toml_empty_string_returns_full_default() {
+    fn from_toml_empty_string_returns_bundled_default() {
+        // Empty TOML → no base override → default light *and* default dark
+        // are preserved. Without this round-trip the bundled dark palette
+        // would silently collapse to light.
         let theme = Theme::from_toml("").expect("empty parses");
-        assert_eq!(theme, Theme::default());
+        assert_eq!(theme, Theme::default_bundled());
     }
 
     #[test]
@@ -336,19 +569,138 @@ mod tests {
     }
 
     #[test]
+    fn from_toml_bad_color_in_dark_override_names_the_subtable() {
+        let text = "[colors.dark]\nbackground = \"not-a-color\"\n";
+        let err = Theme::from_toml(text).expect_err("bad dark color should error");
+        assert!(err.contains("colors.dark.background"), "got: {err}");
+    }
+
+    #[test]
     fn from_toml_or_default_swallows_errors() {
         let path = Path::new("/tmp/does-not-exist.toml");
         let theme = Theme::from_toml_or_default("not = [valid", path);
-        assert_eq!(theme, Theme::default());
+        assert_eq!(theme, Theme::default_bundled());
+    }
+
+    #[test]
+    fn from_toml_nested_dark_overrides_apply_to_dark_variant_only() {
+        // Double-hash raw strings (`r##"…"##`) — single-hash would terminate
+        // at the first `"#` inside a hex literal.
+        let text = r##"
+            [colors]
+            background = "#ffffff"
+            foreground = "#000000"
+
+            [colors.dark]
+            background = "#111111"
+        "##;
+        let theme = Theme::from_toml(text).expect("parses");
+        // Dark: background overridden by dark sub-table, foreground inherits
+        // from base.
+        assert_eq!(
+            theme.dark.colors.background,
+            Color::from_argb_u8(0xFF, 0x11, 0x11, 0x11)
+        );
+        assert_eq!(
+            theme.dark.colors.foreground,
+            Color::from_argb_u8(0xFF, 0x00, 0x00, 0x00)
+        );
+        // Light: keeps the base values, untouched by [colors.dark].
+        assert_eq!(
+            theme.light.colors.background,
+            Color::from_argb_u8(0xFF, 0xFF, 0xFF, 0xFF)
+        );
+        assert_eq!(
+            theme.light.colors.foreground,
+            Color::from_argb_u8(0xFF, 0x00, 0x00, 0x00)
+        );
+    }
+
+    #[test]
+    fn from_toml_nested_light_overrides_apply_to_light_variant_only() {
+        let text = r##"
+            [colors]
+            background = "#ffffff"
+
+            [colors.light]
+            background = "#fafafa"
+
+            [colors.dark]
+            background = "#111111"
+        "##;
+        let theme = Theme::from_toml(text).expect("parses");
+        assert_eq!(
+            theme.light.colors.background,
+            Color::from_argb_u8(0xFF, 0xFA, 0xFA, 0xFA)
+        );
+        assert_eq!(
+            theme.dark.colors.background,
+            Color::from_argb_u8(0xFF, 0x11, 0x11, 0x11)
+        );
+    }
+
+    #[test]
+    fn from_toml_no_overrides_means_dark_equals_light_equals_base() {
+        // A user who writes a fully-flat theme (no sub-tables) gets
+        // identical dark + light variants — backwards compatible with the
+        // pre-dark-mode shape.
+        let text = r##"
+            [colors]
+            background = "#aabbcc"
+            foreground = "#112233"
+        "##;
+        let theme = Theme::from_toml(text).expect("parses");
+        assert_eq!(theme.dark.colors, theme.light.colors);
+        assert_eq!(
+            theme.dark.colors.background,
+            Color::from_argb_u8(0xFF, 0xAA, 0xBB, 0xCC)
+        );
+    }
+
+    #[test]
+    fn variant_for_honors_explicit_mode() {
+        let theme = Theme::default_bundled();
+        // Dark setting wins regardless of system.
+        assert_eq!(theme.variant_for(ThemeMode::Dark, SystemAppearance::Light), &theme.dark);
+        assert_eq!(theme.variant_for(ThemeMode::Dark, SystemAppearance::Dark), &theme.dark);
+        // Light setting wins regardless of system.
+        assert_eq!(
+            theme.variant_for(ThemeMode::Light, SystemAppearance::Light),
+            &theme.light
+        );
+        assert_eq!(
+            theme.variant_for(ThemeMode::Light, SystemAppearance::Dark),
+            &theme.light
+        );
+    }
+
+    #[test]
+    fn variant_for_auto_follows_system() {
+        let theme = Theme::default_bundled();
+        assert_eq!(theme.variant_for(ThemeMode::Auto, SystemAppearance::Dark), &theme.dark);
+        assert_eq!(
+            theme.variant_for(ThemeMode::Auto, SystemAppearance::Light),
+            &theme.light
+        );
+    }
+
+    #[test]
+    fn theme_mode_as_str_round_trips_lowercase() {
+        // Writer uses these strings — match the documented spelling so a
+        // typo in `as_str` shows up loud in a test rather than as a
+        // silent settings.toml drift.
+        assert_eq!(ThemeMode::Auto.as_str(), "auto");
+        assert_eq!(ThemeMode::Dark.as_str(), "dark");
+        assert_eq!(ThemeMode::Light.as_str(), "light");
     }
 
     #[test]
     fn bundled_yosemite_spotlight_matches_default() {
-        // Drift between the bundled theme file and the in-Rust defaults would
-        // be a silent UX surprise — this test catches it.
+        // Drift between the bundled theme file and the in-Rust defaults
+        // would be a silent UX surprise — this test catches it.
         let text = include_str!("../themes/yosemite-spotlight.toml");
         let theme = Theme::from_toml(text).expect("bundled theme parses");
-        assert_eq!(theme, Theme::default());
+        assert_eq!(theme, Theme::default_bundled());
     }
 
     #[test]
@@ -362,10 +714,28 @@ mod tests {
             width = 900
         "#;
         let theme = Theme::from_toml(text).expect("parses");
-        assert_eq!(theme.font.family, "Monaco");
-        assert!((theme.font.size_query - 24.0).abs() < f32::EPSILON);
-        assert!((theme.font.size_title - 14.0).abs() < f32::EPSILON);
-        assert!((theme.window.width - 900.0).abs() < f32::EPSILON);
-        assert!((theme.window.border_radius - 14.0).abs() < f32::EPSILON);
+        assert_eq!(theme.light.font.family, "Monaco");
+        assert!((theme.light.font.size_query - 24.0).abs() < f32::EPSILON);
+        assert!((theme.light.font.size_title - 14.0).abs() < f32::EPSILON);
+        assert!((theme.light.window.width - 900.0).abs() < f32::EPSILON);
+        assert!((theme.light.window.border_radius - 14.0).abs() < f32::EPSILON);
+        // Dark inherits the same base because no font.dark / window.dark
+        // sub-table was provided.
+        assert_eq!(theme.dark.font, theme.light.font);
+        assert_eq!(theme.dark.window, theme.light.window);
+    }
+
+    #[test]
+    fn font_dark_override_only_affects_dark_variant() {
+        let text = r"
+            [font]
+            size_query = 24
+
+            [font.dark]
+            size_query = 30
+        ";
+        let theme = Theme::from_toml(text).expect("parses");
+        assert!((theme.light.font.size_query - 24.0).abs() < f32::EPSILON);
+        assert!((theme.dark.font.size_query - 30.0).abs() < f32::EPSILON);
     }
 }

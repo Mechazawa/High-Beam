@@ -234,6 +234,12 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 # `parse` for theme.toml reads; `display` adds write-back for settings.toml.
 toml = { version = "0.8", default-features = false, features = ["parse", "display"] }
 
+# System dark/light appearance detection for the theme auto-switch.
+# Default feature `async-io` doesn't require an active runtime — `detect()`
+# is callable from any thread without setup. v2.0 dropped the upstream
+# `subscribe()` helper, so `src/dark_mode.rs` rolls its own 2 s poller.
+dark-light = "2"
+
 # `chrono` is already in the transitive tree via slint; clock + std is all
 # the plugin.log writer needs.
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

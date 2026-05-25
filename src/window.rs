@@ -18,7 +18,7 @@ use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
 use crate::QueryWindow;
 use crate::settings::WindowPosition;
 use crate::settings_ui::SettingsController;
-use crate::theme::Theme;
+use crate::theme::ThemeVariant;
 
 /// Process-wide single-shot flag. When true, every dismiss path also calls
 /// `slint::quit_event_loop` so the launcher process exits on first dismiss
@@ -189,9 +189,12 @@ pub(crate) fn configure(window: &QueryWindow, settings: SettingsController) {
     // activation logic below.
 }
 
-/// Push theme tokens into the window's `in-out` properties. Theme reload
-/// is restart-only.
-pub(crate) fn apply_theme(window: &QueryWindow, theme: &Theme) {
+/// Push theme tokens into the window's `in-out` properties. Re-callable
+/// — the dark-mode watcher (see `daemon::run_with_options`) bounces back
+/// here through the Slint event loop when the OS appearance flips, so
+/// every call must overwrite the full property surface rather than
+/// patching individual fields.
+pub(crate) fn apply_theme(window: &QueryWindow, theme: &ThemeVariant) {
     window.set_background_color(theme.colors.background);
     window.set_foreground_color(theme.colors.foreground);
     window.set_muted_color(theme.colors.muted);

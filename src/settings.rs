@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
 use crate::paths;
+use crate::theme::ThemeMode;
 
 const SETTINGS_FILENAME: &str = "settings.toml";
 
@@ -78,6 +79,11 @@ pub struct GlobalSettings {
     /// `altAction` instead of the primary action. One of
     /// [`ALT_ACTION_MODIFIER_CHOICES`].
     pub alt_action_modifier: String,
+    /// Which theme variant the launcher paints. `Auto` (the default)
+    /// follows the OS appearance and repaints live when it flips; `Dark`
+    /// / `Light` pin to one variant regardless. Unknown strings on disk
+    /// silently degrade to `Auto` — see [`normalize_theme_mode`].
+    pub theme_mode: ThemeMode,
 }
 
 /// Saved outer-position of the launcher window, in physical pixels relative
@@ -102,6 +108,7 @@ impl Default for GlobalSettings {
             launcher_position: None,
             query_history_max_entries: DEFAULT_QUERY_HISTORY_MAX_ENTRIES,
             alt_action_modifier: DEFAULT_ALT_ACTION_MODIFIER.to_owned(),
+            theme_mode: ThemeMode::default(),
         }
     }
 }
@@ -114,6 +121,20 @@ pub fn normalize_alt_action_modifier(raw: &str) -> String {
         .iter()
         .find(|c| c.eq_ignore_ascii_case(raw))
         .map_or_else(|| DEFAULT_ALT_ACTION_MODIFIER.to_owned(), |c| (*c).to_owned())
+}
+
+/// Normalise a `theme_mode` string from disk to a [`ThemeMode`]. Matched
+/// case-insensitively against `auto` / `dark` / `light`; anything else
+/// degrades to [`ThemeMode::Auto`] (the default) so a typo never blocks
+/// startup. Mirrors [`normalize_alt_action_modifier`] in spirit.
+#[must_use]
+pub fn normalize_theme_mode(raw: &str) -> ThemeMode {
+    match raw.to_ascii_lowercase().as_str() {
+        "dark" => ThemeMode::Dark,
+        "light" => ThemeMode::Light,
+        "auto" => ThemeMode::Auto,
+        _ => ThemeMode::default(),
+    }
 }
 
 /// Per-plugin settings as we store them.
@@ -231,12 +252,17 @@ impl Settings {
                 .alt_action_modifier
                 .as_deref()
                 .map_or_else(|| DEFAULT_ALT_ACTION_MODIFIER.to_owned(), normalize_alt_action_modifier);
+            let theme_mode = raw_global
+                .theme_mode
+                .as_deref()
+                .map_or(ThemeMode::default(), normalize_theme_mode);
 
             GlobalSettings {
                 hotkey: raw_global.hotkey.unwrap_or_else(|| DEFAULT_HOTKEY.to_owned()),
                 launcher_position: raw_global.launcher_position,
                 query_history_max_entries: max_entries,
                 alt_action_modifier: alt_mod,
+                theme_mode,
             }
         };
 
@@ -294,6 +320,10 @@ impl Settings {
             } else {
                 Some(self.global.alt_action_modifier.clone())
             };
+            let theme_mode = match self.global.theme_mode {
+                ThemeMode::Auto => None,
+                mode => Some(mode.as_str().to_owned()),
+            };
 
             Some(GlobalFile {
                 hotkey: Some(self.global.hotkey.clone()),
@@ -304,6 +334,7 @@ impl Settings {
                     Some(max)
                 },
                 alt_action_modifier: alt_mod,
+                theme_mode,
             })
         };
         let file = SettingsFile { global, plugins };
@@ -446,6 +477,20 @@ impl Settings {
         self.global.alt_action_modifier = normalize_alt_action_modifier(value);
     }
 
+    /// User's theme-mode preference. `Auto` is the default and follows
+    /// the OS appearance; `Dark` / `Light` pin to one variant.
+    #[must_use]
+    pub fn theme_mode(&self) -> ThemeMode {
+        self.global.theme_mode
+    }
+
+    /// Replace the theme-mode preference. Unknown values reset to
+    /// [`ThemeMode::Auto`] rather than persisting garbage on disk — same
+    /// guarantee the loader provides via [`normalize_theme_mode`].
+    pub fn set_theme_mode(&mut self, value: &str) {
+        self.global.theme_mode = normalize_theme_mode(value);
+    }
+
     /// Set the global hotkey accelerator string. Trimmed before storing so
     /// `"Shift+Space "` from a stray `TextInput` doesn't fail the parser later.
     pub fn set_hotkey(&mut self, hotkey: &str) {
@@ -485,6 +530,8 @@ struct GlobalFile {
     query_history_max_entries: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     alt_action_modifier: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    theme_mode: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -699,6 +746,59 @@ mod tests {
     fn is_plugin_enabled_or_default_absent_uses_manifest_default_false() {
         let s = Settings::default();
         assert!(!s.is_plugin_enabled_or_default("absent", false));
+    }
+
+    #[test]
+    fn theme_mode_defaults_to_auto() {
+        let s = Settings::default();
+        assert_eq!(s.theme_mode(), ThemeMode::Auto);
+
+        // Same when `[global]` block is present but field absent.
+        let s = Settings::from_toml("[global]\n").expect("parse");
+        assert_eq!(s.theme_mode(), ThemeMode::Auto);
+    }
+
+    #[test]
+    fn theme_mode_round_trips_through_toml() {
+        let mut s = Settings::default();
+        s.set_theme_mode("dark");
+        let text = s.to_toml();
+        assert!(text.contains("theme_mode = \"dark\""), "got: {text}");
+
+        let loaded = Settings::from_toml(&text).expect("parse");
+        assert_eq!(loaded.theme_mode(), ThemeMode::Dark);
+    }
+
+    #[test]
+    fn theme_mode_auto_omitted_from_disk() {
+        // Auto is the default — pristine settings shouldn't carry it.
+        let mut s = Settings::default();
+        s.set_theme_mode("auto");
+        // Touch another field so the global block writes (Auto alone
+        // matches the full default and would suppress the section
+        // entirely).
+        s.set_hotkey("Cmd+K");
+        let text = s.to_toml();
+        assert!(!text.contains("theme_mode"), "auto should be omitted: {text}");
+    }
+
+    #[test]
+    fn theme_mode_unknown_value_falls_back_to_auto() {
+        // Loader path: a typo on disk degrades to Auto.
+        let s = Settings::from_toml("[global]\ntheme_mode = \"garbage\"\n").expect("parse");
+        assert_eq!(s.theme_mode(), ThemeMode::Auto);
+
+        // Setter path: same guarantee — UI inputs go through normalise.
+        let mut s = Settings::default();
+        s.set_theme_mode("nonsense");
+        assert_eq!(s.theme_mode(), ThemeMode::Auto);
+    }
+
+    #[test]
+    fn theme_mode_match_is_case_insensitive() {
+        // Hand-edited TOML often capitalises — accept it.
+        let s = Settings::from_toml("[global]\ntheme_mode = \"Dark\"\n").expect("parse");
+        assert_eq!(s.theme_mode(), ThemeMode::Dark);
     }
 
     #[test]

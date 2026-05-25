@@ -5,6 +5,7 @@ pub mod bundle_install;
 pub mod cli;
 pub mod confirm;
 pub mod daemon;
+pub mod dark_mode;
 pub mod frecency;
 pub mod hotkey;
 pub mod ipc;

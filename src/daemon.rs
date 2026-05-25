@@ -5,7 +5,6 @@
 use std::error::Error;
 use std::io;
 use std::path::{Path, PathBuf};
-#[cfg(target_os = "macos")]
 use std::sync::Arc;
 use std::thread;
 
@@ -14,12 +13,13 @@ use slint::ComponentHandle;
 use crate::QueryWindow;
 use crate::app;
 use crate::bundle_install;
+use crate::dark_mode;
 use crate::ipc::{Command, Server};
 use crate::logging::{self, LogErr};
 use crate::plugins::loader::{self, LoaderOptions};
 use crate::settings::Settings;
 use crate::settings_ui::SettingsController;
-use crate::theme::Theme;
+use crate::theme::{Theme, ThemeMode};
 use crate::window;
 
 pub struct Options {
@@ -71,7 +71,6 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
     slint::BackendSelector::new().backend_name("winit".into()).select()?;
 
     let window = QueryWindow::new()?;
-    window::apply_theme(&window, &Theme::load_or_default());
 
     // Wire the settings view. We scan manifests synchronously here (cheap —
     // just reads `manifest.json` from each plugin dir) so the controller can
@@ -84,6 +83,32 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
     // hot-reload is out of scope for v1, so the daemon-startup value is what
     // we register with the OS.
     let hotkey_spec = settings_for_ui.global().hotkey.clone();
+    let theme_mode = settings_for_ui.theme_mode();
+
+    // Theme stays in an Arc — the dark-mode watcher thread holds a clone
+    // for the daemon's lifetime when auto-switch is active.
+    let theme = Arc::new(Theme::load_or_default());
+    window::apply_theme(&window, theme.variant_for(theme_mode, dark_mode::current()));
+
+    // Subscribe to OS appearance flips only in Auto mode — `Dark`/`Light`
+    // pin the variant regardless of the system, so a watcher would just
+    // burn wakeups. The guard's `Drop` stops the watcher; binding it to
+    // `_dark_mode_guard` keeps it alive for the rest of `run`.
+    let _dark_mode_guard = (theme_mode == ThemeMode::Auto).then(|| {
+        let weak = window.as_weak();
+        let theme = Arc::clone(&theme);
+        dark_mode::subscribe(move |appearance| {
+            let weak = weak.clone();
+            let theme = Arc::clone(&theme);
+            slint::invoke_from_event_loop(move || {
+                if let Some(w) = weak.upgrade() {
+                    window::apply_theme(&w, theme.variant_for(ThemeMode::Auto, appearance));
+                }
+            })
+            .log_debug("dark-mode: post repaint to event loop");
+        })
+    });
+
     let settings_controller = SettingsController::new(manifests, settings_for_ui);
 
     settings_controller.wire(&window);
