@@ -11,6 +11,7 @@ use tokio::sync::mpsc;
 
 use crate::QueryWindow;
 use crate::frecency::FrecencyDb;
+use crate::logging::LogErr;
 use crate::plugins::actions;
 use crate::plugins::result::RankedResult;
 use crate::query_history::{InputAction, QueryHistoryDb, QueryHistoryState};
@@ -202,14 +203,15 @@ fn send_confirm_decision(state: &ConfirmState, decision: bool, weak: &slint::Wea
     };
 
     if let Some(tx) = maybe_tx {
-        let _ = tx.send(decision);
+        tx.send(decision).log_debug("confirm: pending receiver gone before decision");
     }
     let weak = weak.clone();
-    let _ = slint::invoke_from_event_loop(move || {
+    slint::invoke_from_event_loop(move || {
         if let Some(w) = weak.upgrade() {
             w.invoke_show_query();
         }
-    });
+    })
+    .log_debug("confirm: post show_query to event loop");
 }
 
 /// Resolve the highlighted row, execute its action, bump frecency and push the

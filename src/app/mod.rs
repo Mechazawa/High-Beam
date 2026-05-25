@@ -28,6 +28,7 @@ use tokio_util::sync::CancellationToken;
 use crate::QueryWindow;
 use crate::confirm::PendingConfirmation;
 use crate::frecency::{self, FrecencyDb};
+use crate::logging::LogErr;
 use crate::plugins::actions;
 use crate::plugins::loader::{self, LoaderOptions};
 use crate::plugins::registry::PluginRegistry;
@@ -258,6 +259,6 @@ fn open_frecency_db() -> Option<FrecencyDb> {
 
 impl Drop for PluginHost {
     fn drop(&mut self) {
-        let _ = self.query_tx.send(HostMessage::Shutdown);
+        self.query_tx.send(HostMessage::Shutdown).log_debug("PluginHost::drop: worker already gone");
     }
 }

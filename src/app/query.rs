@@ -10,6 +10,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::QueryWindow;
 use crate::frecency::{self, Snapshot};
+use crate::logging::LogErr;
 use crate::plugins::dispatch::{self, StreamedResult};
 use crate::plugins::result::RankedResult;
 use crate::plugins::runtime::LoadedPlugin;
@@ -32,14 +33,15 @@ pub(super) fn handle_query(
     let weak_reset = weak.clone();
     // `invoke_from_event_loop` only returns Err once the event loop has
     // exited — i.e. the daemon is shutting down. At that point dropping the
-    // UI update is exactly what we want, so the Err arm is silently
-    // discarded here and at every other call site in this module.
-    let _ = slint::invoke_from_event_loop(move || {
+    // UI update is exactly what we want; `log_debug` keeps a breadcrumb
+    // around for anyone debugging shutdown ordering.
+    slint::invoke_from_event_loop(move || {
         if let Some(w) = weak_reset.upgrade() {
             w.set_results(ModelRc::new(VecModel::from(Vec::<ResultRow>::new())));
             w.set_selected_index(0);
         }
-    });
+    })
+    .log_debug("query: post reset to event loop");
 
     let (yield_tx, mut yield_rx) = mpsc::unbounded_channel::<StreamedResult>();
     dispatch::dispatch_streaming(plugins, input, &cancel, &yield_tx);
@@ -70,11 +72,12 @@ pub(super) fn handle_query(
                         }
                         let snapshot = live.clone();
                         let weak = weak.clone();
-                        let _ = slint::invoke_from_event_loop(move || {
+                        slint::invoke_from_event_loop(move || {
                             if let Some(w) = weak.upgrade() {
                                 render_results(&w, &snapshot);
                             }
-                        });
+                        })
+                        .log_debug("query: post results render to event loop");
                     }
                     None => break,
                 }

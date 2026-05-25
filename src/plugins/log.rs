@@ -23,6 +23,8 @@ use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use crate::logging::LogErr;
+
 use chrono::SecondsFormat;
 
 /// Log severity. Rendered padded to 5 chars so columns align in `tail -f`.
@@ -111,7 +113,7 @@ impl PluginLog {
             // `Disconnected` means the writer thread already exited (e.g.
             // during shutdown after Drop ran on another Arc clone) — dropping
             // the line is the only sensible move.
-            let _ = tx.send(LogMsg::Line(line));
+            tx.send(LogMsg::Line(line)).log_debug("plugin-log: writer disconnected, dropping line");
         }
     }
 
@@ -134,7 +136,7 @@ impl PluginLog {
         if sent {
             // Sentinel travels FIFO with every prior `Line`, so by the time
             // the writer answers the ack every earlier write is on disk.
-            let _ = ack_rx.recv();
+            ack_rx.recv().log_debug("plugin-log: flush ack channel closed");
         }
     }
 }
@@ -186,7 +188,7 @@ fn run_writer(path: &Path, rx: &std_mpsc::Receiver<LogMsg>) {
                 // Best-effort ack — receiver may already be gone if the
                 // caller stopped waiting. Either way the prior Line writes
                 // are guaranteed to have happened before we get here.
-                let _ = ack.send(());
+                ack.send(()).log_debug("plugin-log: flush ack receiver gone");
             }
         }
     }

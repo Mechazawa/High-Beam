@@ -30,6 +30,7 @@ use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
 use wayland_protocols::xdg::activation::v1::client::xdg_activation_v1::XdgActivationV1;
 
 use crate::QueryWindow;
+use crate::logging::LogErr;
 
 /// Activate our Wayland surface with the supplied `XDG_ACTIVATION_TOKEN`.
 ///
@@ -91,7 +92,9 @@ fn try_activate(window: &QueryWindow, token: &str) -> Result<(), Box<dyn std::er
                 conn.flush()?;
                 // Drain anything the registry roundtrip left pending so we
                 // drop the queue cleanly.
-                let _ = event_queue.dispatch_pending(&mut ActivateState);
+                event_queue
+                    .dispatch_pending(&mut ActivateState)
+                    .log_warn("wayland: drain pending events after activation");
                 Ok(())
             });
 

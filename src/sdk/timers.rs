@@ -8,6 +8,8 @@
 use rquickjs::function::Async;
 use rquickjs::{Ctx, Error as JsError, Function};
 
+use crate::logging::LogErr;
+
 /// Install the timer polyfills on the global object. Idempotent.
 ///
 /// # Errors
@@ -27,9 +29,10 @@ pub fn install<'js>(ctx: &Ctx<'js>) -> Result<(), JsError> {
                 std::time::Duration::from_millis(0)
             };
             tokio::time::sleep(delay).await;
-            // Callback exceptions are swallowed — there's no try/catch site
-            // for them to surface to.
-            let _ = cb.call::<_, ()>(());
+            // Callback exceptions have no try/catch site to surface to —
+            // we route them through tracing at WARN so plugin bugs aren't
+            // completely invisible.
+            cb.call::<_, ()>(()).log_warn("setTimeout: callback threw");
             Ok::<i32, JsError>(0)
         }),
     )?;

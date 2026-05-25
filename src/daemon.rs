@@ -15,7 +15,7 @@ use crate::QueryWindow;
 use crate::app;
 use crate::bundle_install;
 use crate::ipc::{Command, Server};
-use crate::logging;
+use crate::logging::{self, LogErr};
 use crate::plugins::loader::{self, LoaderOptions};
 use crate::settings::Settings;
 use crate::settings_ui::SettingsController;
@@ -154,11 +154,12 @@ fn spawn_ipc_listener(
             Command::Open { activation_token } => {
                 let weak = weak.clone();
                 let settings = settings.clone();
-                let _ = slint::invoke_from_event_loop(move || {
+                slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak.upgrade() {
                         window::show(&w, &settings, activation_token.as_deref());
                     }
-                });
+                })
+                .log_debug("ipc: post Open to event loop");
             }
         });
 
@@ -219,11 +220,11 @@ impl HotkeyRegistration {
             return;
         };
         let new = parse_hotkey_or_default(spec);
-        let _ = self.manager.unregister(*current);
+        self.manager.unregister(*current).log_debug("hotkey: unregister previous before reregister");
 
         if let Err(err) = self.manager.register(new) {
             tracing::error!(%err, %spec, "hotkey: re-register failed; restoring previous");
-            let _ = self.manager.register(*current);
+            self.manager.register(*current).log_warn("hotkey: failed to restore previous binding after failed re-register");
 
             return;
         }
@@ -281,14 +282,15 @@ fn spawn_hotkey_listener(
             if event.state == HotKeyState::Pressed && Some(event.id) == live_id {
                 let weak = weak.clone();
                 let settings = settings.clone();
-                let _ = slint::invoke_from_event_loop(move || {
+                slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak.upgrade() {
                         // The macOS hotkey path doesn't use an activation
                         // token — `activate_and_make_key` handles focus
                         // itself via `NSApp.activate`.
                         window::show(&w, &settings, None);
                     }
-                });
+                })
+                .log_debug("hotkey: post show to event loop");
             }
         }
     }) {

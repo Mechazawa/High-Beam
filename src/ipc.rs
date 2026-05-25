@@ -8,6 +8,8 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 
+use crate::logging::LogErr;
+
 /// Commands accepted by the running daemon. Wire format is stable; do not
 /// rename without considering compat with running daemons.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -137,7 +139,7 @@ impl Drop for Server {
     fn drop(&mut self) {
         // If we crashed instead of dropping, `Server::bind` clears the stale
         // file on next start.
-        let _ = std::fs::remove_file(&self.path);
+        std::fs::remove_file(&self.path).log_debug("ipc: cleanup socket on Drop");
     }
 }
 

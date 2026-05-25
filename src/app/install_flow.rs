@@ -16,6 +16,7 @@ use tokio::sync::oneshot;
 
 use crate::QueryWindow;
 use crate::confirm::{ConfirmationSummary, PendingConfirmation};
+use crate::logging::LogErr;
 use crate::plugins;
 use crate::plugins::actions;
 use crate::plugins::loader::{self, LoadOutcome};
@@ -95,11 +96,12 @@ impl ProgressEmitter {
             Err(_) => return,
         };
         let weak = self.weak.clone();
-        let _ = slint::invoke_from_event_loop(move || {
+        slint::invoke_from_event_loop(move || {
             if let Some(w) = weak.upgrade() {
                 super::query::render_results(&w, &snapshot);
             }
-        });
+        })
+        .log_debug("install: post progress render to event loop");
     }
 }
 
@@ -221,11 +223,12 @@ async fn request_confirmation(
 
     // Push the summary into Slint properties and flip to the confirm view.
     let weak = weak.clone();
-    let _ = slint::invoke_from_event_loop(move || {
+    slint::invoke_from_event_loop(move || {
         let Some(w) = weak.upgrade() else { return };
         populate_confirm_view(&w, &summary);
         w.invoke_show_confirm();
-    });
+    })
+    .log_debug("install: post confirm view to event loop");
 
     rx.await.unwrap_or(false)
 }
@@ -642,7 +645,7 @@ fn temp_dir_for_install(name: &str) -> std::io::Result<PathBuf> {
 }
 
 fn cleanup_staging(path: &Path) {
-    let _ = std::fs::remove_dir_all(path);
+    std::fs::remove_dir_all(path).log_debug("install: cleanup staging dir");
 }
 
 async fn run_reload(

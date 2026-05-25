@@ -18,6 +18,9 @@ use std::path::Path;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+#[cfg(target_os = "macos")]
+use crate::logging::LogErr;
+
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use rquickjs::function::{Async, Opt};
@@ -158,12 +161,12 @@ fn extract_icon_bytes(path: &str, size: u32) -> Option<(Vec<u8>, &'static str)> 
         .ok()?;
 
     if !out.status.success() {
-        let _ = std::fs::remove_file(&tmp);
+        std::fs::remove_file(&tmp).log_debug("icons: cleanup tmp after failed sips");
         return None;
     }
 
     let bytes = std::fs::read(&tmp).ok();
-    let _ = std::fs::remove_file(&tmp);
+    std::fs::remove_file(&tmp).log_debug("icons: cleanup tmp after sips extract");
 
     bytes.map(|b| (b, "image/png"))
 }

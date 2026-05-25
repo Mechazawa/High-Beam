@@ -28,6 +28,7 @@ use rquickjs::{
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
+use crate::logging::LogErr;
 use crate::plugins::log::{LogLevel, PluginLog};
 use crate::plugins::manifest::Manifest;
 use crate::plugins::result::PluginResult;
@@ -614,7 +615,7 @@ async fn run_hook<'js>(
     let result = tokio::select! {
         biased;
         () = shutdown.cancelled() => {
-            let _ = abort.cancel(ctx);
+            abort.cancel(ctx).log_debug("plugin hook: fire abort listeners on shutdown");
             Err(PluginError::Cancelled)
         }
         res = fut => res
@@ -626,7 +627,7 @@ async fn run_hook<'js>(
     // the natural-completion arm. Either way the JS controller is now out
     // of the registry.
     if result.is_ok() {
-        let _ = abort.release(ctx);
+        abort.release(ctx).log_debug("plugin hook: release abort controller after success");
     }
     result
 }
@@ -709,7 +710,7 @@ async fn stream_query<'js>(
     loop {
         if cancel.is_cancelled() {
             // Fire JS-side listeners so plugin code can clean up.
-            let _ = abort.cancel(&ctx);
+            abort.cancel(&ctx).log_debug("query stream: fire abort listeners on pre-step cancel");
 
             return Err(PluginError::Cancelled);
         }
@@ -723,7 +724,7 @@ async fn stream_query<'js>(
         let step: Object<'js> = tokio::select! {
             biased;
             () = cancel.cancelled() => {
-                let _ = abort.cancel(&ctx);
+                abort.cancel(&ctx).log_debug("query stream: fire abort listeners on mid-step cancel");
                 return Err(PluginError::Cancelled);
             }
             result = next_fut => result
@@ -740,7 +741,7 @@ async fn stream_query<'js>(
             // Natural completion: dispose the JS-side controller so the
             // registry doesn't accumulate one entry per query over the
             // plugin context's lifetime.
-            let _ = abort.release(&ctx);
+            abort.release(&ctx).log_debug("query stream: release abort controller on natural completion");
 
             return Ok(());
         }
@@ -758,7 +759,7 @@ async fn stream_query<'js>(
 
         if tx.send(parsed).is_err() {
             // Receiver dropped — treat as a cancel.
-            let _ = abort.cancel(&ctx);
+            abort.cancel(&ctx).log_debug("query stream: fire abort listeners after receiver dropped");
 
             return Err(PluginError::Cancelled);
         }

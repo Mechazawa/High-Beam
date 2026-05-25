@@ -14,6 +14,7 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::QueryWindow;
 use crate::daemon::HotkeyRegistration;
+use crate::logging::LogErr;
 use crate::hotkey::{MOD_ALT, MOD_CONTROL, MOD_META, MOD_SHIFT, format_hotkey_spec, slint_flag_for_modifier};
 use crate::plugins::manifest::{Manifest, OptionDef, OptionKind};
 use crate::settings::{Settings, WindowPosition};
@@ -116,7 +117,7 @@ impl SettingsController {
             // Persist on close — the toggle/set callbacks also persist, but
             // close acts as a final commit point if anything fell through.
             if let Some(w) = weak.upgrade() {
-                let _ = ctrl.persist();
+                ctrl.persist().log_warn("settings: persist on close failed");
                 w.set_current_view(0);
             }
         });
