@@ -144,34 +144,49 @@ export component ViewFrameView {
                             }
                         }
                     }
-                    if block.kind == "button": Rectangle {
-                        // Pad the touch surface so a 14-line view feels
-                        // tappable; click feedback comes from the
-                        // TouchArea below changing background opacity.
-                        height: 28px;
-                        border-radius: 4px;
-                        background:
-                            block.tone == "primary" ? root.primary-button-bg
-                            : block.tone == "danger" ? root.danger-button-bg
-                            : root.default-button-bg;
-                        opacity: button-touch.pressed ? 0.7 : 1.0;
-
-                        Text {
-                            text: block.text;
-                            font-size: root.font-size-subtitle;
-                            color:
-                                (block.tone == "primary" || block.tone == "danger")
-                                    ? #ffffff
-                                    : root.foreground-color;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
+                    if block.kind == "button": button-focus := FocusScope {
+                        // Enter or Space on a focused button counts as
+                        // a click — matches platform conventions.
+                        key-pressed(event) => {
+                            if (block.has-on-click
+                                && (event.text == Key.Return || event.text == " ")) {
+                                root.block-clicked(block.on-click-id);
+                                return accept;
+                            }
+                            return reject;
                         }
 
-                        button-touch := TouchArea {
-                            mouse-cursor: pointer;
-                            clicked => {
-                                if (block.has-on-click) {
-                                    root.block-clicked(block.on-click-id);
+                        Rectangle {
+                            height: 28px;
+                            border-radius: 4px;
+                            background:
+                                block.tone == "primary" ? root.primary-button-bg
+                                : block.tone == "danger" ? root.danger-button-bg
+                                : root.default-button-bg;
+                            // Visible focus ring — same colour as the
+                            // theme's highlight so it matches whatever
+                            // selection style the launcher uses.
+                            border-width: button-focus.has-focus ? 2px : 0px;
+                            border-color: root.highlight-color;
+                            opacity: button-touch.pressed ? 0.7 : 1.0;
+
+                            Text {
+                                text: block.text;
+                                font-size: root.font-size-subtitle;
+                                color:
+                                    (block.tone == "primary" || block.tone == "danger")
+                                        ? #ffffff
+                                        : root.foreground-color;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+
+                            button-touch := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    if (block.has-on-click) {
+                                        root.block-clicked(block.on-click-id);
+                                    }
                                 }
                             }
                         }
