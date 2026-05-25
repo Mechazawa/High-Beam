@@ -771,15 +771,26 @@ mod tests {
 
     #[test]
     fn theme_mode_auto_omitted_from_disk() {
-        // Auto is the default — pristine settings shouldn't carry it.
+        // Round-trip Dark → Auto to actually exercise the
+        // `mode == Auto => None` write branch. Setting Auto on a fresh
+        // Settings is a no-op and wouldn't catch a regression where
+        // Auto leaks back to disk.
         let mut s = Settings::default();
-        s.set_theme_mode("auto");
-        // Touch another field so the global block writes (Auto alone
-        // matches the full default and would suppress the section
-        // entirely).
+        s.set_theme_mode("dark");
         s.set_hotkey("Cmd+K");
-        let text = s.to_toml();
-        assert!(!text.contains("theme_mode"), "auto should be omitted: {text}");
+        let dark_text = s.to_toml();
+        assert!(
+            dark_text.contains("theme_mode = \"dark\""),
+            "dark must be written: {dark_text}",
+        );
+
+        // Reset to Auto — the previously-written line must disappear.
+        s.set_theme_mode("auto");
+        let auto_text = s.to_toml();
+        assert!(
+            !auto_text.contains("theme_mode"),
+            "auto must be omitted on next write: {auto_text}",
+        );
     }
 
     #[test]

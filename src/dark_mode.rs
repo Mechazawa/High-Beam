@@ -68,12 +68,13 @@ pub fn current() -> SystemAppearance {
 /// vary too much across platforms to wrap cheaply, and a 2 s ceiling on
 /// repaint latency is fine for a theme flip.
 ///
-/// # Panics
-///
-/// Panics if the OS refuses to spawn the watcher thread (resource
-/// exhaustion). The launcher needs the watcher to honour `theme_mode =
-/// "auto"`, so failing fast here surfaces the problem at startup rather
-/// than producing a launcher that silently never repaints.
+/// Thread-spawn failure (resource exhaustion, `EAGAIN` from `clone`,
+/// container `RLIMIT_NPROC`) degrades gracefully: the returned guard is
+/// inert (no watcher, callback never fires) and a warning is logged.
+/// Matches the daemon-wide doctrine that a single failing subsystem must
+/// not refuse the launcher's startup — the variant `daemon::run` already
+/// painted at startup remains in place; only live auto-switch is lost.
+#[must_use = "the returned SubscriptionGuard stops the watcher on Drop — discarding it terminates auto-switch immediately"]
 pub fn subscribe<F>(callback: F) -> SubscriptionGuard
 where
     F: Fn(SystemAppearance) + Send + 'static,
@@ -82,15 +83,22 @@ where
     let stop_thread = Arc::clone(&stop);
     let initial = current();
 
-    let handle = thread::Builder::new()
+    let handle = match thread::Builder::new()
         .name("highbeam-dark-mode".into())
         .spawn(move || run_watcher(&stop_thread, initial, callback))
-        .expect("spawn dark-mode watcher thread");
+    {
+        Ok(handle) => Some(handle),
+        Err(err) => {
+            tracing::warn!(%err, "dark-mode: could not spawn watcher; auto-switch disabled this session");
+            // Pre-stop so a future `Drop` is idempotent — there's nothing
+            // to signal, but the invariant "stop is true after Drop"
+            // still holds.
+            stop.store(true, Ordering::Relaxed);
+            None
+        }
+    };
 
-    SubscriptionGuard {
-        stop,
-        handle: Some(handle),
-    }
+    SubscriptionGuard { stop, handle }
 }
 
 fn run_watcher<F>(stop: &Arc<AtomicBool>, initial: SystemAppearance, callback: F)
@@ -149,11 +157,12 @@ mod tests {
     }
 
     #[test]
-    fn subscription_guard_drop_stops_watcher() {
-        // Smoke test: dropping the guard sets the stop flag so the thread
-        // exits on its next wakeup. We can't observe the thread directly
-        // without joining (which we explicitly don't do), but the flag is
-        // the only signal the thread reads and we can assert on that.
+    fn subscription_guard_drop_sets_stop_flag() {
+        // Indirect smoke test: dropping the guard flips the stop atomic,
+        // which is the only signal `run_watcher` reads to exit. We can't
+        // observe the thread itself without joining (which we explicitly
+        // don't do), so this test verifies *the signal*, not the thread's
+        // observed exit — the name reflects that scope.
         let guard = subscribe(|_| {});
         let stop = Arc::clone(&guard.stop);
         assert!(!stop.load(Ordering::Relaxed));

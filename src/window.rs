@@ -190,7 +190,7 @@ pub(crate) fn configure(window: &QueryWindow, settings: SettingsController) {
 }
 
 /// Push theme tokens into the window's `in-out` properties. Re-callable
-/// — the dark-mode watcher (see `daemon::run_with_options`) bounces back
+/// — the dark-mode watcher set up in [`crate::daemon::run`] bounces back
 /// here through the Slint event loop when the OS appearance flips, so
 /// every call must overwrite the full property surface rather than
 /// patching individual fields.
