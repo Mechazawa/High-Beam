@@ -8,11 +8,23 @@
 # (pure JS demos, no JS-side tests).
 name: Plugins
 
+# Path-filtered: plugin tests only run when something they actually
+# exercise has changed. `sdk/**` covers the highbeam SDK that every
+# plugin imports from, and the workflow file itself is included so
+# CI changes still trigger a self-test.
 on:
   push:
     branches: [master]
+    paths:
+      - 'plugins/**'
+      - 'sdk/**'
+      - '.github/workflows/plugins.yml'
   pull_request:
     branches: [master]
+    paths:
+      - 'plugins/**'
+      - 'sdk/**'
+      - '.github/workflows/plugins.yml'
 
 concurrency:
   group: plugins-${{ github.ref }}
