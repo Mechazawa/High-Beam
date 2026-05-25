@@ -18,10 +18,33 @@
 //! observable in logs without yet being visible in the UI; Stage 4 swaps
 //! them for the real Slint-paint / action-dispatch routing.
 
+use std::sync::Arc;
+
 use rquickjs::module::{Declarations, Exports, ModuleDef};
 use rquickjs::{CatchResultExt, Ctx, Function, Object, Result as JsResult, Value};
 
 const VIEW_RUNTIME_JS: &str = include_str!("js/view_runtime.js");
+
+/// Wires the JS-side view runtime back to the host. Each plugin context
+/// gets its own bridge — the closures capture the plugin name (for log
+/// lines + frame ownership) plus whatever Slint-thread state each one
+/// needs (the view stack, the host-message channel). Held behind an
+/// `Arc` because rquickjs `Function` closures need `'static` ownership
+/// and the same bridge is shared across the four install_* functions.
+pub struct RuntimeBridge {
+    /// Plugin that owns this bridge — captured for log lines and so the
+    /// host can match `close_view_request` calls against the right
+    /// frame.
+    pub plugin_name: String,
+    /// Called when a closure inside a view's `on*` handler (or the
+    /// closure's eventual return value) yields an `Action`. Receives the
+    /// JSON-serialised action; the host parses + routes it.
+    pub dispatch: Box<dyn Fn(String) + Send + Sync + 'static>,
+    /// Called when a view's `render()` returns `null` — the JS side has
+    /// already torn down its own state; the host should pop the matching
+    /// frame from the stack.
+    pub close_request: Box<dyn Fn(u64) + Send + Sync + 'static>,
+}
 
 pub struct ViewModule;
 
@@ -83,24 +106,20 @@ fn make_block<'js>(ctx: &Ctx<'js>, kind: &str, opts: Value<'js>) -> JsResult<Obj
 }
 
 /// Install the reactivity runtime + host-callable bridge globals into a
-/// plugin's `Ctx`. Idempotent — the shim guards on `__highbeam_views`
+/// plugin's `Ctx`. Idempotent — the JS shim guards on `__highbeam_views`
 /// presence so re-eval is a no-op, and the bridge globals are re-set on
-/// every call (cheap; lets a future stage rotate the closures without
-/// touching the call site).
-///
-/// `plugin_name` is captured into each bridge closure so log lines and,
-/// in later stages, paint/dispatch routing know which plugin produced
-/// the event.
+/// every call (cheap; lets the caller rotate the closures without
+/// touching this code).
 ///
 /// # Errors
 ///
 /// Propagates JS errors from evaluating the runtime shim or setting the
 /// bridge globals.
-pub fn install_runtime(ctx: &Ctx<'_>, plugin_name: String) -> JsResult<()> {
-    install_paint_tree(ctx, plugin_name.clone())?;
-    install_paint_error(ctx, plugin_name.clone())?;
-    install_dispatch(ctx, plugin_name.clone())?;
-    install_close_request(ctx, plugin_name)?;
+pub fn install_runtime(ctx: &Ctx<'_>, bridge: Arc<RuntimeBridge>) -> JsResult<()> {
+    install_paint_tree(ctx, bridge.plugin_name.clone())?;
+    install_paint_error(ctx, bridge.plugin_name.clone())?;
+    install_dispatch(ctx, Arc::clone(&bridge))?;
+    install_close_request(ctx, bridge)?;
 
     ctx.eval::<(), _>(VIEW_RUNTIME_JS)?;
     Ok(())
@@ -127,18 +146,18 @@ fn install_paint_error(ctx: &Ctx<'_>, plugin_name: String) -> JsResult<()> {
     Ok(())
 }
 
-fn install_dispatch(ctx: &Ctx<'_>, plugin_name: String) -> JsResult<()> {
+fn install_dispatch(ctx: &Ctx<'_>, bridge: Arc<RuntimeBridge>) -> JsResult<()> {
     let dispatch = Function::new(ctx.clone(), move |action_json: String| {
-        tracing::debug!(plugin = %plugin_name, action = %action_json, "views: dispatch (stub)");
+        (bridge.dispatch)(action_json);
         Ok::<_, rquickjs::Error>(())
     })?;
     ctx.globals().set("__highbeam_dispatch", dispatch)?;
     Ok(())
 }
 
-fn install_close_request(ctx: &Ctx<'_>, plugin_name: String) -> JsResult<()> {
+fn install_close_request(ctx: &Ctx<'_>, bridge: Arc<RuntimeBridge>) -> JsResult<()> {
     let close = Function::new(ctx.clone(), move |handle: u64| {
-        tracing::debug!(plugin = %plugin_name, handle, "views: close requested by render-null (stub)");
+        (bridge.close_request)(handle);
         Ok::<_, rquickjs::Error>(())
     })?;
     ctx.globals().set("__highbeam_close_view_request", close)?;
@@ -223,6 +242,17 @@ mod tests {
             .expect("tokio rt")
     }
 
+    /// No-op bridge — the JS-side fallback path uses these closures when
+    /// the host doesn't care about `dispatch` / `close_view_request` side
+    /// effects.
+    fn test_bridge(plugin: &str) -> Arc<RuntimeBridge> {
+        Arc::new(RuntimeBridge {
+            plugin_name: plugin.to_owned(),
+            dispatch: Box::new(|_action_json| {}),
+            close_request: Box::new(|_handle| {}),
+        })
+    }
+
     #[test]
     fn install_runtime_is_idempotent() {
         let runtime = rt();
@@ -230,8 +260,8 @@ mod tests {
             let async_rt = AsyncRuntime::new().expect("rt");
             let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
             async_with!(ctx => |ctx| {
-                install_runtime(&ctx, "test-plugin".into()).expect("install");
-                install_runtime(&ctx, "test-plugin".into()).expect("re-install");
+                install_runtime(&ctx, test_bridge("test-plugin")).expect("install");
+                install_runtime(&ctx, test_bridge("test-plugin")).expect("re-install");
                 let has_views: bool = ctx
                     .eval("typeof globalThis.__highbeam_views === 'object'")
                     .expect("eval");
@@ -253,7 +283,7 @@ mod tests {
                 // Bootstrap AbortController so the runtime's `new AbortController()`
                 // in init() resolves.
                 crate::sdk::abort::install_global_controller(&ctx).expect("abort");
-                install_runtime(&ctx, "t".into()).expect("install");
+                install_runtime(&ctx, test_bridge("t")).expect("install");
 
                 // Plant a fake registry + view that records calls on globals
                 // so the test can assert without an actual showView call path.
@@ -305,7 +335,7 @@ mod tests {
             let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
             async_with!(ctx => |ctx| {
                 crate::sdk::abort::install_global_controller(&ctx).expect("abort");
-                install_runtime(&ctx, "t".into()).expect("install");
+                install_runtime(&ctx, test_bridge("t")).expect("install");
                 // Override the stub paint hooks with recorders so we can assert.
                 ctx.eval::<(), _>(
                     r#"
@@ -349,7 +379,7 @@ mod tests {
             let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
             async_with!(ctx => |ctx| {
                 crate::sdk::abort::install_global_controller(&ctx).expect("abort");
-                install_runtime(&ctx, "t".into()).expect("install");
+                install_runtime(&ctx, test_bridge("t")).expect("install");
 
                 ctx.eval::<(), _>(
                     r#"

@@ -116,6 +116,8 @@ pub fn start(
         frecency_db.clone(),
         Arc::clone(&confirm_state),
         settings.clone(),
+        Arc::clone(&view_stack),
+        tx.clone(),
     )?;
 
     callbacks::wire_window_callbacks(
@@ -146,6 +148,8 @@ fn spawn_runtime_thread(
     frecency_db: Option<FrecencyDb>,
     confirm_state: ConfirmState,
     settings: SettingsController,
+    view_stack: Arc<Mutex<ViewStack>>,
+    host_tx: mpsc::UnboundedSender<HostMessage>,
 ) -> Result<(), Box<dyn Error>> {
     thread::Builder::new()
         .name("highbeam-plugin-runtime".into())
@@ -228,7 +232,10 @@ fn spawn_runtime_thread(
                             let plugins = registry.snapshot().await;
 
                             if let Some(p) = plugins.iter().find(|p| p.manifest.name == plugin) {
-                                if let Err(err) = p.view_init(handle, &props).await {
+                                let bridge =
+                                    callbacks::build_view_bridge(&plugin, Arc::clone(&view_stack), host_tx.clone());
+
+                                if let Err(err) = p.view_init(handle, &props, bridge).await {
                                     tracing::error!(%plugin, handle, %err, "views: init failed");
                                 }
                             } else {

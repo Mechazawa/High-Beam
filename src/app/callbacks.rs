@@ -13,8 +13,9 @@ use crate::QueryWindow;
 use crate::frecency::FrecencyDb;
 use crate::logging::LogErr;
 use crate::plugins::actions;
-use crate::plugins::result::RankedResult;
+use crate::plugins::result::{Action, RankedResult};
 use crate::query_history::{InputAction, QueryHistoryDb, QueryHistoryState};
+use crate::sdk::view::RuntimeBridge;
 use crate::settings_ui::SettingsController;
 use crate::ui::ResultRow;
 use crate::views::{PushError, ViewFrame, ViewStack};
@@ -327,6 +328,148 @@ fn invoke_selected(
             tracing::error!(plugin = %plugin_name, %err, "plugins: action failed");
             window::hide_and_persist_position(&w, settings);
         }
+    }
+}
+
+/// Construct the [`RuntimeBridge`] the JS view runtime calls back into.
+/// Each plugin context gets its own — the closures capture the plugin
+/// name plus enough Slint-thread state (the view stack, the host-message
+/// channel) to route `dispatch` and `close_view_request` actions back
+/// through `slint::invoke_from_event_loop`.
+///
+/// Called from the runtime thread when a `HostMessage::ViewInit` arrives;
+/// the bridge then lives inside the plugin's `QuickJS` context until the
+/// frame closes.
+#[must_use]
+pub(super) fn build_view_bridge(
+    plugin_name: &str,
+    view_stack: Arc<Mutex<ViewStack>>,
+    host_tx: mpsc::UnboundedSender<HostMessage>,
+) -> Arc<RuntimeBridge> {
+    let dispatch = {
+        let plugin = plugin_name.to_owned();
+        let view_stack = Arc::clone(&view_stack);
+        let host_tx = host_tx.clone();
+        Box::new(move |action_json: String| {
+            let plugin = plugin.clone();
+            let view_stack = Arc::clone(&view_stack);
+            let host_tx = host_tx.clone();
+            slint::invoke_from_event_loop(move || {
+                handle_view_dispatch(&plugin, &action_json, &view_stack, &host_tx);
+            })
+            .log_debug("views: dispatch invoke_from_event_loop");
+        })
+    };
+    let close_request = {
+        let plugin = plugin_name.to_owned();
+        Box::new(move |handle: u64| {
+            let plugin = plugin.clone();
+            let view_stack = Arc::clone(&view_stack);
+            let host_tx = host_tx.clone();
+            slint::invoke_from_event_loop(move || {
+                handle_view_close_request(&plugin, handle, &view_stack, &host_tx);
+            })
+            .log_debug("views: close_view_request invoke_from_event_loop");
+        })
+    };
+    Arc::new(RuntimeBridge {
+        plugin_name: plugin_name.to_owned(),
+        dispatch,
+        close_request,
+    })
+}
+
+/// Slint-thread handler for `__highbeam_dispatch(action_json)`. Parses
+/// the action, runs `actions::execute`, and routes the resulting
+/// outcome — minus the `HideWindow` effect, which would tear down the
+/// view the dispatch was *fired from*. View-only outcomes (`ShowView` /
+/// `CloseView`) push or pop the stack; simple side-effecting actions
+/// already ran inside `execute` before we got the outcome.
+fn handle_view_dispatch(
+    plugin: &str,
+    action_json: &str,
+    view_stack: &Arc<Mutex<ViewStack>>,
+    host_tx: &mpsc::UnboundedSender<HostMessage>,
+) {
+    let action: Action = match serde_json::from_str(action_json) {
+        Ok(a) => a,
+        Err(err) => {
+            tracing::error!(%plugin, %err, %action_json, "views: dispatch parse failed");
+            return;
+        }
+    };
+    let outcome = match actions::execute(&action) {
+        Ok(o) => o,
+        Err(err) => {
+            tracing::error!(%plugin, %err, "views: dispatch execute failed");
+            return;
+        }
+    };
+
+    match outcome {
+        // Dispatched-from-view: HideWindow's "hide" half is a no-op. The
+        // action's side effect (URL opened, clipboard written, subprocess
+        // spawned, etc.) already ran inside execute() above.
+        actions::ActionOutcome::HideWindow | actions::ActionOutcome::KeepOpen => {}
+        actions::ActionOutcome::ShowView { handle, props, reset } => {
+            push_view_frame(view_stack, host_tx, plugin, handle, props, reset);
+        }
+        actions::ActionOutcome::CloseView => {
+            pop_view_frame(view_stack, host_tx);
+        }
+        actions::ActionOutcome::OpenSettingsView => {
+            tracing::warn!(%plugin, "views: dispatch of openSettings ignored — would tear down the view");
+        }
+        actions::ActionOutcome::HostTask(_) => {
+            tracing::warn!(%plugin, "views: dispatch of host task ignored");
+        }
+    }
+}
+
+/// Slint-thread handler for `__highbeam_close_view_request(handle)`. The
+/// JS runtime has already torn down its instance for `handle`; we just
+/// need to pop the matching frame and notify the runtime thread (which
+/// then calls `view_close`, a safe no-op on an already-closed JS
+/// instance). Verifies the top frame matches `(plugin, handle)` — a
+/// mismatch means a paused deeper frame somehow triggered the close,
+/// which would be a bug we should observe.
+fn handle_view_close_request(
+    plugin: &str,
+    handle: u64,
+    view_stack: &Arc<Mutex<ViewStack>>,
+    host_tx: &mpsc::UnboundedSender<HostMessage>,
+) {
+    let Ok(mut stack) = view_stack.lock() else {
+        tracing::error!("views: stack lock poisoned; close_view_request dropped");
+        return;
+    };
+    let Some(top) = stack.top() else {
+        tracing::debug!(%plugin, handle, "views: close_view_request on empty stack");
+        return;
+    };
+
+    if top.plugin_name != plugin || top.handle != handle {
+        tracing::warn!(
+            %plugin,
+            handle,
+            top_plugin = %top.plugin_name,
+            top_handle = top.handle,
+            "views: close_view_request for non-top frame; ignored",
+        );
+        return;
+    }
+    let frame = stack.pop().expect("top present");
+    drop(stack);
+    tracing::info!(plugin = %frame.plugin_name, handle = frame.handle, "views: render-null triggered close");
+
+    if host_tx
+        .send(HostMessage::ViewClose {
+            plugin: frame.plugin_name,
+            handle: frame.handle,
+        })
+        .is_err()
+    {
+        tracing::error!("views: runtime thread exited; view close dropped");
     }
 }
 

@@ -408,16 +408,26 @@ impl LoadedPlugin {
     /// sequence; the rendered tree comes back to the host via the
     /// `__highbeam_paint_tree` bridge.
     ///
+    /// `bridge` carries the dispatch + close-request closures the JS
+    /// runtime calls from its `on*` handlers and `render → null` path.
+    /// The host owns its construction so the closures can capture
+    /// Slint-thread state without leaking that surface into the
+    /// per-plugin runtime layer.
+    ///
     /// # Errors
     ///
     /// Propagates JS errors from installing the runtime or invoking
     /// `init` (including any uncaught throw from the plugin's `setup`
     /// or first `render`).
-    pub async fn view_init(&self, handle: u64, props: &JsonValue) -> Result<(), PluginError> {
-        let plugin_name = self.manifest.name.clone();
+    pub async fn view_init(
+        &self,
+        handle: u64,
+        props: &JsonValue,
+        bridge: Arc<crate::sdk::view::RuntimeBridge>,
+    ) -> Result<(), PluginError> {
         let props_json = props.to_string();
         async_with!(self.context => |ctx| {
-            crate::sdk::view::install_runtime(&ctx, plugin_name)
+            crate::sdk::view::install_runtime(&ctx, bridge)
                 .catch(&ctx)
                 .map_err(|err| PluginError::Js(format!("install view runtime: {err}")))?;
             crate::sdk::view::invoke_init(&ctx, handle, &props_json)
