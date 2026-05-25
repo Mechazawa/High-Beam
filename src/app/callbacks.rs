@@ -604,9 +604,14 @@ fn flatten_block(value: &serde_json::Value, out: &mut Vec<ViewBlock>) {
         has_value: !value_text.is_empty(),
         value: value_text.into(),
         id: id.into(),
-        on_click_id: i32::try_from(on_click_id).unwrap_or(0),
-        on_change_id: i32::try_from(on_change_id).unwrap_or(0),
-        on_submit_id: i32::try_from(on_submit_id).unwrap_or(0),
+        // Slint structs only carry `int` (i32). Callback ids are
+        // minted from a per-view counter that starts at 1 — reaching
+        // i32::MAX would require ~2B renders against the same frame.
+        // Saturating to 0 (the no-handler sentinel) would silently
+        // drop a handler, so flag the overflow in debug builds.
+        on_click_id: clamp_callback_id(on_click_id),
+        on_change_id: clamp_callback_id(on_change_id),
+        on_submit_id: clamp_callback_id(on_submit_id),
         has_on_click: on_click_id > 0,
         has_on_change: on_change_id > 0,
         has_on_submit: on_submit_id > 0,
@@ -623,6 +628,20 @@ fn read_callback_id(value: Option<&serde_json::Value>) -> u64 {
         .and_then(|o| o.get("__callbackId"))
         .and_then(serde_json::Value::as_u64)
         .unwrap_or(0)
+}
+
+/// Narrow a SDK-minted callback id to the `i32` Slint structs use.
+/// In practice ids stay well under `i32::MAX` (one render mints a
+/// handful; a view lives for one launcher session) — overflow would
+/// silently drop a handler, so the `debug_assert!` catches it during
+/// development.
+fn clamp_callback_id(id: u64) -> i32 {
+    if let Ok(v) = i32::try_from(id) {
+        v
+    } else {
+        debug_assert!(false, "callback id {id} exceeds i32::MAX");
+        0
+    }
 }
 
 /// Slint-thread handler for `__highbeam_dispatch(action_json)`. Parses
