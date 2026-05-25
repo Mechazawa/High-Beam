@@ -198,6 +198,9 @@ pub(crate) fn apply_theme(window: &QueryWindow, theme: &Theme) {
     window.set_highlight_color(theme.colors.highlight);
     window.set_selection_color(theme.colors.selection);
     window.set_border_color(theme.colors.border);
+    window.set_error_color(theme.colors.error);
+    window.set_success_color(theme.colors.success);
+    window.set_warning_color(theme.colors.warning);
     window.set_font_family(theme.font.family.clone().into());
     window.set_font_size_query(theme.font.size_query);
     window.set_font_size_title(theme.font.size_title);

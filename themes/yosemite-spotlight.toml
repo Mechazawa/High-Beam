@@ -23,6 +23,12 @@ muted      = "#86868b"     # placeholder + subtitle + empty-icon outline
 highlight  = "#0a84ff"     # reserved for future use
 selection  = "#0a84ff33"   # highlighted row background wash
 border     = "#00000010"   # panel outline + row separator
+# Tone colours used by plugin views — `Text({tone: 'error'})`, the
+# danger button background, the error-frame banner. Defaults mirror
+# the macOS system palette.
+error      = "#d70015"
+success    = "#0c8430"
+warning    = "#b75f00"
 
 [font]
 # Empty family lets the platform pick its default system font, which is

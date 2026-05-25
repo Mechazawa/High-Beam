@@ -18,19 +18,21 @@ export component ViewFrameView {
     in property <color> muted-color;
     in property <color> border-color;
     in property <color> highlight-color;
+    in property <color> error-color;
+    in property <color> success-color;
+    in property <color> warning-color;
     in property <length> font-size-title;
     in property <length> font-size-subtitle;
     in property <length> heading-font-size: 22px;
 
-    // Tone palette — Stage 8 will pull these from the theme. For now
-    // we synthesise reasonable defaults so the renderer paints
-    // something readable against any theme.
-    property <color> error-color: #d70015;
-    property <color> success-color: #0c8430;
-    property <color> warning-color: #b75f00;
+    // Button-tone backgrounds derived from the theme — `primary` /
+    // `danger` map directly onto the highlight + error tones so a
+    // user's theme override flows through automatically. `default`
+    // uses the existing border colour so an untoned button looks
+    // like a subtle chip without inventing a new token.
     property <color> primary-button-bg: root.highlight-color;
-    property <color> danger-button-bg: #d70015;
-    property <color> default-button-bg: #00000010;
+    property <color> danger-button-bg: root.error-color;
+    property <color> default-button-bg: root.border-color;
 
     width: 100%;
     height: 100%;

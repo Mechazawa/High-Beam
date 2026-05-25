@@ -119,6 +119,13 @@ export component QueryWindow inherits Window {
     in-out property <color> highlight-color: #0a84ff;
     in-out property <color> selection-color: #0a84ff33;
     in-out property <color> border-color: #00000010;
+    // Tone colours for plugin-view block rendering. Same Rust ->
+    // Slint flow as the other tokens; defaults reproduce the macOS
+    // system palette so a theme that doesn't override them paints
+    // reasonable error/success/warning text + buttons.
+    in-out property <color> error-color: #d70015;
+    in-out property <color> success-color: #0c8430;
+    in-out property <color> warning-color: #b75f00;
     in-out property <string> font-family: "";
     in-out property <length> font-size-query: 32px;
     in-out property <length> font-size-title: 14px;
@@ -449,6 +456,10 @@ export component QueryWindow inherits Window {
             foreground-color: root.foreground-color;
             muted-color: root.muted-color;
             border-color: root.border-color;
+            highlight-color: root.highlight-color;
+            error-color: root.error-color;
+            success-color: root.success-color;
+            warning-color: root.warning-color;
             font-size-title: root.font-size-title;
             font-size-subtitle: root.font-size-subtitle;
 

@@ -29,6 +29,12 @@ pub struct Colors {
     pub highlight: Color,
     pub selection: Color,
     pub border: Color,
+    /// Tone colours for the plugin-view block set. Used by `Text`'s
+    /// `tone` prop and the matching button tones; default values
+    /// reproduce the standard macOS error/success/warning hues.
+    pub error: Color,
+    pub success: Color,
+    pub warning: Color,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -60,6 +66,9 @@ impl Default for Colors {
             highlight: parse("#0a84ff"),
             selection: parse("#0a84ff33"),
             border: parse("#00000010"),
+            error: parse("#d70015"),
+            success: parse("#0c8430"),
+            warning: parse("#b75f00"),
         }
     }
 }
@@ -162,6 +171,9 @@ struct RawColors {
     highlight: Option<String>,
     selection: Option<String>,
     border: Option<String>,
+    error: Option<String>,
+    success: Option<String>,
+    warning: Option<String>,
 }
 
 impl RawColors {
@@ -173,6 +185,9 @@ impl RawColors {
             highlight: parse_optional(self.highlight, defaults.highlight, "colors.highlight")?,
             selection: parse_optional(self.selection, defaults.selection, "colors.selection")?,
             border: parse_optional(self.border, defaults.border, "colors.border")?,
+            error: parse_optional(self.error, defaults.error, "colors.error")?,
+            success: parse_optional(self.success, defaults.success, "colors.success")?,
+            warning: parse_optional(self.warning, defaults.warning, "colors.warning")?,
         })
     }
 }
