@@ -7,6 +7,7 @@
 //! `exec` here is the action builder (no capability required). Live
 //! subprocess execution lives in `highbeam:system.exec`.
 
+use rquickjs::function::Opt;
 use rquickjs::module::{Declarations, Exports, ModuleDef};
 use rquickjs::{Ctx, Function, Object, Result as JsResult, Value};
 
@@ -64,8 +65,14 @@ impl ModuleDef for ActionsModule {
         })?;
         let show_view = Function::new(
             ctx.clone(),
-            |ctx: Ctx<'js>, view: Value<'js>, props: Value<'js>, opts: Value<'js>| {
-                build_show_view(&ctx, view, props, &opts)
+            |ctx: Ctx<'js>, view: Value<'js>, props: Opt<Value<'js>>, opts: Opt<Value<'js>>| {
+                let reset = opts
+                    .0
+                    .as_ref()
+                    .and_then(rquickjs::Value::as_object)
+                    .and_then(|o| o.get::<_, bool>("reset").ok())
+                    .unwrap_or(false);
+                build_show_view(&ctx, view, props.0, reset)
             },
         )?;
         let close_view = build_close_view(ctx)?;
@@ -90,8 +97,8 @@ impl ModuleDef for ActionsModule {
 fn build_show_view<'js>(
     ctx: &Ctx<'js>,
     view: Value<'js>,
-    props: Value<'js>,
-    opts: &Value<'js>,
+    props: Option<Value<'js>>,
+    reset: bool,
 ) -> JsResult<Object<'js>> {
     let handle = register_view(ctx, view)?;
 
@@ -99,17 +106,11 @@ fn build_show_view<'js>(
     obj.set("kind", "showView")?;
     obj.set("handle", handle)?;
 
-    let props_value = if props.is_undefined() || props.is_null() {
-        Object::new(ctx.clone())?.into_value()
-    } else {
-        props
+    let props_value = match props {
+        Some(p) if !p.is_undefined() && !p.is_null() => p,
+        _ => Object::new(ctx.clone())?.into_value(),
     };
     obj.set("props", props_value)?;
-
-    let reset = opts
-        .as_object()
-        .and_then(|o| o.get::<_, bool>("reset").ok())
-        .unwrap_or(false);
     obj.set("reset", reset)?;
 
     Ok(obj)

@@ -182,6 +182,13 @@ fn spawn_runtime_thread(
                 let plugins: Vec<Arc<LoadedPlugin>> = outcomes.into_iter().map(|o| o.plugin).collect();
                 let registry = PluginRegistry::new(opts, plugins);
                 let mut current_cancel: Option<CancellationToken> = None;
+                // Per-view close signals — keyed on (plugin, handle) so a
+                // ViewClose message can wake the matching `spawn_view`
+                // task without us having to keep a handle on each task.
+                let mut view_close_signals: std::collections::HashMap<
+                    (String, u64),
+                    tokio_util::sync::CancellationToken,
+                > = std::collections::HashMap::new();
 
                 while let Some(msg) = rx.recv().await {
                     match msg {
@@ -240,23 +247,20 @@ fn spawn_runtime_thread(
                                     host_tx.clone(),
                                     &weak,
                                 );
-
-                                if let Err(err) = p.view_init(handle, &props, bridge).await {
-                                    tracing::error!(%plugin, handle, %err, "views: init failed");
-                                }
+                                view_close_signals.insert((plugin.clone(), handle), bridge.close_signal.clone());
+                                p.spawn_view(handle, &props, bridge);
                             } else {
                                 tracing::warn!(%plugin, handle, "views: init for unknown plugin");
                             }
                         }
                         HostMessage::ViewClose { plugin, handle } => {
-                            let plugins = registry.snapshot().await;
-
-                            if let Some(p) = plugins.iter().find(|p| p.manifest.name == plugin) {
-                                if let Err(err) = p.view_close(handle).await {
-                                    tracing::error!(%plugin, handle, %err, "views: close failed");
-                                }
+                            // Fire the bridge's close_signal — the per-view
+                            // tokio task awaits it, runs `unmounted` inside
+                            // its own async_with!, and exits.
+                            if let Some(signal) = view_close_signals.remove(&(plugin.clone(), handle)) {
+                                signal.cancel();
                             } else {
-                                tracing::warn!(%plugin, handle, "views: close for unknown plugin");
+                                tracing::debug!(%plugin, handle, "views: close for unknown handle");
                             }
                         }
                         HostMessage::Shutdown => {

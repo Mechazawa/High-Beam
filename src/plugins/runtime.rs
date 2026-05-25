@@ -402,57 +402,50 @@ impl LoadedPlugin {
         rx
     }
 
-    /// Run the JS view runtime's `init(handle, props)` for a freshly-pushed
-    /// view frame. Lazily installs the runtime + bridge globals on first
-    /// use. Triggers the plugin's `setup → first render → mounted`
-    /// sequence; the rendered tree comes back to the host via the
-    /// `__highbeam_paint_tree` bridge.
+    /// Spawn a long-running task that owns the plugin's `QuickJS` context
+    /// for the view frame's lifetime. The task:
     ///
-    /// `bridge` carries the dispatch + close-request closures the JS
-    /// runtime calls from its `on*` handlers and `render → null` path.
-    /// The host owns its construction so the closures can capture
-    /// Slint-thread state without leaking that surface into the
-    /// per-plugin runtime layer.
+    ///   1. Installs the JS runtime + bridge globals.
+    ///   2. Calls `init(handle, props)` — setup → first render → mounted.
+    ///   3. Awaits `bridge.close_signal`, keeping `async_with!` alive so
+    ///      pending `QuickJS` jobs (microtask flushes, `setTimeout`
+    ///      continuations, etc.) actually run.
+    ///   4. Calls `close(handle)` — runs `unmounted`, fires the abort
+    ///      signal, clears the per-handle instance.
     ///
-    /// # Errors
-    ///
-    /// Propagates JS errors from installing the runtime or invoking
-    /// `init` (including any uncaught throw from the plugin's `setup`
-    /// or first `render`).
-    pub async fn view_init(
-        &self,
-        handle: u64,
-        props: &JsonValue,
-        bridge: Arc<crate::sdk::view::RuntimeBridge>,
-    ) -> Result<(), PluginError> {
+    /// Returns immediately after the task is spawned; the host doesn't
+    /// wait for the view's lifecycle to complete.
+    pub fn spawn_view(&self, handle: u64, props: &JsonValue, bridge: Arc<crate::sdk::view::RuntimeBridge>) {
+        let plugin_name = self.manifest.name.clone();
         let props_json = props.to_string();
-        async_with!(self.context => |ctx| {
-            crate::sdk::view::install_runtime(&ctx, bridge)
-                .catch(&ctx)
-                .map_err(|err| PluginError::Js(format!("install view runtime: {err}")))?;
-            crate::sdk::view::invoke_init(&ctx, handle, &props_json)
-                .catch(&ctx)
-                .map_err(|err| PluginError::Js(format!("view init: {err}")))?;
-            Ok::<_, PluginError>(())
-        })
-        .await
-    }
+        let context = self.context.clone();
+        let close_signal = bridge.close_signal.clone();
 
-    /// Tear down a view frame on the JS side — runs `unmounted`, fires
-    /// the mounted-signal's abort, and drops the instance + its registry
-    /// entry so the view object itself becomes GC-eligible.
-    ///
-    /// # Errors
-    ///
-    /// Propagates JS errors from invoking `close`.
-    pub async fn view_close(&self, handle: u64) -> Result<(), PluginError> {
-        async_with!(self.context => |ctx| {
-            crate::sdk::view::invoke_close(&ctx, handle)
-                .catch(&ctx)
-                .map_err(|err| PluginError::Js(format!("view close: {err}")))?;
-            Ok::<_, PluginError>(())
-        })
-        .await
+        tokio::spawn(async move {
+            async_with!(context => |ctx| {
+                if let Err(err) = crate::sdk::view::install_runtime(&ctx, bridge).catch(&ctx) {
+                    tracing::error!(plugin = %plugin_name, handle, %err, "views: install runtime failed");
+                    return;
+                }
+
+                if let Err(err) = crate::sdk::view::invoke_init(&ctx, handle, &props_json).catch(&ctx) {
+                    tracing::error!(plugin = %plugin_name, handle, %err, "views: init failed");
+                    return;
+                }
+
+                // Keep the context held while we await the host's close
+                // signal. The async runtime polls pending JS jobs in the
+                // background of this await — without it, `mounted`'s
+                // `setTimeout` continuations would never re-enter the
+                // engine.
+                close_signal.cancelled().await;
+
+                if let Err(err) = crate::sdk::view::invoke_close(&ctx, handle).catch(&ctx) {
+                    tracing::error!(plugin = %plugin_name, handle, %err, "views: close failed");
+                }
+            })
+            .await;
+        });
     }
 
     /// Whether this plugin exported the requested hook. Callers can skip

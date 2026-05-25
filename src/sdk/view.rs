@@ -36,6 +36,13 @@ pub struct RuntimeBridge {
     /// host can match `close_view_request` calls against the right
     /// frame.
     pub plugin_name: String,
+    /// Fires when the host wants the view's tokio task to exit. The
+    /// per-view `view_init` task awaits this; `view_close` triggers it.
+    /// Driving the task this way (rather than calling `invoke_close`
+    /// from a separate `async_with!`) avoids two contexts contending
+    /// for the same `QuickJS` engine and keeps `setTimeout`/microtask
+    /// continuations alive for the view's whole lifetime.
+    pub close_signal: tokio_util::sync::CancellationToken,
     /// Called when the JS runtime produces a fresh rendered tree.
     /// Arguments: `(handle, tree_json)`. The closure parses + paints on
     /// the Slint thread.
@@ -249,6 +256,7 @@ mod tests {
     fn test_bridge(plugin: &str) -> Arc<RuntimeBridge> {
         Arc::new(RuntimeBridge {
             plugin_name: plugin.to_owned(),
+            close_signal: tokio_util::sync::CancellationToken::new(),
             paint_tree: Box::new(|_handle, _tree| {}),
             dispatch: Box::new(|_action_json| {}),
             close_request: Box::new(|_handle| {}),

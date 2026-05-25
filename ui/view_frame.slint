@@ -16,25 +16,32 @@ export component ViewFrameView {
 
     in property <color> foreground-color;
     in property <color> muted-color;
-    in property <color> error-color;
-    in property <color> success-color;
-    in property <color> warning-color;
     in property <color> border-color;
     in property <length> font-size-title;
     in property <length> font-size-subtitle;
-    in property <length> heading-font-size: 24px;
+    in property <length> heading-font-size: 22px;
+
+    // Tone palette — Stage 8 will pull these from the theme. For now
+    // we synthesise reasonable defaults so the renderer paints
+    // something readable against any theme.
+    property <color> error-color: #d70015;
+    property <color> success-color: #0c8430;
+    property <color> warning-color: #b75f00;
 
     width: 100%;
     height: 100%;
 
-    callback escape-pressed();
+    // Esc inside a plugin view pops the top frame off the stack
+    // instead of hiding the whole launcher. When the last frame goes
+    // the host switches the window back to VIEW-QUERY.
+    callback pop-view();
 
     forward-focus: focus-scope;
 
     focus-scope := FocusScope {
         key-pressed(event) => {
             if (event.text == Key.Escape) {
-                root.escape-pressed();
+                root.pop-view();
                 return accept;
             }
             return reject;
@@ -42,8 +49,8 @@ export component ViewFrameView {
     }
 
     VerticalLayout {
-        padding: 16px;
-        spacing: 8px;
+        padding: 10px;
+        spacing: 4px;
 
         if root.has-title: Text {
             text: root.frame-title;
@@ -58,9 +65,8 @@ export component ViewFrameView {
         }
 
         ScrollView {
-            min-height: 80px;
             VerticalLayout {
-                spacing: 6px;
+                spacing: 4px;
 
                 for block in root.blocks: VerticalLayout {
                     if block.kind == "heading": Text {
@@ -71,8 +77,9 @@ export component ViewFrameView {
                     }
                     if block.kind == "text": Text {
                         text: block.text;
-                        font-size: block.size == "lg" ? root.font-size-title * 1.25
-                            : block.size == "xl" ? root.font-size-title * 1.5
+                        font-size:
+                            block.size == "lg" ? root.font-size-title * 1.2
+                            : block.size == "xl" ? root.font-size-title * 1.4
                             : block.size == "sm" ? root.font-size-subtitle
                             : root.font-size-title;
                         color:
@@ -86,9 +93,9 @@ export component ViewFrameView {
                     if block.kind == "spinner": HorizontalLayout {
                         spacing: 8px;
                         Rectangle {
-                            width: 12px;
-                            height: 12px;
-                            border-radius: 6px;
+                            width: 10px;
+                            height: 10px;
+                            border-radius: 5px;
                             background: root.muted-color;
                             opacity: 0.6;
                         }
@@ -99,15 +106,15 @@ export component ViewFrameView {
                         }
                     }
                     if block.kind == "progress": VerticalLayout {
-                        spacing: 4px;
+                        spacing: 2px;
                         if block.has-label: Text {
                             text: block.label;
                             color: root.muted-color;
                             font-size: root.font-size-subtitle;
                         }
                         Rectangle {
-                            height: 6px;
-                            border-radius: 3px;
+                            height: 5px;
+                            border-radius: 2.5px;
                             background: root.border-color;
                             Rectangle {
                                 x: 0;
@@ -117,7 +124,7 @@ export component ViewFrameView {
                                     block.has-progress-value
                                         ? parent.width * max(0, min(1, block.progress-value))
                                         : parent.width * 0.3;
-                                border-radius: 3px;
+                                border-radius: 2.5px;
                                 background: root.foreground-color;
                             }
                         }

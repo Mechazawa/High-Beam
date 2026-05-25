@@ -140,6 +140,11 @@ export component QueryWindow inherits Window {
 
     callback query-edited(string);
     callback escape-pressed();
+    // Fires from ViewFrameView when the user presses Esc inside a
+    // pushed plugin view. The Rust side pops the top frame from the
+    // view stack (which fires the JS unmounted via the close-signal
+    // and returns the window to VIEW-QUERY when the stack drains).
+    callback pop-view();
     // Fires from Rust just before the window hides — Esc, focus loss,
     // action-induced hide all go through it. Carries the current input text
     // so app.rs can decide whether to persist it to query history.
@@ -430,7 +435,7 @@ export component QueryWindow inherits Window {
             font-size-title: root.font-size-title;
             font-size-subtitle: root.font-size-subtitle;
 
-            escape-pressed => { root.escape-pressed(); }
+            pop-view => { root.pop-view(); }
         }
 
         // ---- Install-confirmation view ----

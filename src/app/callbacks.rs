@@ -107,6 +107,18 @@ pub(super) fn wire_window_callbacks(
 
     wire_history_callbacks(window, &history_state, history_db.as_ref(), &settings);
 
+    // Esc inside a pushed plugin view pops the top frame instead of
+    // hiding the launcher. The frame's close_signal fires (so the
+    // plugin's JS unmounted runs); when the last frame leaves the
+    // stack pop_view_frame switches the window back to VIEW-QUERY.
+    let weak_for_pop = window.as_weak();
+    let view_stack_for_pop = Arc::clone(&view_stack);
+    let tx_for_pop = tx.clone();
+
+    window.on_pop_view(move || {
+        pop_view_frame(&view_stack_for_pop, &tx_for_pop, &weak_for_pop);
+    });
+
     // Install — confirmed.
     let confirm_state_install = Arc::clone(&confirm_state);
     let weak_confirm_install = window.as_weak();
@@ -391,6 +403,7 @@ pub(super) fn build_view_bridge(
     };
     Arc::new(RuntimeBridge {
         plugin_name: plugin_name.to_owned(),
+        close_signal: tokio_util::sync::CancellationToken::new(),
         paint_tree,
         dispatch,
         close_request,
