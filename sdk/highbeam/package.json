@@ -1,6 +1,6 @@
 {
     "name": "@high-beam/sdk",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "description": "TypeScript declarations and Node-compatible test stubs for the highbeam:* plugin SDK.",
     "type": "module",
     "types": "index.d.ts",

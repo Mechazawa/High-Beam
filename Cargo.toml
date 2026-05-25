@@ -1,6 +1,6 @@
 [package]
 name = "high-beam"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 license = "MIT"
 build = "build.rs"
@@ -136,6 +136,34 @@ info-plist-path = "bundle/Info.plist"
 window-size = { width = 660, height = 400 }
 app-position = { x = 180, y = 170 }
 application-folder-position = { x = 480, y = 170 }
+
+# .rpm packaging via cargo-generate-rpm. cargo-packager 0.11 has no rpm
+# backend, so we drive it separately. The `bundle-rpm` Justfile recipe
+# stages files into `target/rpm-stage/` mirroring the on-disk install
+# layout used by the .deb / tarball, then `cargo generate-rpm` reads this
+# table to produce the package. Fields not listed here (Name, Version,
+# Summary, License, URL) are inherited from [package].
+#
+# `auto-req = "no"` because we list the runtime deps explicitly under
+# `[…requires]` below — the auto-discoverer over-collects every libc and
+# linker SONAME ELF reference, and Fedora/openSUSE name those differently
+# enough that the auto list often won't resolve cleanly.
+[package.metadata.generate-rpm]
+auto-req = "no"
+assets = [
+    { source = "target/rpm-stage/usr/bin/highbeam",                       dest = "/usr/bin/highbeam",                                mode = "755" },
+    { source = "target/rpm-stage/usr/share/applications/highbeam.desktop", dest = "/usr/share/applications/highbeam.desktop",        mode = "644" },
+    { source = "target/rpm-stage/usr/lib/systemd/user/highbeam.service",   dest = "/usr/lib/systemd/user/highbeam.service",          mode = "644" },
+    { source = "target/rpm-stage/usr/share/highbeam/themes/*",             dest = "/usr/share/highbeam/themes/",                     mode = "644" },
+    { source = "target/rpm-stage/usr/share/highbeam/plugins/**/*",         dest = "/usr/share/highbeam/plugins/",                    mode = "644" },
+]
+
+# Fedora / openSUSE package names for the same runtime libs the .deb / pacman
+# tables list under their distro-specific spellings.
+[package.metadata.generate-rpm.requires]
+openssl-libs = "*"
+fontconfig = "*"
+libxkbcommon = "*"
 
 # Release-profile knobs for the bundled binary. The launcher is mostly idle
 # between keystrokes, so single-digit-ms wins from cross-crate optimisation

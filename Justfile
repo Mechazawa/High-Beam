@@ -99,25 +99,62 @@ bundle-arch:
 bundle-deb:
     cargo packager --release --formats deb
 
-# .rpm is the gap in cargo-packager's coverage (no rpm backend in
-# 0.11.x). The fallback is `cargo-generate-rpm` — install it once
-# (`cargo install cargo-generate-rpm`) and run this recipe. Config
-# lives under [package.metadata.generate-rpm] when we're ready to wire
-# it up; for now this recipe prints the install hint and exits 0 so
-# `bundle-linux` doesn't fail on the missing backend.
+# .rpm via cargo-generate-rpm — cargo-packager 0.11 has no rpm backend,
+# so we drive it ourselves. Stages files into `target/rpm-stage/`
+# mirroring the .deb / tarball install layout; `cargo generate-rpm`
+# then reads `[package.metadata.generate-rpm]` in Cargo.toml.
+#
+# The plugin filter (echo / echo-ts / slow-echo / frecency-demo) and
+# the per-file skiplist (package.json, tsconfig, vitest config, …)
+# mirror `bundle-tarball` exactly so the three Linux artifacts ship
+# the same set of plugins. If `bundle-tarball`'s logic changes, keep
+# the two in sync.
+#
+# Exits 0 with an install hint when cargo-generate-rpm isn't on PATH
+# so `bundle-linux` keeps working on a stock dev box; CI installs the
+# tool unconditionally via taiki-e/install-action.
 bundle-rpm:
     #!/usr/bin/env bash
     set -euo pipefail
-    if command -v cargo-generate-rpm >/dev/null 2>&1; then
-        cargo build --release
-        cargo generate-rpm
-    else
+    if ! command -v cargo-generate-rpm >/dev/null 2>&1; then
         echo "bundle-rpm: cargo-generate-rpm not installed."
         echo "  cargo install cargo-generate-rpm"
-        echo "  (then add [package.metadata.generate-rpm] to Cargo.toml"
-        echo "  — see docs/distribution.md)"
         exit 0
     fi
+    cargo build --release
+    stage="target/rpm-stage"
+    rm -rf "$stage"
+    mkdir -p \
+        "$stage/usr/bin" \
+        "$stage/usr/share/highbeam/plugins" \
+        "$stage/usr/share/highbeam/themes" \
+        "$stage/usr/share/applications" \
+        "$stage/usr/lib/systemd/user"
+    cp target/release/high-beam "$stage/usr/bin/highbeam"
+    chmod +x "$stage/usr/bin/highbeam"
+    for plugin in plugins/*/; do
+        name_only="$(basename "$plugin")"
+        case "$name_only" in
+            echo|echo-ts|slow-echo|frecency-demo) continue ;;
+        esac
+        dest="$stage/usr/share/highbeam/plugins/$name_only"
+        mkdir -p "$dest"
+        for f in "$plugin"manifest.json "$plugin"plugin.js "$plugin"*.json; do
+            [ -f "$f" ] || continue
+            case "$(basename "$f")" in
+                package.json|package-lock.json|tsconfig.json) continue ;;
+                vitest.config.json) continue ;;
+            esac
+            cp "$f" "$dest/"
+        done
+    done
+    cp themes/*.toml "$stage/usr/share/highbeam/themes/"
+    cp packaging/linux/highbeam.desktop "$stage/usr/share/applications/"
+    cp packaging/linux/highbeam.service "$stage/usr/lib/systemd/user/"
+    # `-o target/release/` lands the .rpm next to the .deb / pacman
+    # tarball so the CI artifact-upload glob (`target/release/*.rpm`)
+    # picks it up without a separate path.
+    cargo generate-rpm --output target/release/
 
 # Re-render bundle/icon.svg into bundle/icon.png (1024x1024) and
 # bundle/icon.icns (multi-resolution). cargo-packager 0.11 needs the

@@ -156,6 +156,13 @@ jobs:
         with:
           tool: cargo-packager
 
+      # `bundle-rpm` runs `cargo generate-rpm`; ship a pre-built binary
+      # rather than `cargo install` from source (~2 min) on every run.
+      - name: Install cargo-generate-rpm
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-generate-rpm
+
       # These four recipes are added by the sibling agent wiring Linux
       # packaging. They wrap `cargo packager --release --formats <fmt>` so
       # the workflow stays format-agnostic. If a recipe is renamed, update
@@ -358,4 +365,5 @@ jobs:
           files: |
             dist/macos/*.dmg
             dist/linux/**/*.deb
+            dist/linux/**/*.rpm
             dist/linux/**/*.tar.gz
