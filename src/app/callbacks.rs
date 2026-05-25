@@ -508,6 +508,18 @@ pub(super) fn build_view_bridge(
             .log_debug("views: paint_tree invoke_from_event_loop");
         })
     };
+    let paint_error = {
+        let plugin = plugin_name.to_owned();
+        let weak = slint_weak.clone();
+        Box::new(move |handle: u64, message: String, stack: String| {
+            let plugin = plugin.clone();
+            let weak = weak.clone();
+            slint::invoke_from_event_loop(move || {
+                paint_view_error(&plugin, handle, &message, &stack, &weak);
+            })
+            .log_debug("views: paint_error invoke_from_event_loop");
+        })
+    };
     let dispatch = {
         let plugin = plugin_name.to_owned();
         let view_stack = Arc::clone(&view_stack);
@@ -542,9 +554,53 @@ pub(super) fn build_view_bridge(
         plugin_name: plugin_name.to_owned(),
         close_signal: tokio_util::sync::CancellationToken::new(),
         paint_tree,
+        paint_error,
         dispatch,
         close_request,
     })
+}
+
+/// Slint-thread handler for `__highbeam_paint_error(handle, message,
+/// stack)`. Builds a synthetic error frame body in place of the
+/// plugin's normal render, so an uncaught throw surfaces visibly
+/// instead of leaving the view stuck on its last successful paint.
+/// Esc dismisses the error frame the same way it dismisses any
+/// other view (the JS side already ran `closeFrame` before firing
+/// `paint_error`).
+fn paint_view_error(plugin: &str, handle: u64, message: &str, stack: &str, weak: &slint::Weak<QueryWindow>) {
+    tracing::error!(%plugin, handle, %message, "views: render error");
+    if !stack.is_empty() {
+        tracing::error!(%plugin, handle, stack = %stack, "views: render error stack");
+    }
+    let Some(window) = weak.upgrade() else { return };
+
+    // `text` carries the plugin name + summary; `label` carries the
+    // collapsed stack. Slint's ViewBlock renders kind="error" with a
+    // red banner and monospaced stack body.
+    let blocks = vec![ViewBlock {
+        kind: "error".into(),
+        text: message.into(),
+        has_text: true,
+        label: stack.into(),
+        has_label: !stack.is_empty(),
+        tone: String::new().into(),
+        size: String::new().into(),
+        value: String::new().into(),
+        id: String::new().into(),
+        on_click_id: 0,
+        on_change_id: 0,
+        on_submit_id: 0,
+        has_value: false,
+        has_on_click: false,
+        has_on_change: false,
+        has_on_submit: false,
+        progress_value: -1.0,
+        has_progress_value: false,
+    }];
+    window.set_view_frame_title(format!("{plugin} crashed").into());
+    window.set_view_has_title(true);
+    window.set_view_blocks(ModelRc::new(VecModel::from(blocks)));
+    window.invoke_show_view_frame();
 }
 
 /// Slint-thread handler for `__highbeam_paint_tree(handle, tree_json)`.

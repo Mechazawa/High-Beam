@@ -201,13 +201,39 @@ export component ViewFrameView {
                             }
                         }
                     }
+                    if block.kind == "error": Rectangle {
+                        border-width: 1px;
+                        border-color: root.error-color;
+                        border-radius: 4px;
+                        background: root.error-color;
+                        opacity: 0.08;
+                        VerticalLayout {
+                            padding: 8px;
+                            spacing: 4px;
+                            Text {
+                                text: block.text;
+                                font-size: root.font-size-title;
+                                font-weight: 700;
+                                color: root.error-color;
+                                wrap: word-wrap;
+                            }
+                            if block.has-label: Text {
+                                text: block.label;
+                                font-family: "Menlo";
+                                font-size: root.font-size-subtitle;
+                                color: root.foreground-color;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
                     // Fallback for not-yet-rendered block kinds.
                     if block.kind != "heading"
                         && block.kind != "text"
                         && block.kind != "spinner"
                         && block.kind != "progress"
                         && block.kind != "button"
-                        && block.kind != "input": Text {
+                        && block.kind != "input"
+                        && block.kind != "error": Text {
                         text: "[" + block.kind + "]";
                         color: root.muted-color;
                         font-size: root.font-size-subtitle;

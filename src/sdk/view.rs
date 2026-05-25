@@ -47,6 +47,13 @@ pub struct RuntimeBridge {
     /// Arguments: `(handle, tree_json)`. The closure parses + paints on
     /// the Slint thread.
     pub paint_tree: Box<dyn Fn(u64, String) + Send + Sync + 'static>,
+    /// Called when an uncaught throw bubbles out of `setup`,
+    /// `mounted`, `render`, an event handler, or `unmounted`. The host
+    /// swaps the frame's body for a host-rendered error panel showing
+    /// the plugin name, message, and stack — the user sees what
+    /// broke rather than a silently-collapsed view.
+    /// Arguments: `(handle, message, stack)`.
+    pub paint_error: Box<dyn Fn(u64, String, String) + Send + Sync + 'static>,
     /// Called when a closure inside a view's `on*` handler (or the
     /// closure's eventual return value) yields an `Action`. Receives the
     /// JSON-serialised action; the host parses + routes it.
@@ -128,7 +135,7 @@ fn make_block<'js>(ctx: &Ctx<'js>, kind: &str, opts: Value<'js>) -> JsResult<Obj
 /// bridge globals.
 pub fn install_runtime(ctx: &Ctx<'_>, bridge: Arc<RuntimeBridge>) -> JsResult<()> {
     install_paint_tree(ctx, Arc::clone(&bridge))?;
-    install_paint_error(ctx, bridge.plugin_name.clone())?;
+    install_paint_error(ctx, Arc::clone(&bridge))?;
     install_dispatch(ctx, Arc::clone(&bridge))?;
     install_close_request(ctx, bridge)?;
 
@@ -145,9 +152,9 @@ fn install_paint_tree(ctx: &Ctx<'_>, bridge: Arc<RuntimeBridge>) -> JsResult<()>
     Ok(())
 }
 
-fn install_paint_error(ctx: &Ctx<'_>, plugin_name: String) -> JsResult<()> {
+fn install_paint_error(ctx: &Ctx<'_>, bridge: Arc<RuntimeBridge>) -> JsResult<()> {
     let paint = Function::new(ctx.clone(), move |handle: u64, message: String, stack: String| {
-        tracing::error!(plugin = %plugin_name, handle, %message, %stack, "views: render error");
+        (bridge.paint_error)(handle, message, stack);
         Ok::<_, rquickjs::Error>(())
     })?;
     ctx.globals().set("__highbeam_paint_error", paint)?;
@@ -258,6 +265,7 @@ mod tests {
             plugin_name: plugin.to_owned(),
             close_signal: tokio_util::sync::CancellationToken::new(),
             paint_tree: Box::new(|_handle, _tree| {}),
+            paint_error: Box::new(|_handle, _message, _stack| {}),
             dispatch: Box::new(|_action_json| {}),
             close_request: Box::new(|_handle| {}),
         })
