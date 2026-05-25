@@ -17,6 +17,7 @@ use crate::plugins::result::RankedResult;
 use crate::query_history::{InputAction, QueryHistoryDb, QueryHistoryState};
 use crate::settings_ui::SettingsController;
 use crate::ui::ResultRow;
+use crate::views::{PushError, ViewFrame, ViewStack};
 use crate::window;
 
 use super::{ConfirmState, HostMessage};
@@ -31,6 +32,7 @@ pub(super) struct WindowCallbackCtx {
     pub confirm_state: ConfirmState,
     pub history_db: Option<QueryHistoryDb>,
     pub history_state: Arc<Mutex<QueryHistoryState>>,
+    pub view_stack: Arc<Mutex<ViewStack>>,
 }
 
 pub(super) fn wire_window_callbacks(
@@ -46,6 +48,7 @@ pub(super) fn wire_window_callbacks(
         confirm_state,
         history_db,
         history_state,
+        view_stack,
     } = ctx;
 
     let latest_id_for_main = Arc::clone(latest_id);
@@ -79,6 +82,7 @@ pub(super) fn wire_window_callbacks(
     let history_db_for_invoke = history_db.clone();
     let history_state_for_invoke = Arc::clone(&history_state);
     let settings_for_invoke = settings.clone();
+    let view_stack_for_invoke = Arc::clone(&view_stack);
 
     window.on_invoke_selected(move |meta, control, shift, alt| {
         let mods = (u8::from(meta) * crate::hotkey::MOD_META)
@@ -95,6 +99,7 @@ pub(super) fn wire_window_callbacks(
             &tx_for_invoke,
             history_db_for_invoke.as_ref(),
             &history_state_for_invoke,
+            &view_stack_for_invoke,
             alt_held,
         );
     });
@@ -234,6 +239,7 @@ fn invoke_selected(
     host_tx: &mpsc::UnboundedSender<HostMessage>,
     history_db: Option<&QueryHistoryDb>,
     history_state: &Arc<Mutex<QueryHistoryState>>,
+    view_stack: &Arc<Mutex<ViewStack>>,
     alt_held: bool,
 ) {
     let Some(w) = weak.upgrade() else { return };
@@ -279,7 +285,7 @@ fn invoke_selected(
     match actions::execute(&action) {
         Ok(outcome) => {
             if let Some(db) = frecency_db {
-                spawn_pick_bump(db, plugin_name, result_key);
+                spawn_pick_bump(db, plugin_name.clone(), result_key);
             }
 
             match outcome {
@@ -309,12 +315,74 @@ fn invoke_selected(
                         tracing::error!("plugins: runtime thread exited; host task dropped",);
                     }
                 }
+                actions::ActionOutcome::ShowView { handle, props, reset } => {
+                    push_view_frame(view_stack, &plugin_name, handle, props, reset);
+                }
+                actions::ActionOutcome::CloseView => {
+                    pop_view_frame(view_stack);
+                }
             }
         }
         Err(err) => {
             tracing::error!(plugin = %plugin_name, %err, "plugins: action failed");
             window::hide_and_persist_position(&w, settings);
         }
+    }
+}
+
+/// Push a freshly-minted [`ViewFrame`] onto the shared stack. Stage 2 stops
+/// at logging the push and does not yet drive the launcher window into
+/// view-mode — Slint rendering arrives with the protocol + UI stages. A
+/// rejected push (stack at cap) logs an ERROR so the action is observably
+/// dropped instead of silently lost.
+fn push_view_frame(
+    view_stack: &Arc<Mutex<ViewStack>>,
+    plugin_name: &str,
+    handle: u64,
+    props: serde_json::Value,
+    reset: bool,
+) {
+    let Ok(mut stack) = view_stack.lock() else {
+        tracing::error!("views: stack lock poisoned; push dropped");
+        return;
+    };
+    let frame = ViewFrame::new(plugin_name.to_owned(), handle, props);
+
+    match stack.push(frame, reset) {
+        Ok(()) => tracing::info!(
+            plugin = %plugin_name,
+            handle,
+            reset,
+            depth = stack.depth(),
+            "views: frame pushed",
+        ),
+        Err(PushError::AtCap) => tracing::error!(
+            plugin = %plugin_name,
+            handle,
+            depth = stack.depth(),
+            "views: push rejected at stack cap",
+        ),
+    }
+}
+
+/// Pop the topmost frame off the shared stack. A no-op on an empty stack
+/// (and not an error — a stale `closeView` after the user already Esc'd
+/// out is a benign race).
+fn pop_view_frame(view_stack: &Arc<Mutex<ViewStack>>) {
+    let Ok(mut stack) = view_stack.lock() else {
+        tracing::error!("views: stack lock poisoned; pop dropped");
+        return;
+    };
+
+    if let Some(frame) = stack.pop() {
+        tracing::info!(
+            plugin = %frame.plugin_name,
+            handle = frame.handle,
+            depth = stack.depth(),
+            "views: frame popped",
+        );
+    } else {
+        tracing::debug!("views: pop on empty stack");
     }
 }
 

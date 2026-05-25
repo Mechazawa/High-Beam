@@ -99,6 +99,25 @@ pub enum Action {
     /// A no-op result that just sits in the list (e.g. version readout).
     #[serde(rename = "noop")]
     Noop,
+    /// Push a view frame for the producing plugin. `handle` is opaque to the
+    /// host — the SDK mints it per plugin context and looks it up via
+    /// `__highbeam_view_registry` on `globalThis` when the host asks for a
+    /// render. `props` is whatever the caller passed; functions inside are
+    /// silently dropped by serde for v1 (the closure-prop pattern lands with
+    /// the reactivity runtime). `reset = true` clears the stack before pushing
+    /// so the new frame becomes the only frame.
+    #[serde(rename = "showView")]
+    ShowView {
+        handle: u64,
+        #[serde(default)]
+        props: serde_json::Value,
+        #[serde(default)]
+        reset: bool,
+    },
+    /// Pop the top view frame. `render → null` from inside a view does the
+    /// same thing.
+    #[serde(rename = "closeView")]
+    CloseView,
 }
 
 /// A result enriched with the plugin name that produced it. Two plugins
@@ -175,5 +194,43 @@ mod tests {
             Some(Action::OpenUrl { url }) => assert_eq!(url, "https://explain.example"),
             other => panic!("expected Some(OpenUrl), got {other:?}"),
         }
+    }
+
+    #[test]
+    fn show_view_round_trips_with_handle_props_and_reset() {
+        let json = r#"{"kind":"showView","handle":42,"props":{"id":1},"reset":true}"#;
+        let parsed: Action = serde_json::from_str(json).unwrap();
+
+        match parsed {
+            Action::ShowView { handle, props, reset } => {
+                assert_eq!(handle, 42);
+                assert_eq!(props, serde_json::json!({ "id": 1 }));
+                assert!(reset);
+            }
+            other => panic!("expected ShowView, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn show_view_defaults_props_and_reset_when_omitted() {
+        let json = r#"{"kind":"showView","handle":7}"#;
+        let parsed: Action = serde_json::from_str(json).unwrap();
+
+        match parsed {
+            Action::ShowView { handle, props, reset } => {
+                assert_eq!(handle, 7);
+                assert_eq!(props, serde_json::Value::Null);
+                assert!(!reset);
+            }
+            other => panic!("expected ShowView, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn close_view_round_trips() {
+        let json = r#"{"kind":"closeView"}"#;
+        let parsed: Action = serde_json::from_str(json).unwrap();
+
+        assert!(matches!(parsed, Action::CloseView));
     }
 }

@@ -10,6 +10,11 @@
 use rquickjs::module::{Declarations, Exports, ModuleDef};
 use rquickjs::{Ctx, Function, Object, Result as JsResult, Value};
 
+/// `globalThis` slot the SDK stashes the view registry on. Per `QuickJS`
+/// context (so per plugin), so handles are unique within a plugin and the
+/// host pairs `(plugin_name, handle)` to look a frame back up.
+pub(crate) const VIEW_REGISTRY_GLOBAL: &str = "__highbeam_view_registry";
+
 pub struct ActionsModule;
 
 impl ModuleDef for ActionsModule {
@@ -75,19 +80,24 @@ impl ModuleDef for ActionsModule {
     }
 }
 
-/// Build a `showView` action object. `props` defaults to `{}` (matches the
-/// vitest stub); `opts.reset` defaults to `false`. Later stages swap the
-/// inlined `view` for a per-plugin handle id; Stage 1 keeps the view object
-/// in-place so the wire shape is pinned without minting a registry yet.
+/// Build a `showView` action object. The view literal is stashed in a
+/// per-context registry on `globalThis` and the action carries only the
+/// freshly-minted `handle` — opaque to the host but enough to ask the
+/// plugin's `QuickJS` context to render or close that specific view.
+///
+/// `props` defaults to `{}` when undefined; `opts.reset` defaults to
+/// `false`.
 fn build_show_view<'js>(
     ctx: &Ctx<'js>,
     view: Value<'js>,
     props: Value<'js>,
     opts: &Value<'js>,
 ) -> JsResult<Object<'js>> {
+    let handle = register_view(ctx, view)?;
+
     let obj = Object::new(ctx.clone())?;
     obj.set("kind", "showView")?;
-    obj.set("view", view)?;
+    obj.set("handle", handle)?;
 
     let props_value = if props.is_undefined() || props.is_null() {
         Object::new(ctx.clone())?.into_value()
@@ -111,4 +121,40 @@ fn build_close_view<'js>(ctx: &Ctx<'js>) -> JsResult<Object<'js>> {
     let obj = Object::new(ctx.clone())?;
     obj.set("kind", "closeView")?;
     Ok(obj)
+}
+
+/// Mint a fresh handle for `view`, stash the view on the per-context
+/// registry, and return the handle. Handles start at `1` (zero is
+/// reserved as a sentinel for "not a view" should the host ever need to
+/// distinguish). Returns the handle as a `u32`-safe number — well within
+/// the JS Number safe-integer range and matches the host enum's `u64`
+/// field on the receive side.
+fn register_view<'js>(ctx: &Ctx<'js>, view: Value<'js>) -> JsResult<i64> {
+    let registry = ensure_registry(ctx)?;
+    let next: i64 = registry.get("nextId").unwrap_or(1);
+    registry.set("nextId", next + 1)?;
+
+    let by_handle: Object<'js> = registry.get("byHandle")?;
+    by_handle.set(next.to_string(), view)?;
+
+    Ok(next)
+}
+
+/// Lazily create the per-context view registry on `globalThis`. Shape:
+/// `{ nextId: <i64>, byHandle: { [handle: string]: ViewDef } }`. Handles
+/// are stringified for the `byHandle` lookup because JS object keys are
+/// strings anyway — coercing them once at insert-time keeps both sides
+/// (host-driven lookups in later stages, debug inspection from the JS
+/// console) symmetrical.
+fn ensure_registry<'js>(ctx: &Ctx<'js>) -> JsResult<Object<'js>> {
+    let globals = ctx.globals();
+
+    if let Ok(existing) = globals.get::<_, Object<'js>>(VIEW_REGISTRY_GLOBAL) {
+        return Ok(existing);
+    }
+    let registry = Object::new(ctx.clone())?;
+    registry.set("nextId", 1i64)?;
+    registry.set("byHandle", Object::new(ctx.clone())?)?;
+    globals.set(VIEW_REGISTRY_GLOBAL, registry.clone())?;
+    Ok(registry)
 }

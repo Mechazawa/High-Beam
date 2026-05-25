@@ -36,6 +36,7 @@ use crate::plugins::result::RankedResult;
 use crate::plugins::runtime::LoadedPlugin;
 use crate::query_history::{QueryHistoryDb, QueryHistoryState};
 use crate::settings_ui::SettingsController;
+use crate::views::ViewStack;
 
 use callbacks::WindowCallbackCtx;
 
@@ -85,6 +86,8 @@ pub fn start(
         .unwrap_or_default();
     let history_state = Arc::new(Mutex::new(QueryHistoryState::new(initial_entries)));
 
+    let view_stack = Arc::new(Mutex::new(ViewStack::new()));
+
     spawn_runtime_thread(
         rx,
         plugins_override,
@@ -107,6 +110,7 @@ pub fn start(
             confirm_state,
             history_db,
             history_state,
+            view_stack,
         },
     );
 
