@@ -92,14 +92,15 @@ jobs:
       # Linux build needs system libs that don't ship in the Ubuntu
       # runner image by default. libxkbcommon is winit's keymap
       # backend; libssl-dev backs reqwest's rustls system-roots
-      # loader. (rustls itself is vendored; the -dev package is for
-      # the system cert store linkage.) pkg-config keeps these
-      # discoverable.
+      # loader (rustls itself is vendored; the -dev package is for
+      # the system cert store linkage); libfontconfig1-dev backs
+      # freedesktop-icons' fontconfig probe used by the Linux icon
+      # fetcher. pkg-config keeps these discoverable.
       - name: Install Linux build deps
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            pkg-config libxkbcommon-dev libssl-dev
+            pkg-config libxkbcommon-dev libssl-dev libfontconfig1-dev
 
       - name: cargo fmt --check
         run: cargo fmt -- --check
