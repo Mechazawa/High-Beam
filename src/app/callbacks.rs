@@ -316,10 +316,10 @@ fn invoke_selected(
                     }
                 }
                 actions::ActionOutcome::ShowView { handle, props, reset } => {
-                    push_view_frame(view_stack, &plugin_name, handle, props, reset);
+                    push_view_frame(view_stack, host_tx, &plugin_name, handle, props, reset);
                 }
                 actions::ActionOutcome::CloseView => {
-                    pop_view_frame(view_stack);
+                    pop_view_frame(view_stack, host_tx);
                 }
             }
         }
@@ -330,13 +330,14 @@ fn invoke_selected(
     }
 }
 
-/// Push a freshly-minted [`ViewFrame`] onto the shared stack. Stage 2 stops
-/// at logging the push and does not yet drive the launcher window into
-/// view-mode — Slint rendering arrives with the protocol + UI stages. A
-/// rejected push (stack at cap) logs an ERROR so the action is observably
-/// dropped instead of silently lost.
+/// Push a freshly-minted [`ViewFrame`] onto the shared stack and dispatch
+/// a [`HostMessage::ViewInit`] to the runtime thread so the plugin's JS
+/// runtime can run `setup → first render → mounted`. A rejected push
+/// (stack at cap) logs an ERROR and does *not* send the `ViewInit` — the
+/// action is observably dropped instead of silently lost.
 fn push_view_frame(
     view_stack: &Arc<Mutex<ViewStack>>,
+    host_tx: &mpsc::UnboundedSender<HostMessage>,
     plugin_name: &str,
     handle: u64,
     props: serde_json::Value,
@@ -346,16 +347,34 @@ fn push_view_frame(
         tracing::error!("views: stack lock poisoned; push dropped");
         return;
     };
+    let props_for_init = props.clone();
     let frame = ViewFrame::new(plugin_name.to_owned(), handle, props);
 
     match stack.push(frame, reset) {
-        Ok(()) => tracing::info!(
-            plugin = %plugin_name,
-            handle,
-            reset,
-            depth = stack.depth(),
-            "views: frame pushed",
-        ),
+        Ok(()) => {
+            tracing::info!(
+                plugin = %plugin_name,
+                handle,
+                reset,
+                depth = stack.depth(),
+                "views: frame pushed",
+            );
+            // Drop the stack lock before posting — the runtime thread
+            // may immediately call back into the bridge globals and try
+            // to grab the same lock.
+            drop(stack);
+
+            if host_tx
+                .send(HostMessage::ViewInit {
+                    plugin: plugin_name.to_owned(),
+                    handle,
+                    props: props_for_init,
+                })
+                .is_err()
+            {
+                tracing::error!("views: runtime thread exited; view init dropped");
+            }
+        }
         Err(PushError::AtCap) => tracing::error!(
             plugin = %plugin_name,
             handle,
@@ -365,24 +384,37 @@ fn push_view_frame(
     }
 }
 
-/// Pop the topmost frame off the shared stack. A no-op on an empty stack
-/// (and not an error — a stale `closeView` after the user already Esc'd
-/// out is a benign race).
-fn pop_view_frame(view_stack: &Arc<Mutex<ViewStack>>) {
+/// Pop the topmost frame off the shared stack and dispatch
+/// [`HostMessage::ViewClose`] so the plugin's JS runtime runs
+/// `unmounted` and clears its per-handle state. A no-op on an empty
+/// stack (and not an error — a stale `closeView` after the user already
+/// Esc'd out is a benign race).
+fn pop_view_frame(view_stack: &Arc<Mutex<ViewStack>>, host_tx: &mpsc::UnboundedSender<HostMessage>) {
     let Ok(mut stack) = view_stack.lock() else {
         tracing::error!("views: stack lock poisoned; pop dropped");
         return;
     };
 
-    if let Some(frame) = stack.pop() {
-        tracing::info!(
-            plugin = %frame.plugin_name,
-            handle = frame.handle,
-            depth = stack.depth(),
-            "views: frame popped",
-        );
-    } else {
+    let Some(frame) = stack.pop() else {
         tracing::debug!("views: pop on empty stack");
+        return;
+    };
+    tracing::info!(
+        plugin = %frame.plugin_name,
+        handle = frame.handle,
+        depth = stack.depth(),
+        "views: frame popped",
+    );
+    drop(stack);
+
+    if host_tx
+        .send(HostMessage::ViewClose {
+            plugin: frame.plugin_name,
+            handle: frame.handle,
+        })
+        .is_err()
+    {
+        tracing::error!("views: runtime thread exited; view close dropped");
     }
 }
 

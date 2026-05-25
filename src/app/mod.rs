@@ -51,9 +51,28 @@ pub struct PluginHost {
 pub(super) type ConfirmState = Arc<Mutex<Option<PendingConfirmation>>>;
 
 pub(super) enum HostMessage {
-    Query { id: u64, input: String },
+    Query {
+        id: u64,
+        input: String,
+    },
     Task(actions::HostTask),
     Shutdown,
+    /// Drive a freshly-pushed view frame through its `setup → first render
+    /// → mounted` sequence. Sent by `callbacks::push_view_frame`. The
+    /// rendered tree comes back via the JS runtime's `__highbeam_paint_tree`
+    /// bridge — Stage 4a still logs at DEBUG; Stage 4c paints to Slint.
+    ViewInit {
+        plugin: String,
+        handle: u64,
+        props: serde_json::Value,
+    },
+    /// Tear down a view frame on the JS side. Sent by
+    /// `callbacks::pop_view_frame` and (later) by the
+    /// `__highbeam_close_view_request` bridge when `render → null`.
+    ViewClose {
+        plugin: String,
+        handle: u64,
+    },
 }
 
 /// Spin up the plugin runtime, wire callbacks to the given window, and
@@ -204,6 +223,28 @@ fn spawn_runtime_thread(
                                 &settings,
                             )
                             .await;
+                        }
+                        HostMessage::ViewInit { plugin, handle, props } => {
+                            let plugins = registry.snapshot().await;
+
+                            if let Some(p) = plugins.iter().find(|p| p.manifest.name == plugin) {
+                                if let Err(err) = p.view_init(handle, &props).await {
+                                    tracing::error!(%plugin, handle, %err, "views: init failed");
+                                }
+                            } else {
+                                tracing::warn!(%plugin, handle, "views: init for unknown plugin");
+                            }
+                        }
+                        HostMessage::ViewClose { plugin, handle } => {
+                            let plugins = registry.snapshot().await;
+
+                            if let Some(p) = plugins.iter().find(|p| p.manifest.name == plugin) {
+                                if let Err(err) = p.view_close(handle).await {
+                                    tracing::error!(%plugin, handle, %err, "views: close failed");
+                                }
+                            } else {
+                                tracing::warn!(%plugin, handle, "views: close for unknown plugin");
+                            }
                         }
                         HostMessage::Shutdown => {
                             if let Some(prev) = current_cancel.take() {

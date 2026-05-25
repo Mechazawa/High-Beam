@@ -402,6 +402,49 @@ impl LoadedPlugin {
         rx
     }
 
+    /// Run the JS view runtime's `init(handle, props)` for a freshly-pushed
+    /// view frame. Lazily installs the runtime + bridge globals on first
+    /// use. Triggers the plugin's `setup → first render → mounted`
+    /// sequence; the rendered tree comes back to the host via the
+    /// `__highbeam_paint_tree` bridge.
+    ///
+    /// # Errors
+    ///
+    /// Propagates JS errors from installing the runtime or invoking
+    /// `init` (including any uncaught throw from the plugin's `setup`
+    /// or first `render`).
+    pub async fn view_init(&self, handle: u64, props: &JsonValue) -> Result<(), PluginError> {
+        let plugin_name = self.manifest.name.clone();
+        let props_json = props.to_string();
+        async_with!(self.context => |ctx| {
+            crate::sdk::view::install_runtime(&ctx, plugin_name)
+                .catch(&ctx)
+                .map_err(|err| PluginError::Js(format!("install view runtime: {err}")))?;
+            crate::sdk::view::invoke_init(&ctx, handle, &props_json)
+                .catch(&ctx)
+                .map_err(|err| PluginError::Js(format!("view init: {err}")))?;
+            Ok::<_, PluginError>(())
+        })
+        .await
+    }
+
+    /// Tear down a view frame on the JS side — runs `unmounted`, fires
+    /// the mounted-signal's abort, and drops the instance + its registry
+    /// entry so the view object itself becomes GC-eligible.
+    ///
+    /// # Errors
+    ///
+    /// Propagates JS errors from invoking `close`.
+    pub async fn view_close(&self, handle: u64) -> Result<(), PluginError> {
+        async_with!(self.context => |ctx| {
+            crate::sdk::view::invoke_close(&ctx, handle)
+                .catch(&ctx)
+                .map_err(|err| PluginError::Js(format!("view close: {err}")))?;
+            Ok::<_, PluginError>(())
+        })
+        .await
+    }
+
     /// Whether this plugin exported the requested hook. Callers can skip
     /// scheduling work for plugins that won't react.
     #[must_use]
