@@ -70,6 +70,7 @@ pub fn format_hotkey_spec(mods: KeyMods, key: &str) -> Option<String> {
     }
 
     out.push_str(&canonical);
+
     Some(out)
 }
 
@@ -163,6 +164,7 @@ fn is_function_key(name: &str) -> bool {
     let Some(rest) = name.strip_prefix('F') else {
         return false;
     };
+
     !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit())
 }
 

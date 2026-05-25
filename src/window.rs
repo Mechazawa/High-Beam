@@ -37,6 +37,7 @@ fn quit_if_once() {
     if !ONCE_MODE.load(Ordering::Relaxed) {
         return;
     }
+
     // `slint::quit_event_loop` would do the graceful exit dance — return
     // from `run_event_loop_until_quit`, fall out of `daemon::run`, drop
     // the window. On Linux Wayland that drop crashes with SIGSEGV in
@@ -65,6 +66,7 @@ static LAST_SHOW_MS: AtomicU64 = AtomicU64::new(0);
 fn mark_show_time() {
     let start = EPOCH.get_or_init(Instant::now);
     let ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+
     LAST_SHOW_MS.store(ms, Ordering::Relaxed);
 }
 
@@ -73,7 +75,9 @@ fn ms_since_show() -> u64 {
     let Some(start) = EPOCH.get() else {
         return u64::MAX;
     };
+
     let now_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+
     now_ms.saturating_sub(LAST_SHOW_MS.load(Ordering::Relaxed))
 }
 
@@ -90,6 +94,7 @@ fn ms_since_show() -> u64 {
 pub(crate) fn configure(window: &QueryWindow, settings: SettingsController) {
     let weak_for_esc = window.as_weak();
     let settings_for_esc = settings.clone();
+
     window.on_escape_pressed(move || {
         if let Some(w) = weak_for_esc.upgrade() {
             hide_and_persist_position(&w, &settings_for_esc);
@@ -97,6 +102,7 @@ pub(crate) fn configure(window: &QueryWindow, settings: SettingsController) {
     });
 
     let weak_for_drag = window.as_weak();
+
     window.on_request_window_drag(move || {
         if let Some(w) = weak_for_drag.upgrade() {
             start_native_drag(&w);
@@ -105,6 +111,7 @@ pub(crate) fn configure(window: &QueryWindow, settings: SettingsController) {
 
     let weak_for_recenter = window.as_weak();
     let settings_for_recenter = settings.clone();
+
     window.on_recenter_window(move || {
         settings_for_recenter.clear_launcher_position();
 
@@ -136,6 +143,7 @@ pub(crate) fn configure(window: &QueryWindow, settings: SettingsController) {
     // instead of Slint's broken Wayland `hide()`.
     let weak_for_focus = window.as_weak();
     let settings_for_focus = settings;
+
     window.window().on_winit_window_event(move |_slint_win, event| {
         match event {
             winit::event::WindowEvent::Focused(true) => {
@@ -165,11 +173,13 @@ pub(crate) fn configure(window: &QueryWindow, settings: SettingsController) {
                     if w.get_current_view() != 0 {
                         return EventResult::Propagate;
                     }
+
                     hide_and_persist_position(&w, &settings_for_focus);
                 }
             }
             _ => {}
         }
+
         EventResult::Propagate
     });
 
@@ -221,6 +231,7 @@ pub(crate) fn show(window: &QueryWindow, settings: &SettingsController, activati
         tracing::error!(%err, "failed to show window");
         return;
     }
+
     mark_show_time();
     apply_saved_or_centered_position(window, settings);
     #[cfg(target_os = "macos")]
@@ -263,6 +274,7 @@ pub(crate) fn hide(window: &QueryWindow) {
     if let Err(err) = window.hide() {
         tracing::error!(%err, "failed to hide window");
     }
+
     quit_if_once();
 }
 
@@ -295,6 +307,7 @@ pub(crate) fn hide_and_persist_position(window: &QueryWindow, settings: &Setting
             }
         }
     }
+
     hide(window);
 }
 
@@ -370,6 +383,7 @@ fn monitor_rects(window: &QueryWindow) -> Vec<MonitorRect> {
                 .map(|m| {
                     let pos = m.position();
                     let size = m.size();
+
                     MonitorRect {
                         x: pos.x,
                         y: pos.y,
@@ -403,6 +417,7 @@ pub(crate) fn position_visible_on_any_monitor(pos: WindowPosition, monitors: &[M
     if monitors.is_empty() {
         return false;
     }
+
     monitors.iter().any(|m| {
         // Inclusive on the leading edge, exclusive on the trailing — a
         // window at exactly the bottom-right pixel of a monitor has its
@@ -522,12 +537,15 @@ pub(crate) fn decode_icon(spec: Option<&str>) -> Image {
     let Some(spec) = spec else {
         return Image::default();
     };
+
     let Some((mime, b64)) = parse_data_uri(spec) else {
         return Image::default();
     };
+
     let Ok(bytes) = STANDARD.decode(b64) else {
         return Image::default();
     };
+
     decode_bytes(mime, &bytes).unwrap_or_default()
 }
 
@@ -542,10 +560,12 @@ fn decode_bytes(mime: &str, bytes: &[u8]) -> Option<Image> {
     if mime.eq_ignore_ascii_case("image/svg+xml") {
         return Image::load_from_svg_data(bytes).ok();
     }
+
     let img = image::load_from_memory(bytes).ok()?;
     let rgba = img.to_rgba8();
     let (width, height) = rgba.dimensions();
     let buffer = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(rgba.as_raw(), width, height);
+
     Some(Image::from_rgba8(buffer))
 }
 

@@ -14,8 +14,8 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::QueryWindow;
 use crate::daemon::HotkeyRegistration;
-use crate::logging::LogErr;
 use crate::hotkey::{MOD_ALT, MOD_CONTROL, MOD_META, MOD_SHIFT, format_hotkey_spec, slint_flag_for_modifier};
+use crate::logging::LogErr;
 use crate::plugins::manifest::{Manifest, OptionDef, OptionKind};
 use crate::settings::{Settings, WindowPosition};
 use crate::ui::{PluginOption, PluginSlot};
@@ -103,6 +103,7 @@ impl SettingsController {
 
         let ctrl = self.clone();
         let weak = window.as_weak();
+
         window.on_open_settings(move || {
             if let Some(w) = weak.upgrade() {
                 ctrl.refresh_slots(&w);
@@ -113,6 +114,7 @@ impl SettingsController {
 
         let ctrl = self.clone();
         let weak = window.as_weak();
+
         window.on_close_settings(move || {
             // Persist on close — the toggle/set callbacks also persist, but
             // close acts as a final commit point if anything fell through.
@@ -124,6 +126,7 @@ impl SettingsController {
 
         let ctrl = self.clone();
         let weak = window.as_weak();
+
         window.on_select_plugin(move |idx| {
             if let Some(w) = weak.upgrade() {
                 w.set_selected_plugin_index(idx);
@@ -133,6 +136,7 @@ impl SettingsController {
 
         let ctrl = self.clone();
         let weak = window.as_weak();
+
         window.on_toggle_plugin(move |name, enabled| {
             ctrl.set_enabled(&name, enabled);
 
@@ -166,6 +170,7 @@ impl SettingsController {
         // no TextInput focus to preserve.
         let ctrl = self.clone();
         let weak = window.as_weak();
+
         window.on_cycle_option_enum(move |plugin, key| {
             ctrl.set_option_for_kind(&plugin, &key, "");
 
@@ -176,6 +181,7 @@ impl SettingsController {
 
         let ctrl = self.clone();
         let weak = window.as_weak();
+
         window.on_capture_hotkey(move |meta, control, shift, alt, key| -> bool {
             let mods = (u8::from(meta) * MOD_META)
                 | (u8::from(control) * MOD_CONTROL)
@@ -184,6 +190,7 @@ impl SettingsController {
             let Some(spec) = format_hotkey_spec(mods, key.as_str()) else {
                 return false;
             };
+
             ctrl.set_hotkey(&spec);
             ctrl.reregister_hotkey(&spec);
 
@@ -195,6 +202,7 @@ impl SettingsController {
 
         let ctrl = self.clone();
         let weak = window.as_weak();
+
         window.on_reset_hotkey_to_default(move || {
             ctrl.set_hotkey(crate::settings::DEFAULT_HOTKEY);
             ctrl.reregister_hotkey(crate::settings::DEFAULT_HOTKEY);
@@ -206,6 +214,7 @@ impl SettingsController {
 
         let ctrl = self.clone();
         let weak = window.as_weak();
+
         window.on_cycle_alt_action_modifier(move || {
             ctrl.cycle_alt_action_modifier();
 
@@ -254,6 +263,7 @@ impl SettingsController {
                 .position(|c| *c == current)
                 .unwrap_or(0);
             let next_idx = (idx + 1) % crate::settings::ALT_ACTION_MODIFIER_CHOICES.len();
+
             settings.set_alt_action_modifier(crate::settings::ALT_ACTION_MODIFIER_CHOICES[next_idx]);
         }
 
@@ -427,6 +437,7 @@ impl SettingsController {
                 enabled: settings.is_plugin_enabled_or_default(&m.name, m.default_enabled),
             })
             .collect();
+
         window.set_plugin_slots(ModelRc::new(VecModel::from(slots)));
     }
 
@@ -457,6 +468,7 @@ impl SettingsController {
             .iter()
             .map(|def| option_row(&manifest.name, def, user_opts))
             .collect();
+
         window.set_plugin_options(ModelRc::new(VecModel::from(options)));
     }
 
@@ -492,6 +504,7 @@ impl SettingsController {
         let Some(def) = manifest.parsed_options().defs.iter().find(|d| d.key == key) else {
             return;
         };
+
         let value = match &def.kind {
             OptionKind::Int { min, max, .. } => {
                 let Ok(parsed) = raw.trim().parse::<i64>() else {
@@ -601,6 +614,7 @@ fn option_row(
 fn next_choice(current: &str, choices: &[String]) -> String {
     let idx = choices.iter().position(|c| c == current).unwrap_or(0);
     let next = (idx + 1) % choices.len().max(1);
+
     choices.get(next).cloned().unwrap_or_else(|| current.to_owned())
 }
 

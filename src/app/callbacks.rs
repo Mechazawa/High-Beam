@@ -57,6 +57,7 @@ pub(super) fn wire_window_callbacks(
     // path lock-free in the common case.
     let history_state_for_edit = Arc::clone(&history_state);
     let weak_for_edit = window.as_weak();
+
     window.on_query_edited(move |text| {
         if let Some(w) = weak_for_edit.upgrade()
             && w.get_is_history_preview()
@@ -78,12 +79,14 @@ pub(super) fn wire_window_callbacks(
     let history_db_for_invoke = history_db.clone();
     let history_state_for_invoke = Arc::clone(&history_state);
     let settings_for_invoke = settings.clone();
+
     window.on_invoke_selected(move |meta, control, shift, alt| {
         let mods = (u8::from(meta) * crate::hotkey::MOD_META)
             | (u8::from(control) * crate::hotkey::MOD_CONTROL)
             | (u8::from(shift) * crate::hotkey::MOD_SHIFT)
             | (u8::from(alt) * crate::hotkey::MOD_ALT);
         let alt_held = settings_for_invoke.alt_modifier_held(mods);
+
         invoke_selected(
             &weak_for_invoke,
             &latest,
@@ -101,6 +104,7 @@ pub(super) fn wire_window_callbacks(
     // Install — confirmed.
     let confirm_state_install = Arc::clone(&confirm_state);
     let weak_confirm_install = window.as_weak();
+
     window.on_confirm_install(move || {
         send_confirm_decision(&confirm_state_install, true, &weak_confirm_install);
     });
@@ -108,6 +112,7 @@ pub(super) fn wire_window_callbacks(
     // Install — cancelled.
     let confirm_state_cancel = confirm_state;
     let weak_confirm_cancel = window.as_weak();
+
     window.on_confirm_cancel(move || {
         send_confirm_decision(&confirm_state_cancel, false, &weak_confirm_cancel);
     });
@@ -124,6 +129,7 @@ fn wire_history_callbacks(
 ) {
     let weak_for_up = window.as_weak();
     let history_state_for_up = Arc::clone(history_state);
+
     window.on_history_up(move || {
         let Some(w) = weak_for_up.upgrade() else {
             return;
@@ -140,6 +146,7 @@ fn wire_history_callbacks(
 
     let weak_for_down = window.as_weak();
     let history_state_for_down = Arc::clone(history_state);
+
     window.on_history_down(move || {
         let Some(w) = weak_for_down.upgrade() else {
             return;
@@ -162,6 +169,7 @@ fn wire_history_callbacks(
     let history_db_for_dismiss = history_db.cloned();
     let history_state_for_dismiss = Arc::clone(history_state);
     let settings_for_dismiss = settings.clone();
+
     window.on_persist_dismiss(move |text| {
         if text.is_empty() {
             return;
@@ -203,7 +211,8 @@ fn send_confirm_decision(state: &ConfirmState, decision: bool, weak: &slint::Wea
     };
 
     if let Some(tx) = maybe_tx {
-        tx.send(decision).log_debug("confirm: pending receiver gone before decision");
+        tx.send(decision)
+            .log_debug("confirm: pending receiver gone before decision");
     }
     let weak = weak.clone();
     slint::invoke_from_event_loop(move || {

@@ -154,6 +154,7 @@ fn spawn_ipc_listener(
             Command::Open { activation_token } => {
                 let weak = weak.clone();
                 let settings = settings.clone();
+
                 slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak.upgrade() {
                         window::show(&w, &settings, activation_token.as_deref());
@@ -220,11 +221,15 @@ impl HotkeyRegistration {
             return;
         };
         let new = parse_hotkey_or_default(spec);
-        self.manager.unregister(*current).log_debug("hotkey: unregister previous before reregister");
+        self.manager
+            .unregister(*current)
+            .log_debug("hotkey: unregister previous before reregister");
 
         if let Err(err) = self.manager.register(new) {
             tracing::error!(%err, %spec, "hotkey: re-register failed; restoring previous");
-            self.manager.register(*current).log_warn("hotkey: failed to restore previous binding after failed re-register");
+            self.manager
+                .register(*current)
+                .log_warn("hotkey: failed to restore previous binding after failed re-register");
 
             return;
         }
@@ -282,6 +287,7 @@ fn spawn_hotkey_listener(
             if event.state == HotKeyState::Pressed && Some(event.id) == live_id {
                 let weak = weak.clone();
                 let settings = settings.clone();
+
                 slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak.upgrade() {
                         // The macOS hotkey path doesn't use an activation

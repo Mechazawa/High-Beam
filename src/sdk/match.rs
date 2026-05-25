@@ -129,11 +129,7 @@ fn highlights_from_indices<'js>(ctx: &Ctx<'js>, indices: &[u32], haystack: &str)
         return Ok(out);
     }
 
-    let mut char_to_byte: Vec<usize> = Vec::with_capacity(haystack.chars().count() + 1);
-
-    for (byte_idx, _) in haystack.char_indices() {
-        char_to_byte.push(byte_idx);
-    }
+    let mut char_to_byte: Vec<usize> = haystack.char_indices().map(|(byte_idx, _)| byte_idx).collect();
     char_to_byte.push(haystack.len());
 
     let mut ranges: Vec<(usize, usize)> = Vec::new();

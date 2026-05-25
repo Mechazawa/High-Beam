@@ -101,6 +101,7 @@ impl FrecencyDb {
             let result_key: String = row.get(1)?;
             let picks: u32 = row.get(2)?;
             let last_picked_at: i64 = row.get(3)?;
+
             Ok((plugin_name, result_key, PickRow { picks, last_picked_at }))
         });
         let mut map: HashMap<String, HashMap<String, PickRow>> = HashMap::new();

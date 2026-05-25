@@ -136,6 +136,7 @@ impl Theme {
         let colors = raw.colors.unwrap_or_default().apply(&defaults.colors)?;
         let font = raw.font.unwrap_or_default().apply(&defaults.font);
         let window = raw.window.unwrap_or_default().apply(&defaults.window);
+
         Ok(Self { colors, font, window })
     }
 }

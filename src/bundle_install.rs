@@ -21,6 +21,7 @@ pub fn install_default_plugins_if_needed() {
         tracing::debug!("bundle-install: no platform plugin dir; skipping");
         return;
     };
+
     let Some(bundled) = bundled_plugins_dir() else {
         // Running unbundled (cargo run) — not an error.
         tracing::debug!("bundle-install: no bundled resources; running unbundled");
@@ -92,6 +93,7 @@ fn bundled_plugins_dir() -> Option<PathBuf> {
     let candidate = exe.parent()?.parent()?.join("Resources").join("plugins");
     #[cfg(not(target_os = "macos"))]
     let candidate = exe.parent()?.parent()?.join("share").join("highbeam").join("plugins");
+
     candidate.is_dir().then_some(candidate)
 }
 
@@ -129,6 +131,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
         // Other file types (devices, sockets) are ignored — the bundle
         // resources directory only ever contains regular files/dirs.
     }
+
     Ok(())
 }
 

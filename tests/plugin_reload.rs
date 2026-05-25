@@ -134,6 +134,7 @@ fn reload_unknown_plugin_returns_not_found() {
     };
     let reg = PluginRegistry::new(opts, Vec::new());
     let rt = rt();
+
     match rt.block_on(reg.reload_one("ghost", &Settings::default())) {
         Err(ReloadError::NotFound(name)) => assert_eq!(name, "ghost"),
         Err(other) => panic!("expected NotFound, got {other:?}"),

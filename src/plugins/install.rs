@@ -193,7 +193,7 @@ fn require_installer_fields(manifest: &Manifest) -> Result<(), InstallError> {
             b: "entryUrl",
         }),
         (None, None) => Err(InstallError::MissingField("archiveUrl|entryUrl")),
-        _ => Ok(()),
+        (Some(_), None) | (None, Some(_)) => Ok(()),
     }
 }
 

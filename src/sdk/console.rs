@@ -44,12 +44,11 @@ fn format_args<'js>(ctx: &Ctx<'js>, args: &[Value<'js>]) -> String {
     let Some(stringify) = resolve_stringify(ctx) else {
         return String::from("[console: JSON.stringify unavailable]");
     };
-    let mut parts = Vec::with_capacity(args.len());
 
-    for value in args {
-        parts.push(render_one(ctx, value, &stringify));
-    }
-    parts.join(" ")
+    args.iter()
+        .map(|value| render_one(ctx, value, &stringify))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn resolve_stringify<'js>(ctx: &Ctx<'js>) -> Option<Function<'js>> {
@@ -67,16 +66,14 @@ fn render_one<'js>(ctx: &Ctx<'js>, value: &Value<'js>, stringify: &Function<'js>
     }
 
     if value.is_object() || value.is_array() {
-        match stringify.call::<_, String>((value.clone(),)) {
-            Ok(s) => return s,
-            Err(_) => return String::from("[unserializable]"),
-        }
+        return stringify
+            .call::<_, String>((value.clone(),))
+            .unwrap_or_else(|_| String::from("[unserializable]"));
     }
     // Primitives via `String(value)` so a misbehaving Symbol/BigInt fails
     // back to a debug rendering rather than killing the log line.
-    let string_ctor: Function<'js> = match ctx.globals().get("String") {
-        Ok(f) => f,
-        Err(_) => return format!("{value:?}"),
+    let Ok(string_ctor) = ctx.globals().get::<_, Function<'js>>("String") else {
+        return format!("{value:?}");
     };
     string_ctor
         .call::<_, String>((value.clone(),))

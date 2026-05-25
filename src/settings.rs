@@ -156,6 +156,7 @@ impl Settings {
             tracing::warn!("settings: could not resolve config dir; running with defaults");
             return Self::default();
         };
+
         Self::load_from(&path)
     }
 
@@ -175,6 +176,7 @@ impl Settings {
                 Self::default()
             }
         };
+
         settings.path = Some(path.to_path_buf());
         settings
     }
@@ -229,6 +231,7 @@ impl Settings {
                 .alt_action_modifier
                 .as_deref()
                 .map_or_else(|| DEFAULT_ALT_ACTION_MODIFIER.to_owned(), normalize_alt_action_modifier);
+
             GlobalSettings {
                 hotkey: raw_global.hotkey.unwrap_or_else(|| DEFAULT_HOTKEY.to_owned()),
                 launcher_position: raw_global.launcher_position,
@@ -236,6 +239,7 @@ impl Settings {
                 alt_action_modifier: alt_mod,
             }
         };
+
         Ok(Self {
             path: None,
             global,
@@ -290,6 +294,7 @@ impl Settings {
             } else {
                 Some(self.global.alt_action_modifier.clone())
             };
+
             Some(GlobalFile {
                 hotkey: Some(self.global.hotkey.clone()),
                 launcher_position: self.global.launcher_position,
@@ -322,6 +327,7 @@ impl Settings {
                 "settings have no resolved path",
             ));
         };
+
         Self::write_to(self, path)
     }
 

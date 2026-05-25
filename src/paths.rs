@@ -48,6 +48,7 @@ pub fn socket_path() -> io::Result<PathBuf> {
         {
             return Ok(runtime.join("high-beam.sock"));
         }
+
         let dirs = project_dirs()?;
         let state = dirs.state_dir().ok_or_else(|| {
             io::Error::new(
@@ -55,6 +56,7 @@ pub fn socket_path() -> io::Result<PathBuf> {
                 "no XDG_RUNTIME_DIR and no state directory available",
             )
         })?;
+
         Ok(state.join("high-beam.sock"))
     }
 
@@ -109,5 +111,6 @@ pub(crate) fn ensure_parent_dir(path: &std::path::Path) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+
     Ok(())
 }

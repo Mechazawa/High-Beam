@@ -72,6 +72,7 @@ pub(super) fn handle_query(
                         }
                         let snapshot = live.clone();
                         let weak = weak.clone();
+
                         slint::invoke_from_event_loop(move || {
                             if let Some(w) = weak.upgrade() {
                                 render_results(&w, &snapshot);

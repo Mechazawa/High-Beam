@@ -259,6 +259,8 @@ fn open_frecency_db() -> Option<FrecencyDb> {
 
 impl Drop for PluginHost {
     fn drop(&mut self) {
-        self.query_tx.send(HostMessage::Shutdown).log_debug("PluginHost::drop: worker already gone");
+        self.query_tx
+            .send(HostMessage::Shutdown)
+            .log_debug("PluginHost::drop: worker already gone");
     }
 }

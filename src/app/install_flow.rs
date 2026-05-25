@@ -96,6 +96,7 @@ impl ProgressEmitter {
             Err(_) => return,
         };
         let weak = self.weak.clone();
+
         slint::invoke_from_event_loop(move || {
             if let Some(w) = weak.upgrade() {
                 super::query::render_results(&w, &snapshot);
@@ -182,6 +183,7 @@ async fn install_pipeline(
     let plugin_name = manifest.name.clone();
     let plugin_version = manifest.version.clone().unwrap_or_default();
     let staging = stage_payload(&manifest, url, progress_key, progress).await?;
+
     finalize_install(FinalizeCtx {
         plugin_name: &plugin_name,
         plugin_version: &plugin_version,
@@ -579,6 +581,7 @@ async fn run_update_all(
 
         let name = plugin.manifest.name.clone();
         let key = format!("update-{name}");
+
         progress.emit(&key, format!("Checking {name}…"), Some(manifest_url.clone()));
 
         let remote = match plugins::install::fetch_and_validate_manifest(&manifest_url).await {
@@ -664,6 +667,7 @@ async fn run_reload(
             // with `Reload`, regardless of whether the manifest version
             // moved — that's what the user just asked for.
             let names: Vec<String> = outcomes.iter().map(|o| o.plugin.manifest.name.clone()).collect();
+
             persist_versions_and_fire(&outcomes, LifecycleReason::Reload, settings);
             progress.emit(
                 "reload-all",

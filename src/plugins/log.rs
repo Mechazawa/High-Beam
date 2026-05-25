@@ -113,7 +113,8 @@ impl PluginLog {
             // `Disconnected` means the writer thread already exited (e.g.
             // during shutdown after Drop ran on another Arc clone) — dropping
             // the line is the only sensible move.
-            tx.send(LogMsg::Line(line)).log_debug("plugin-log: writer disconnected, dropping line");
+            tx.send(LogMsg::Line(line))
+                .log_debug("plugin-log: writer disconnected, dropping line");
         }
     }
 

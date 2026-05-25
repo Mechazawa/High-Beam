@@ -59,22 +59,10 @@ pub trait LogErr<T> {
 
 impl<T, E: Display> LogErr<T> for Result<T, E> {
     fn log_warn(self, context: &str) -> Option<T> {
-        match self {
-            Ok(v) => Some(v),
-            Err(e) => {
-                tracing::warn!(error = %e, "{}", context);
-                None
-            }
-        }
+        self.inspect_err(|e| tracing::warn!(error = %e, "{}", context)).ok()
     }
 
     fn log_debug(self, context: &str) -> Option<T> {
-        match self {
-            Ok(v) => Some(v),
-            Err(e) => {
-                tracing::debug!(error = %e, "{}", context);
-                None
-            }
-        }
+        self.inspect_err(|e| tracing::debug!(error = %e, "{}", context)).ok()
     }
 }

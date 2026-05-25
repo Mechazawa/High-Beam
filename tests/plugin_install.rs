@@ -172,6 +172,7 @@ fn install_rejects_manifest_missing_required_fields() {
     let err = rt
         .block_on(install::fetch_and_validate_manifest(&server.url("/bad/manifest.json")))
         .expect_err("should be MissingField");
+
     match err {
         InstallError::MissingField(name) => assert!(matches!(name, "version" | "archiveUrl")),
         other => panic!("expected MissingField, got {other:?}"),
@@ -206,6 +207,7 @@ fn install_rejects_embedded_version_mismatch() {
     )
     .expect("parse");
     let err = install::cross_check_embedded(&payload, &url_fetched, "http://x/m.json").expect_err("mismatch");
+
     match err {
         InstallError::EmbeddedMismatch { field, .. } => assert_eq!(field, "version"),
         other => panic!("expected EmbeddedMismatch, got {other:?}"),

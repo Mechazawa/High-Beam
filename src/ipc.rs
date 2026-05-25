@@ -48,6 +48,7 @@ impl Command {
 
         if let Some(rest) = trimmed.strip_prefix("open ") {
             let token = rest.trim();
+
             return Ok(Self::Open {
                 activation_token: (!token.is_empty()).then(|| token.to_owned()),
             });
