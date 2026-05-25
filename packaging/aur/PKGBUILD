@@ -15,7 +15,7 @@ url="https://github.com/Mechazawa/high-beam"
 license=('MIT')
 # Runtime deps mirror `[package.metadata.packager.pacman].depends` in
 # Cargo.toml. Keep the two in sync when you bump them.
-depends=('openssl' 'libxkbcommon')
+depends=('openssl' 'libxkbcommon' 'fontconfig')
 optdepends=(
     'xdotool: improves window-management plugin coverage on X11'
 )

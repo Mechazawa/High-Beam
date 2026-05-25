@@ -105,16 +105,19 @@ generate-desktop-entry = true
 [package.metadata.packager.deb]
 # Runtime deps for the .deb. `libxkbcommon0` is winit's Wayland/X11
 # keymap backend; `libssl3` covers reqwest's rustls fallback to the
-# system roots loader. Names are Debian-style (lowercase + suffix
-# digits) — these resolve on Debian 12 / Ubuntu 22.04+.
-depends = ["libxkbcommon0", "libssl3"]
+# system roots loader; `libfontconfig1` is freedesktop-icons'
+# fontconfig probe used by the Linux icon fetcher. Names are
+# Debian-style (lowercase + suffix digits) — these resolve on
+# Debian 12 / Ubuntu 22.04+.
+depends = ["libxkbcommon0", "libssl3", "libfontconfig1"]
 section = "utils"
 priority = "optional"
 
 [package.metadata.packager.pacman]
 # Arch package names — note the differences from Debian: `openssl` not
-# `libssl3`, `libxkbcommon` without the `0` SONAME suffix.
-depends = ["openssl", "libxkbcommon"]
+# `libssl3`, `libxkbcommon` without the `0` SONAME suffix, `fontconfig`
+# not `libfontconfig1`.
+depends = ["openssl", "libxkbcommon", "fontconfig"]
 conflicts = ["high-beam-bin"]
 provides = ["high-beam"]
 
