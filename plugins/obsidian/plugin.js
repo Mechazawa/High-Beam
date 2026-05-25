@@ -73,8 +73,8 @@ function basename(path) {
     return slash >= 0 ? path.slice(slash + 1) : path;
 }
 
-// Strip the leading keyword token. Mirrors bitwarden's parser — requires a
-// word boundary after the keyword so `obsfoo` isn't treated as a trigger.
+// Strip the leading keyword token — requires a word boundary after the
+// keyword so `obsfoo` isn't treated as a trigger.
 function parseTrigger(input, keyword) {
     if (typeof input !== "string") return null;
     const trimmed = input.trimStart();

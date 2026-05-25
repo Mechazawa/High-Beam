@@ -40,9 +40,7 @@ jobs:
       fail-fast: false
       matrix:
         plugin:
-          - 1password
           - app-launcher
-          - bitwarden
           - calculator
           - clipboard-history
           - currency-converter
