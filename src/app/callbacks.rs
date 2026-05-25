@@ -17,7 +17,7 @@ use crate::plugins::result::{Action, RankedResult};
 use crate::query_history::{InputAction, QueryHistoryDb, QueryHistoryState};
 use crate::sdk::view::RuntimeBridge;
 use crate::settings_ui::SettingsController;
-use crate::ui::ResultRow;
+use crate::ui::{ResultRow, ViewBlock};
 use crate::views::{PushError, ViewFrame, ViewStack};
 use crate::window;
 
@@ -320,7 +320,7 @@ fn invoke_selected(
                     push_view_frame(view_stack, host_tx, &plugin_name, handle, props, reset);
                 }
                 actions::ActionOutcome::CloseView => {
-                    pop_view_frame(view_stack, host_tx);
+                    pop_view_frame(view_stack, host_tx, weak);
                 }
             }
         }
@@ -345,38 +345,160 @@ pub(super) fn build_view_bridge(
     plugin_name: &str,
     view_stack: Arc<Mutex<ViewStack>>,
     host_tx: mpsc::UnboundedSender<HostMessage>,
+    slint_weak: &slint::Weak<QueryWindow>,
 ) -> Arc<RuntimeBridge> {
+    let paint_tree = {
+        let plugin = plugin_name.to_owned();
+        let weak = slint_weak.clone();
+        Box::new(move |handle: u64, tree_json: String| {
+            let plugin = plugin.clone();
+            let weak = weak.clone();
+            slint::invoke_from_event_loop(move || {
+                paint_view_tree(&plugin, handle, &tree_json, &weak);
+            })
+            .log_debug("views: paint_tree invoke_from_event_loop");
+        })
+    };
     let dispatch = {
         let plugin = plugin_name.to_owned();
         let view_stack = Arc::clone(&view_stack);
         let host_tx = host_tx.clone();
+        let weak = slint_weak.clone();
         Box::new(move |action_json: String| {
             let plugin = plugin.clone();
             let view_stack = Arc::clone(&view_stack);
             let host_tx = host_tx.clone();
+            let weak = weak.clone();
             slint::invoke_from_event_loop(move || {
-                handle_view_dispatch(&plugin, &action_json, &view_stack, &host_tx);
+                handle_view_dispatch(&plugin, &action_json, &view_stack, &host_tx, &weak);
             })
             .log_debug("views: dispatch invoke_from_event_loop");
         })
     };
     let close_request = {
         let plugin = plugin_name.to_owned();
+        let weak = slint_weak.clone();
         Box::new(move |handle: u64| {
             let plugin = plugin.clone();
             let view_stack = Arc::clone(&view_stack);
             let host_tx = host_tx.clone();
+            let weak = weak.clone();
             slint::invoke_from_event_loop(move || {
-                handle_view_close_request(&plugin, handle, &view_stack, &host_tx);
+                handle_view_close_request(&plugin, handle, &view_stack, &host_tx, &weak);
             })
             .log_debug("views: close_view_request invoke_from_event_loop");
         })
     };
     Arc::new(RuntimeBridge {
         plugin_name: plugin_name.to_owned(),
+        paint_tree,
         dispatch,
         close_request,
     })
+}
+
+/// Slint-thread handler for `__highbeam_paint_tree(handle, tree_json)`.
+/// Parses the JSON tree the plugin's `render()` produced, flattens it
+/// into a list of `ViewBlock`s the Slint side iterates, and pushes the
+/// result onto the `QueryWindow`'s view-frame properties (switching
+/// `current-view` to `VIEW-VIEWS` if not already).
+///
+/// Stage 4c's flattener is deliberately lossy: `Stack` containers
+/// contribute their children inline (no direction / gap / align yet);
+/// non-rendering blocks (`button`, `input`, `textarea`, `image`, `row`,
+/// `divider`) come through as their `kind` only — Slint paints them as
+/// muted placeholders.
+fn paint_view_tree(plugin: &str, handle: u64, tree_json: &str, weak: &slint::Weak<QueryWindow>) {
+    let parsed: serde_json::Value = match serde_json::from_str(tree_json) {
+        Ok(v) => v,
+        Err(err) => {
+            tracing::error!(%plugin, handle, %err, "views: tree parse failed");
+            return;
+        }
+    };
+    let title = parsed
+        .get("title")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+    let mut blocks = Vec::new();
+
+    if let Some(body) = parsed.get("body").and_then(serde_json::Value::as_array) {
+        for entry in body {
+            flatten_block(entry, &mut blocks);
+        }
+    }
+    let Some(window) = weak.upgrade() else {
+        tracing::debug!(%plugin, handle, "views: paint dropped — window gone");
+        return;
+    };
+    let has_title = title.is_some();
+
+    window.set_view_frame_title(title.unwrap_or_default().into());
+    window.set_view_has_title(has_title);
+    window.set_view_blocks(ModelRc::new(VecModel::from(blocks)));
+    window.invoke_show_view_frame();
+}
+
+/// Walk one tree node, appending the rendered block(s) it represents to
+/// `out`. `stack` containers inline their children; anything else
+/// becomes a single [`ViewBlock`] entry.
+fn flatten_block(value: &serde_json::Value, out: &mut Vec<ViewBlock>) {
+    let Some(obj) = value.as_object() else { return };
+    let kind = obj.get("kind").and_then(serde_json::Value::as_str).unwrap_or("");
+
+    if kind == "stack" {
+        if let Some(children) = obj.get("children").and_then(serde_json::Value::as_array) {
+            for child in children {
+                flatten_block(child, out);
+            }
+        }
+        return;
+    }
+    let text = obj
+        .get("text")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    let tone = obj
+        .get("tone")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    let size = obj
+        .get("size")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    let label = obj
+        .get("label")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    // ProgressBar values live in [0, 1]; the truncation lint flags the
+    // cast but values in this range round-trip exactly. The `-1.0`
+    // sentinel marks indeterminate progress (Slint paints a fixed-
+    // width indicator).
+    let progress_value = obj
+        .get("value")
+        .and_then(serde_json::Value::as_f64)
+        .map_or(-1.0_f32, |v| {
+            #[allow(clippy::cast_possible_truncation)]
+            {
+                v.clamp(-1.0, 1.0) as f32
+            }
+        });
+
+    out.push(ViewBlock {
+        kind: kind.into(),
+        has_text: !text.is_empty(),
+        text: text.into(),
+        tone: tone.into(),
+        size: size.into(),
+        progress_value,
+        has_label: !label.is_empty(),
+        label: label.into(),
+        has_progress_value: obj.contains_key("value"),
+    });
 }
 
 /// Slint-thread handler for `__highbeam_dispatch(action_json)`. Parses
@@ -390,6 +512,7 @@ fn handle_view_dispatch(
     action_json: &str,
     view_stack: &Arc<Mutex<ViewStack>>,
     host_tx: &mpsc::UnboundedSender<HostMessage>,
+    weak: &slint::Weak<QueryWindow>,
 ) {
     let action: Action = match serde_json::from_str(action_json) {
         Ok(a) => a,
@@ -415,7 +538,7 @@ fn handle_view_dispatch(
             push_view_frame(view_stack, host_tx, plugin, handle, props, reset);
         }
         actions::ActionOutcome::CloseView => {
-            pop_view_frame(view_stack, host_tx);
+            pop_view_frame(view_stack, host_tx, weak);
         }
         actions::ActionOutcome::OpenSettingsView => {
             tracing::warn!(%plugin, "views: dispatch of openSettings ignored — would tear down the view");
@@ -438,6 +561,7 @@ fn handle_view_close_request(
     handle: u64,
     view_stack: &Arc<Mutex<ViewStack>>,
     host_tx: &mpsc::UnboundedSender<HostMessage>,
+    weak: &slint::Weak<QueryWindow>,
 ) {
     let Ok(mut stack) = view_stack.lock() else {
         tracing::error!("views: stack lock poisoned; close_view_request dropped");
@@ -459,6 +583,7 @@ fn handle_view_close_request(
         return;
     }
     let frame = stack.pop().expect("top present");
+    let depth = stack.depth();
     drop(stack);
     tracing::info!(plugin = %frame.plugin_name, handle = frame.handle, "views: render-null triggered close");
 
@@ -470,6 +595,12 @@ fn handle_view_close_request(
         .is_err()
     {
         tracing::error!("views: runtime thread exited; view close dropped");
+    }
+
+    if depth == 0
+        && let Some(window) = weak.upgrade()
+    {
+        window.invoke_show_query();
     }
 }
 
@@ -527,12 +658,17 @@ fn push_view_frame(
     }
 }
 
-/// Pop the topmost frame off the shared stack and dispatch
+/// Pop the topmost frame off the shared stack, dispatch
 /// [`HostMessage::ViewClose`] so the plugin's JS runtime runs
-/// `unmounted` and clears its per-handle state. A no-op on an empty
-/// stack (and not an error — a stale `closeView` after the user already
-/// Esc'd out is a benign race).
-fn pop_view_frame(view_stack: &Arc<Mutex<ViewStack>>, host_tx: &mpsc::UnboundedSender<HostMessage>) {
+/// `unmounted`, and — if that was the last frame — switch the window
+/// back to the launcher view. A no-op on an empty stack (and not an
+/// error — a stale `closeView` after the user already Esc'd out is a
+/// benign race).
+fn pop_view_frame(
+    view_stack: &Arc<Mutex<ViewStack>>,
+    host_tx: &mpsc::UnboundedSender<HostMessage>,
+    weak: &slint::Weak<QueryWindow>,
+) {
     let Ok(mut stack) = view_stack.lock() else {
         tracing::error!("views: stack lock poisoned; pop dropped");
         return;
@@ -542,10 +678,11 @@ fn pop_view_frame(view_stack: &Arc<Mutex<ViewStack>>, host_tx: &mpsc::UnboundedS
         tracing::debug!("views: pop on empty stack");
         return;
     };
+    let depth = stack.depth();
     tracing::info!(
         plugin = %frame.plugin_name,
         handle = frame.handle,
-        depth = stack.depth(),
+        depth,
         "views: frame popped",
     );
     drop(stack);
@@ -558,6 +695,12 @@ fn pop_view_frame(view_stack: &Arc<Mutex<ViewStack>>, host_tx: &mpsc::UnboundedS
         .is_err()
     {
         tracing::error!("views: runtime thread exited; view close dropped");
+    }
+
+    if depth == 0
+        && let Some(window) = weak.upgrade()
+    {
+        window.invoke_show_query();
     }
 }
 

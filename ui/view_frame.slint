@@ -1,0 +1,139 @@
+// View-frame renderer. Shown when `current-view == VIEW-VIEWS`.
+//
+// Stage 4c ships a deliberately limited renderer: a flat list of
+// blocks the Rust side flattens out of the plugin's nested tree. Only
+// Heading, Text, Spinner, and ProgressBar render with real visuals;
+// other block kinds (button, input, etc.) show as muted placeholder
+// labels until the interactive renderer lands.
+
+import { ScrollView } from "std-widgets.slint";
+import { ViewBlock } from "types.slint";
+
+export component ViewFrameView {
+    in-out property <string> frame-title: "";
+    in-out property <bool> has-title: false;
+    in-out property <[ViewBlock]> blocks: [];
+
+    in property <color> foreground-color;
+    in property <color> muted-color;
+    in property <color> error-color;
+    in property <color> success-color;
+    in property <color> warning-color;
+    in property <color> border-color;
+    in property <length> font-size-title;
+    in property <length> font-size-subtitle;
+    in property <length> heading-font-size: 24px;
+
+    width: 100%;
+    height: 100%;
+
+    callback escape-pressed();
+
+    forward-focus: focus-scope;
+
+    focus-scope := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.escape-pressed();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 8px;
+
+        if root.has-title: Text {
+            text: root.frame-title;
+            font-size: root.heading-font-size;
+            font-weight: 700;
+            color: root.foreground-color;
+        }
+
+        if root.has-title: Rectangle {
+            height: 1px;
+            background: root.border-color;
+        }
+
+        ScrollView {
+            min-height: 80px;
+            VerticalLayout {
+                spacing: 6px;
+
+                for block in root.blocks: VerticalLayout {
+                    if block.kind == "heading": Text {
+                        text: block.text;
+                        font-size: root.heading-font-size;
+                        font-weight: 700;
+                        color: root.foreground-color;
+                    }
+                    if block.kind == "text": Text {
+                        text: block.text;
+                        font-size: block.size == "lg" ? root.font-size-title * 1.25
+                            : block.size == "xl" ? root.font-size-title * 1.5
+                            : block.size == "sm" ? root.font-size-subtitle
+                            : root.font-size-title;
+                        color:
+                            block.tone == "muted" ? root.muted-color
+                            : block.tone == "error" ? root.error-color
+                            : block.tone == "success" ? root.success-color
+                            : block.tone == "warning" ? root.warning-color
+                            : root.foreground-color;
+                        wrap: word-wrap;
+                    }
+                    if block.kind == "spinner": HorizontalLayout {
+                        spacing: 8px;
+                        Rectangle {
+                            width: 12px;
+                            height: 12px;
+                            border-radius: 6px;
+                            background: root.muted-color;
+                            opacity: 0.6;
+                        }
+                        if block.has-label: Text {
+                            text: block.label;
+                            color: root.muted-color;
+                            font-size: root.font-size-subtitle;
+                        }
+                    }
+                    if block.kind == "progress": VerticalLayout {
+                        spacing: 4px;
+                        if block.has-label: Text {
+                            text: block.label;
+                            color: root.muted-color;
+                            font-size: root.font-size-subtitle;
+                        }
+                        Rectangle {
+                            height: 6px;
+                            border-radius: 3px;
+                            background: root.border-color;
+                            Rectangle {
+                                x: 0;
+                                y: 0;
+                                height: parent.height;
+                                width:
+                                    block.has-progress-value
+                                        ? parent.width * max(0, min(1, block.progress-value))
+                                        : parent.width * 0.3;
+                                border-radius: 3px;
+                                background: root.foreground-color;
+                            }
+                        }
+                    }
+                    // Fallback for not-yet-rendered block kinds.
+                    if block.kind != "heading"
+                        && block.kind != "text"
+                        && block.kind != "spinner"
+                        && block.kind != "progress": Text {
+                        text: "[" + block.kind + "]";
+                        color: root.muted-color;
+                        font-size: root.font-size-subtitle;
+                        font-italic: true;
+                    }
+                }
+            }
+        }
+    }
+}

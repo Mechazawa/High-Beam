@@ -13,10 +13,11 @@
 // (row height, icon size, input padding) remain inline — theming layout is
 // out of scope for v1.
 
-import { ResultRow, PluginSlot, PluginOption, ConfirmCapRow } from "types.slint";
+import { ResultRow, PluginSlot, PluginOption, ConfirmCapRow, ViewBlock } from "types.slint";
 import { LauncherView } from "launcher_view.slint";
 import { SettingsView } from "settings_view.slint";
 import { ConfirmView } from "confirm_view.slint";
+import { ViewFrameView } from "view_frame.slint";
 
 export component QueryWindow inherits Window {
     title: "High Beam";
@@ -31,11 +32,22 @@ export component QueryWindow inherits Window {
     in-out property <int> selected-index: 0;
     in-out property <int> max-rows: 9;
 
-    // View state. 0 = launcher (query), 1 = settings, 2 = install confirm.
+    // View state. 0 = launcher (query), 1 = settings, 2 = install confirm,
+    // 3 = plugin view frame (top of the view stack).
     property <int> VIEW-QUERY: 0;
     property <int> VIEW-SETTINGS: 1;
     property <int> VIEW-CONFIRM: 2;
+    property <int> VIEW-VIEWS: 3;
     in-out property <int> current-view: 0;
+
+    // Plugin view-frame state (rendered when `current-view == VIEW-VIEWS`).
+    // The tree the plugin returned from `render()` is flattened on the
+    // Rust side into an ordered list of blocks the Slint renderer
+    // iterates. `frame-title` corresponds to the optional `title` field
+    // on the rendered ViewNode.
+    in-out property <[ViewBlock]> view-blocks: [];
+    in-out property <string> view-frame-title: "";
+    in-out property <bool> view-has-title: false;
 
     // Settings view state.
     in-out property <[PluginSlot]> plugin-slots: [];
@@ -231,6 +243,12 @@ export component QueryWindow inherits Window {
         root.current-view = root.VIEW-QUERY;
         launcher.focus-input();
     }
+    // Switch to the plugin view-frame. Rust calls this after a
+    // ViewInit's first render arrives so the user sees the frame in
+    // place of the result list.
+    public function show-view-frame() {
+        root.current-view = root.VIEW-VIEWS;
+    }
 
     // Switch to the install-confirmation view. Rust populates the
     // `confirm-*` properties before calling this.
@@ -391,6 +409,28 @@ export component QueryWindow inherits Window {
             recenter-window => { root.recenter-window(); }
             open-config-dir => { root.open-config-dir(); }
             sync-rail-selection => { root.sync-rail-selection(); }
+        }
+
+        // ---- Plugin view frame ----
+        // Stage 4c: flat block renderer (Heading, Text, Spinner,
+        // ProgressBar). Interactive blocks (Button, Input, etc.) render
+        // as placeholder labels until a later stage adds them.
+        view-frame := ViewFrameView {
+            visible: root.current-view == root.VIEW-VIEWS;
+            width: parent.width;
+            height: parent.height;
+
+            frame-title <=> root.view-frame-title;
+            has-title <=> root.view-has-title;
+            blocks <=> root.view-blocks;
+
+            foreground-color: root.foreground-color;
+            muted-color: root.muted-color;
+            border-color: root.border-color;
+            font-size-title: root.font-size-title;
+            font-size-subtitle: root.font-size-subtitle;
+
+            escape-pressed => { root.escape-pressed(); }
         }
 
         // ---- Install-confirmation view ----

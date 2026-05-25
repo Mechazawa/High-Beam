@@ -36,6 +36,10 @@ pub struct RuntimeBridge {
     /// host can match `close_view_request` calls against the right
     /// frame.
     pub plugin_name: String,
+    /// Called when the JS runtime produces a fresh rendered tree.
+    /// Arguments: `(handle, tree_json)`. The closure parses + paints on
+    /// the Slint thread.
+    pub paint_tree: Box<dyn Fn(u64, String) + Send + Sync + 'static>,
     /// Called when a closure inside a view's `on*` handler (or the
     /// closure's eventual return value) yields an `Action`. Receives the
     /// JSON-serialised action; the host parses + routes it.
@@ -116,7 +120,7 @@ fn make_block<'js>(ctx: &Ctx<'js>, kind: &str, opts: Value<'js>) -> JsResult<Obj
 /// Propagates JS errors from evaluating the runtime shim or setting the
 /// bridge globals.
 pub fn install_runtime(ctx: &Ctx<'_>, bridge: Arc<RuntimeBridge>) -> JsResult<()> {
-    install_paint_tree(ctx, bridge.plugin_name.clone())?;
+    install_paint_tree(ctx, Arc::clone(&bridge))?;
     install_paint_error(ctx, bridge.plugin_name.clone())?;
     install_dispatch(ctx, Arc::clone(&bridge))?;
     install_close_request(ctx, bridge)?;
@@ -125,12 +129,9 @@ pub fn install_runtime(ctx: &Ctx<'_>, bridge: Arc<RuntimeBridge>) -> JsResult<()
     Ok(())
 }
 
-fn install_paint_tree(ctx: &Ctx<'_>, plugin_name: String) -> JsResult<()> {
+fn install_paint_tree(ctx: &Ctx<'_>, bridge: Arc<RuntimeBridge>) -> JsResult<()> {
     let paint = Function::new(ctx.clone(), move |handle: u64, tree_json: String| {
-        let len = tree_json.len();
-
-        tracing::debug!(plugin = %plugin_name, handle, bytes = len, "views: tree painted");
-        tracing::trace!(plugin = %plugin_name, handle, tree = %tree_json, "views: tree body");
+        (bridge.paint_tree)(handle, tree_json);
         Ok::<_, rquickjs::Error>(())
     })?;
     ctx.globals().set("__highbeam_paint_tree", paint)?;
@@ -243,11 +244,12 @@ mod tests {
     }
 
     /// No-op bridge — the JS-side fallback path uses these closures when
-    /// the host doesn't care about `dispatch` / `close_view_request` side
-    /// effects.
+    /// the host doesn't care about `paint_tree` / `dispatch` /
+    /// `close_view_request` side effects.
     fn test_bridge(plugin: &str) -> Arc<RuntimeBridge> {
         Arc::new(RuntimeBridge {
             plugin_name: plugin.to_owned(),
+            paint_tree: Box::new(|_handle, _tree| {}),
             dispatch: Box::new(|_action_json| {}),
             close_request: Box::new(|_handle| {}),
         })

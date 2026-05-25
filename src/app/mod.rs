@@ -138,7 +138,9 @@ pub fn start(
     Ok(PluginHost { query_tx: tx })
 }
 
-#[allow(clippy::too_many_arguments)]
+// The runtime thread loop is a single coherent state machine — splitting
+// it into per-variant helpers would only add artificial seams.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn spawn_runtime_thread(
     mut rx: mpsc::UnboundedReceiver<HostMessage>,
     plugins_override: Option<PathBuf>,
@@ -232,8 +234,12 @@ fn spawn_runtime_thread(
                             let plugins = registry.snapshot().await;
 
                             if let Some(p) = plugins.iter().find(|p| p.manifest.name == plugin) {
-                                let bridge =
-                                    callbacks::build_view_bridge(&plugin, Arc::clone(&view_stack), host_tx.clone());
+                                let bridge = callbacks::build_view_bridge(
+                                    &plugin,
+                                    Arc::clone(&view_stack),
+                                    host_tx.clone(),
+                                    &weak,
+                                );
 
                                 if let Err(err) = p.view_init(handle, &props, bridge).await {
                                     tracing::error!(%plugin, handle, %err, "views: init failed");

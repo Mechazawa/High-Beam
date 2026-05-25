@@ -37,6 +37,32 @@ export struct ConfirmCapRow {
     is-new: bool,
 }
 
+// One block in a flattened view tree. The Rust side walks the
+// rendered ViewNode and emits one entry per leaf-ish block (containers
+// like Stack contribute their children inline for v0; nesting +
+// direction land with the interactive renderer). `kind` is one of:
+//   "heading" | "text" | "spinner" | "progress"
+// Other tags (button / input / textarea / image / row / divider) are
+// rendered as a placeholder Text in this stage and gain proper
+// components later.
+export struct ViewBlock {
+    kind: string,
+    // Heading / Text payload. Empty for non-text blocks.
+    text: string,
+    // Text tone: "" | "muted" | "error" | "success" | "warning".
+    tone: string,
+    // Text size: "" | "sm" | "md" | "lg" | "xl".
+    size: string,
+    // Progress bar: 0..1 indeterminate sentinel < 0.
+    progress-value: float,
+    // Spinner / Progress label.
+    label: string,
+    // Has-flags so Slint can branch without comparing against ""s.
+    has-text: bool,
+    has-label: bool,
+    has-progress-value: bool,
+}
+
 // One option input in the settings detail pane. Option `kind` is one of:
 //   "string" | "bool" | "int" | "enum"
 // `value-*` columns are all populated; the matching one for `kind` is the
