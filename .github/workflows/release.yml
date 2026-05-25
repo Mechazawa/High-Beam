@@ -52,6 +52,10 @@ jobs:
         with:
           tool: cargo-packager
 
+      # macos-latest does not ship `just` preinstalled.
+      - name: Install just
+        uses: taiki-e/install-action@just
+
       # Conditional codesigning: only runs when the maintainer has uploaded
       # a .p12 + password to repo secrets. Absent secrets → bundle ships
       # ad-hoc-signed, end users need the `xattr -dr com.apple.quarantine`
