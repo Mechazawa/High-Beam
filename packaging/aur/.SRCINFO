@@ -1,0 +1,17 @@
+pkgbase = high-beam-bin
+	pkgdesc = Native Rust keyboard launcher (Spotlight / Alfred / Raycast class)
+	pkgver = 0.2.2
+	pkgrel = 1
+	url = https://github.com/Mechazawa/high-beam
+	arch = x86_64
+	license = MIT
+	depends = openssl
+	depends = libxkbcommon
+	depends = fontconfig
+	optdepends = xdotool: improves window-management plugin coverage on X11
+	provides = high-beam
+	conflicts = high-beam
+	source = high-beam-bin-0.2.2.tar.gz::https://github.com/Mechazawa/high-beam/releases/download/v0.2.2/highbeam-0.2.2-linux-x86_64.tar.gz
+	sha256sums = 01432e0df37cec7ce1cc2c3cf987bb5720defc96c24204201e7f5a52ef61e62f
+
+pkgname = high-beam-bin

@@ -22,10 +22,7 @@ optdepends=(
 provides=('high-beam')
 conflicts=('high-beam')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/Mechazawa/high-beam/releases/download/v$pkgver/highbeam-$pkgver-linux-x86_64.tar.gz")
-# `SKIP` keeps the template usable before a release ships. Fill in the
-# real sha256 (`sha256sum highbeam-*.tar.gz`) at release-tag time, then
-# regenerate .SRCINFO and push.
-sha256sums=('SKIP')
+sha256sums=('01432e0df37cec7ce1cc2c3cf987bb5720defc96c24204201e7f5a52ef61e62f')
 
 package() {
     cd "$srcdir/highbeam-$pkgver-linux-x86_64"
