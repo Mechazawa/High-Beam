@@ -266,7 +266,7 @@ jobs:
           tag = os.environ["TAG_NAME"]
           system = (
               "You're writing release notes for a developer tool. "
-              "Given a list of git commit messages, produce 2-4 short "
+              "Given a list of git commit messages, produce 1-3 short, concise "
               "paragraphs grouping related changes thematically. Focus "
               "on what's new for users, not internal refactors. Skip "
               "CI / chore / lint commits. Use short headlines like "
