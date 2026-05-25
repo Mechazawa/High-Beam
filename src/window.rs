@@ -283,6 +283,12 @@ pub(crate) fn hide(window: &QueryWindow) {
 /// block the UI thread — same pattern the frecency picks use — so the
 /// hide is observably instant regardless of disk latency.
 pub(crate) fn hide_and_persist_position(window: &QueryWindow, settings: &SettingsController) {
+    // Drain any pushed plugin views first so their `unmounted` hooks
+    // run while the QuickJS contexts are still alive. The bound
+    // handler in app::callbacks pops every frame and sends
+    // HostMessage::ViewClose so each per-view task wakes up.
+    window.invoke_clear_view_stack();
+
     // Persist-dismiss fires BEFORE the hide so subscribers see the input
     // while it's still live — `clear-input` zeroes the text on hide.
     window.invoke_persist_dismiss(window.get_query_text());

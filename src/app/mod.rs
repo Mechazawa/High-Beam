@@ -234,6 +234,36 @@ fn spawn_runtime_thread(
                             if let Some(prev) = current_cancel.take() {
                                 prev.cancel();
                             }
+                            // Any host task (reload / install / update)
+                            // can swap the QuickJS context a view is
+                            // attached to. Tear down every open frame
+                            // first so plugins get a clean `unmounted`
+                            // call before their old context dies.
+                            for ((plugin, handle), signal) in view_close_signals.drain() {
+                                tracing::info!(
+                                    %plugin,
+                                    handle,
+                                    reason = "host task",
+                                    "views: tearing down",
+                                );
+                                signal.cancel();
+                            }
+                            view_event_senders.clear();
+
+                            if !view_stack.lock().map_or(true, |s| s.depth() == 0) {
+                                let view_stack_for_clear = Arc::clone(&view_stack);
+                                let weak_for_clear = weak.clone();
+                                slint::invoke_from_event_loop(move || {
+                                    if let Ok(mut stack) = view_stack_for_clear.lock() {
+                                        stack.clear();
+                                    }
+
+                                    if let Some(w) = weak_for_clear.upgrade() {
+                                        w.invoke_show_query();
+                                    }
+                                })
+                                .log_debug("views: host-task stack clear");
+                            }
                             // Bump the query id so any stale yield from the
                             // last keystroke can't paint over the progress
                             // rows the task is about to push.

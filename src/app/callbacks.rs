@@ -36,6 +36,10 @@ pub(super) struct WindowCallbackCtx {
     pub view_stack: Arc<Mutex<ViewStack>>,
 }
 
+// Window callback wiring is a flat sequence of per-callback blocks;
+// splitting helpers per chunk just adds indirection without reducing
+// total surface.
+#[allow(clippy::too_many_lines)]
 pub(super) fn wire_window_callbacks(
     window: &QueryWindow,
     tx: &mpsc::UnboundedSender<HostMessage>,
@@ -117,6 +121,18 @@ pub(super) fn wire_window_callbacks(
 
     window.on_pop_view(move || {
         pop_view_frame(&view_stack_for_pop, &tx_for_pop, &weak_for_pop);
+    });
+
+    // Fires just before the launcher hides for any reason (Esc on
+    // root, focus loss, action-induced HideWindow). Drain the view
+    // stack so every per-view spawn_view task gets its unmounted
+    // hook called before its QuickJS context is torn down.
+    let view_stack_for_clear = Arc::clone(&view_stack);
+    let tx_for_clear = tx.clone();
+    let weak_for_clear = window.as_weak();
+
+    window.on_clear_view_stack(move || {
+        clear_view_stack_for_hide(&view_stack_for_clear, &tx_for_clear, &weak_for_clear);
     });
 
     // Block-level events from inside a pushed view (button click,
@@ -380,6 +396,44 @@ fn invoke_selected(
             tracing::error!(plugin = %plugin_name, %err, "plugins: action failed");
             window::hide_and_persist_position(&w, settings);
         }
+    }
+}
+
+/// Drain every frame off the view stack, sending
+/// [`HostMessage::ViewClose`] for each so the per-view `spawn_view`
+/// tasks run `unmounted` + tear down their JS state. Switches the
+/// window back to `VIEW-QUERY` once the stack is empty. Idempotent.
+fn clear_view_stack_for_hide(
+    view_stack: &Arc<Mutex<ViewStack>>,
+    host_tx: &mpsc::UnboundedSender<HostMessage>,
+    weak: &slint::Weak<QueryWindow>,
+) {
+    let popped: Vec<ViewFrame> = {
+        let Ok(mut stack) = view_stack.lock() else {
+            tracing::error!("views: stack lock poisoned; clear dropped");
+            return;
+        };
+        stack.clear()
+    };
+
+    if popped.is_empty() {
+        return;
+    }
+    for frame in &popped {
+        if host_tx
+            .send(HostMessage::ViewClose {
+                plugin: frame.plugin_name.clone(),
+                handle: frame.handle,
+            })
+            .is_err()
+        {
+            tracing::error!("views: runtime thread exited; view close dropped during clear");
+        }
+    }
+    tracing::info!(count = popped.len(), "views: stack drained on launcher hide",);
+
+    if let Some(window) = weak.upgrade() {
+        window.invoke_show_query();
     }
 }
 

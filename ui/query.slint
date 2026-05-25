@@ -145,6 +145,12 @@ export component QueryWindow inherits Window {
     // view stack (which fires the JS unmounted via the close-signal
     // and returns the window to VIEW-QUERY when the stack drains).
     callback pop-view();
+    // Fires from window.rs just before the launcher hides (Esc on
+    // root, focus loss, action-induced). The Rust side drains the
+    // view stack, sending HostMessage::ViewClose for each frame so
+    // every per-view spawn_view task runs unmounted before its
+    // QuickJS context is torn down. Idempotent on an empty stack.
+    callback clear-view-stack();
     // Fires when the user clicks a Button (or activates a Row) in a
     // pushed view. Carries the callback id the SDK substituted into
     // the rendered tree; Rust resolves it back to the originating
