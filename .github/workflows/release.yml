@@ -351,6 +351,11 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
           draft: false
           fail_on_unmatched_files: true
+          # `dist/macos/*.dmg` skips the bundled .app directory (already
+          # inside the .dmg, and softprops/action-gh-release can't upload
+          # directories anyway). The Linux globs are explicit per format
+          # so the tarball under `dist/linux/dist/` gets picked up.
           files: |
-            dist/macos/*
-            dist/linux/*
+            dist/macos/*.dmg
+            dist/linux/**/*.deb
+            dist/linux/**/*.tar.gz
