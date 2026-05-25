@@ -119,6 +119,46 @@ pub(super) fn wire_window_callbacks(
         pop_view_frame(&view_stack_for_pop, &tx_for_pop, &weak_for_pop);
     });
 
+    // Block-level events from inside a pushed view (button click,
+    // input change, submit). The callback id was substituted in by
+    // the SDK render walker; the host pairs it with the top frame's
+    // (plugin, handle) and dispatches HostMessage::ViewEvent.
+    let view_stack_for_click = Arc::clone(&view_stack);
+    let tx_for_click = tx.clone();
+
+    window.on_view_block_clicked(move |callback_id| {
+        send_view_event(
+            &view_stack_for_click,
+            &tx_for_click,
+            callback_id,
+            serde_json::Value::Null,
+        );
+    });
+
+    let view_stack_for_change = Arc::clone(&view_stack);
+    let tx_for_change = tx.clone();
+
+    window.on_view_block_changed(move |callback_id, text| {
+        send_view_event(
+            &view_stack_for_change,
+            &tx_for_change,
+            callback_id,
+            serde_json::Value::String(text.into()),
+        );
+    });
+
+    let view_stack_for_submit = Arc::clone(&view_stack);
+    let tx_for_submit = tx.clone();
+
+    window.on_view_block_submitted(move |callback_id, text| {
+        send_view_event(
+            &view_stack_for_submit,
+            &tx_for_submit,
+            callback_id,
+            serde_json::Value::String(text.into()),
+        );
+    });
+
     // Install — confirmed.
     let confirm_state_install = Arc::clone(&confirm_state);
     let weak_confirm_install = window.as_weak();
@@ -343,6 +383,49 @@ fn invoke_selected(
     }
 }
 
+/// Resolve a Slint-side `callback_id` against the top view frame and
+/// post a [`HostMessage::ViewEvent`] to the runtime thread. A click /
+/// change / submit can only fire on the visible (top) frame, so the
+/// stack's top entry is authoritative for `(plugin, handle)`.
+fn send_view_event(
+    view_stack: &Arc<Mutex<ViewStack>>,
+    host_tx: &mpsc::UnboundedSender<HostMessage>,
+    callback_id: i32,
+    value: serde_json::Value,
+) {
+    let id = match u64::try_from(callback_id) {
+        Ok(0) => return, // 0 is the sentinel for "no handler"
+        Ok(id) => id,
+        Err(_) => {
+            tracing::warn!(callback_id, "views: negative callback id; dropped");
+            return;
+        }
+    };
+    let Ok(stack) = view_stack.lock() else {
+        tracing::error!("views: stack lock poisoned; event dropped");
+        return;
+    };
+    let Some(top) = stack.top() else {
+        tracing::debug!(callback_id = id, "views: event with empty stack; dropped");
+        return;
+    };
+    let plugin = top.plugin_name.clone();
+    let handle = top.handle;
+    drop(stack);
+
+    if host_tx
+        .send(HostMessage::ViewEvent {
+            plugin,
+            handle,
+            callback_id: id,
+            value,
+        })
+        .is_err()
+    {
+        tracing::error!("views: runtime thread exited; event dropped");
+    }
+}
+
 /// Construct the [`RuntimeBridge`] the JS view runtime calls back into.
 /// Each plugin context gets its own — the closures capture the plugin
 /// name plus enough Slint-thread state (the view stack, the host-message
@@ -454,7 +537,10 @@ fn paint_view_tree(plugin: &str, handle: u64, tree_json: &str, weak: &slint::Wea
 
 /// Walk one tree node, appending the rendered block(s) it represents to
 /// `out`. `stack` containers inline their children; anything else
-/// becomes a single [`ViewBlock`] entry.
+/// becomes a single [`ViewBlock`] entry. Interactive blocks (button,
+/// input) pull their callback ids out of the `__callbackId`
+/// placeholders the SDK render walker left in place of `on*`
+/// closures.
 fn flatten_block(value: &serde_json::Value, out: &mut Vec<ViewBlock>) {
     let Some(obj) = value.as_object() else { return };
     let kind = obj.get("kind").and_then(serde_json::Value::as_str).unwrap_or("");
@@ -467,39 +553,44 @@ fn flatten_block(value: &serde_json::Value, out: &mut Vec<ViewBlock>) {
         }
         return;
     }
-    let text = obj
-        .get("text")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("")
-        .to_owned();
-    let tone = obj
-        .get("tone")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("")
-        .to_owned();
-    let size = obj
-        .get("size")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("")
-        .to_owned();
-    let label = obj
-        .get("label")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("")
-        .to_owned();
-    // ProgressBar values live in [0, 1]; the truncation lint flags the
-    // cast but values in this range round-trip exactly. The `-1.0`
-    // sentinel marks indeterminate progress (Slint paints a fixed-
-    // width indicator).
-    let progress_value = obj
-        .get("value")
-        .and_then(serde_json::Value::as_f64)
-        .map_or(-1.0_f32, |v| {
-            #[allow(clippy::cast_possible_truncation)]
-            {
-                v.clamp(-1.0, 1.0) as f32
-            }
-        });
+    let read_str = |key: &str| -> String {
+        obj.get(key)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .to_owned()
+    };
+
+    let text = read_str("text");
+    let tone = read_str("tone");
+    let size = read_str("size");
+    let value_text = read_str("value");
+    let id = read_str("id");
+    // `label` doubles as the Input/TextArea `placeholder` since the
+    // two are mutually exclusive per block kind.
+    let label = if kind == "input" || kind == "textarea" {
+        read_str("placeholder")
+    } else {
+        read_str("label")
+    };
+
+    let on_click_id = read_callback_id(obj.get("onClick"));
+    let on_change_id = read_callback_id(obj.get("onChange"));
+    let on_submit_id = read_callback_id(obj.get("onSubmit"));
+
+    // ProgressBar values live in [0, 1]; truncation in this range
+    // round-trips exactly. `-1.0` is the indeterminate sentinel.
+    let progress_value = if kind == "progress" {
+        obj.get("value")
+            .and_then(serde_json::Value::as_f64)
+            .map_or(-1.0_f32, |v| {
+                #[allow(clippy::cast_possible_truncation)]
+                {
+                    v.clamp(-1.0, 1.0) as f32
+                }
+            })
+    } else {
+        -1.0_f32
+    };
 
     out.push(ViewBlock {
         kind: kind.into(),
@@ -510,8 +601,28 @@ fn flatten_block(value: &serde_json::Value, out: &mut Vec<ViewBlock>) {
         progress_value,
         has_label: !label.is_empty(),
         label: label.into(),
-        has_progress_value: obj.contains_key("value"),
+        has_value: !value_text.is_empty(),
+        value: value_text.into(),
+        id: id.into(),
+        on_click_id: i32::try_from(on_click_id).unwrap_or(0),
+        on_change_id: i32::try_from(on_change_id).unwrap_or(0),
+        on_submit_id: i32::try_from(on_submit_id).unwrap_or(0),
+        has_on_click: on_click_id > 0,
+        has_on_change: on_change_id > 0,
+        has_on_submit: on_submit_id > 0,
+        has_progress_value: kind == "progress" && obj.contains_key("value"),
     });
+}
+
+/// Extract a callback id from a value the SDK render walker may have
+/// substituted (`{ "__callbackId": N }`). Returns `0` when absent —
+/// callers compare against `0` as the "no handler" sentinel.
+fn read_callback_id(value: Option<&serde_json::Value>) -> u64 {
+    value
+        .and_then(serde_json::Value::as_object)
+        .and_then(|o| o.get("__callbackId"))
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0)
 }
 
 /// Slint-thread handler for `__highbeam_dispatch(action_json)`. Parses

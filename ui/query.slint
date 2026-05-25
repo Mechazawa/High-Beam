@@ -145,6 +145,17 @@ export component QueryWindow inherits Window {
     // view stack (which fires the JS unmounted via the close-signal
     // and returns the window to VIEW-QUERY when the stack drains).
     callback pop-view();
+    // Fires when the user clicks a Button (or activates a Row) in a
+    // pushed view. Carries the callback id the SDK substituted into
+    // the rendered tree; Rust resolves it back to the originating
+    // plugin/view and posts a HostMessage::ViewEvent.
+    callback view-block-clicked(int);
+    // Fires on every keystroke inside a view's Input/TextArea with an
+    // onChange handler. (callback_id, new-text).
+    callback view-block-changed(int, string);
+    // Fires when the user presses Enter inside an Input with an
+    // onSubmit handler. (callback_id, current-text).
+    callback view-block-submitted(int, string);
     // Fires from Rust just before the window hides — Esc, focus loss,
     // action-induced hide all go through it. Carries the current input text
     // so app.rs can decide whether to persist it to query history.
@@ -436,6 +447,9 @@ export component QueryWindow inherits Window {
             font-size-subtitle: root.font-size-subtitle;
 
             pop-view => { root.pop-view(); }
+            block-clicked(id) => { root.view-block-clicked(id); }
+            block-changed(id, text) => { root.view-block-changed(id, text); }
+            block-submitted(id, text) => { root.view-block-submitted(id, text); }
         }
 
         // ---- Install-confirmation view ----

@@ -60,14 +60,23 @@ pub(super) enum HostMessage {
     /// Drive a freshly-pushed view frame through its `setup → first render
     /// → mounted` sequence. Sent by `callbacks::push_view_frame`. The
     /// rendered tree comes back via the JS runtime's `__highbeam_paint_tree`
-    /// bridge — Stage 4a still logs at DEBUG; Stage 4c paints to Slint.
+    /// bridge — painted into the launcher window from there.
     ViewInit {
         plugin: String,
         handle: u64,
         props: serde_json::Value,
     },
+    /// User interaction with a rendered block fired a callback. Routed
+    /// to the per-view spawn task (via `view_event_senders`) which calls
+    /// `invoke_event` inside its `async_with!`.
+    ViewEvent {
+        plugin: String,
+        handle: u64,
+        callback_id: u64,
+        value: serde_json::Value,
+    },
     /// Tear down a view frame on the JS side. Sent by
-    /// `callbacks::pop_view_frame` and (later) by the
+    /// `callbacks::pop_view_frame` and by the
     /// `__highbeam_close_view_request` bridge when `render → null`.
     ViewClose {
         plugin: String,
@@ -189,6 +198,14 @@ fn spawn_runtime_thread(
                     (String, u64),
                     tokio_util::sync::CancellationToken,
                 > = std::collections::HashMap::new();
+                // Per-view event senders. The receiver lives in the
+                // spawn_view task's select! loop so events arrive
+                // serialised through the same async_with! that owns the
+                // plugin's QuickJS context.
+                let mut view_event_senders: std::collections::HashMap<
+                    (String, u64),
+                    mpsc::UnboundedSender<crate::plugins::runtime::ViewEventEnvelope>,
+                > = std::collections::HashMap::new();
 
                 while let Some(msg) = rx.recv().await {
                     match msg {
@@ -247,16 +264,40 @@ fn spawn_runtime_thread(
                                     host_tx.clone(),
                                     &weak,
                                 );
+                                let (event_tx, event_rx) = mpsc::unbounded_channel();
                                 view_close_signals.insert((plugin.clone(), handle), bridge.close_signal.clone());
-                                p.spawn_view(handle, &props, bridge);
+                                view_event_senders.insert((plugin.clone(), handle), event_tx);
+                                p.spawn_view(handle, &props, bridge, event_rx);
                             } else {
                                 tracing::warn!(%plugin, handle, "views: init for unknown plugin");
+                            }
+                        }
+                        HostMessage::ViewEvent {
+                            plugin,
+                            handle,
+                            callback_id,
+                            value,
+                        } => {
+                            if let Some(tx) = view_event_senders.get(&(plugin.clone(), handle)) {
+                                if tx
+                                    .send(crate::plugins::runtime::ViewEventEnvelope { callback_id, value })
+                                    .is_err()
+                                {
+                                    tracing::debug!(%plugin, handle, callback_id, "views: event channel closed");
+                                }
+                            } else {
+                                tracing::debug!(%plugin, handle, callback_id, "views: event for unknown view");
                             }
                         }
                         HostMessage::ViewClose { plugin, handle } => {
                             // Fire the bridge's close_signal — the per-view
                             // tokio task awaits it, runs `unmounted` inside
-                            // its own async_with!, and exits.
+                            // its own async_with!, and exits. Drop the
+                            // event sender so future events for this
+                            // handle log + bail instead of queueing into a
+                            // closed task.
+                            view_event_senders.remove(&(plugin.clone(), handle));
+
                             if let Some(signal) = view_close_signals.remove(&(plugin.clone(), handle)) {
                                 signal.cancel();
                             } else {

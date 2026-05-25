@@ -119,6 +119,13 @@ impl LifecycleReason {
     }
 }
 
+/// One `view_event(callback_id, value)` envelope sent from the host's
+/// per-view event channel into the [`LoadedPlugin::spawn_view`] task.
+pub struct ViewEventEnvelope {
+    pub callback_id: u64,
+    pub value: JsonValue,
+}
+
 /// A loaded, evaluated plugin ready to handle queries.
 ///
 /// `AsyncContext` keeps the underlying `AsyncRuntime` alive via its own
@@ -407,7 +414,8 @@ impl LoadedPlugin {
     ///
     ///   1. Installs the JS runtime + bridge globals.
     ///   2. Calls `init(handle, props)` — setup → first render → mounted.
-    ///   3. Awaits `bridge.close_signal`, keeping `async_with!` alive so
+    ///   3. Loops on `select!` between the host's close signal and the
+    ///      per-view event channel, keeping `async_with!` alive so
     ///      pending `QuickJS` jobs (microtask flushes, `setTimeout`
     ///      continuations, etc.) actually run.
     ///   4. Calls `close(handle)` — runs `unmounted`, fires the abort
@@ -415,7 +423,13 @@ impl LoadedPlugin {
     ///
     /// Returns immediately after the task is spawned; the host doesn't
     /// wait for the view's lifecycle to complete.
-    pub fn spawn_view(&self, handle: u64, props: &JsonValue, bridge: Arc<crate::sdk::view::RuntimeBridge>) {
+    pub fn spawn_view(
+        &self,
+        handle: u64,
+        props: &JsonValue,
+        bridge: Arc<crate::sdk::view::RuntimeBridge>,
+        mut event_rx: mpsc::UnboundedReceiver<ViewEventEnvelope>,
+    ) {
         let plugin_name = self.manifest.name.clone();
         let props_json = props.to_string();
         let context = self.context.clone();
@@ -438,12 +452,38 @@ impl LoadedPlugin {
                     return;
                 }
 
-                // Keep the context held while we await the host's close
-                // signal. The async runtime polls pending JS jobs in the
-                // background of this await — without it, `mounted`'s
-                // `setTimeout` continuations would never re-enter the
-                // engine.
-                close_signal.cancelled().await;
+                // Drive events + close in the same async_with! the
+                // init ran in. The runtime polls pending JS jobs while
+                // we're parked in select!, so `mounted`'s `setTimeout`
+                // continuations and downstream re-renders fire even
+                // when no user input has arrived.
+                loop {
+                    tokio::select! {
+                        biased;
+                        () = close_signal.cancelled() => break,
+                        maybe_ev = event_rx.recv() => {
+                            let Some(ev) = maybe_ev else {
+                                // Sender dropped — host has finished
+                                // tearing down this view's bookkeeping;
+                                // fall back to waiting on close_signal.
+                                close_signal.cancelled().await;
+                                break;
+                            };
+                            let value_json = ev.value.to_string();
+                            if let Err(err) = crate::sdk::view::invoke_event(
+                                &ctx, handle, ev.callback_id, &value_json,
+                            ).catch(&ctx) {
+                                tracing::error!(
+                                    plugin = %plugin_name,
+                                    handle,
+                                    callback_id = ev.callback_id,
+                                    %err,
+                                    "views: event failed",
+                                );
+                            }
+                        }
+                    }
+                }
 
                 if let Err(err) = crate::sdk::view::invoke_close(&ctx, handle).catch(&ctx) {
                     tracing::error!(plugin = %plugin_name, handle, %err, "views: close failed");
