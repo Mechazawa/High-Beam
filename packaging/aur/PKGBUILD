@@ -7,7 +7,7 @@
 # ship an `x86_64-unknown-linux-gnu` binary in CI.
 pkgname=high-beam-bin
 _pkgname=high-beam
-pkgver=0.1.0
+pkgver=0.2.2
 pkgrel=1
 pkgdesc="Native Rust keyboard launcher (Spotlight / Alfred / Raycast class)"
 arch=('x86_64')
