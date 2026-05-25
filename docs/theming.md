@@ -26,6 +26,9 @@ muted      = "#86868b"       # subtitle / placeholder text
 highlight  = "#0a84ff"       # accent (e.g. selected-row label)
 selection  = "#0a84ff33"     # selected-row fill
 border     = "#00000010"     # window outline
+error      = "#d70015"       # Text tone="error", danger Button bg, error-frame banner
+success    = "#0c8430"       # Text tone="success"
+warning    = "#b75f00"       # Text tone="warning"
 
 [font]
 family       = "SF Pro Display, Inter, system-ui"
