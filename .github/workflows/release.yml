@@ -68,7 +68,7 @@ jobs:
           KEYCHAIN_PATH="$RUNNER_TEMP/highbeam-signing.keychain-db"
           KEYCHAIN_PASSWORD="$(uuidgen)"
 
-          echo "$MACOS_CERT_P12_BASE64" | base64 --decode > "$CERT_PATH"
+          printenv MACOS_CERT_P12_BASE64 | base64 --decode > "$CERT_PATH"
 
           # Ephemeral keychain so we don't pollute the runner's login.keychain
           # (which doesn't exist on GHA macos-latest anyway, but the pattern
@@ -148,7 +148,9 @@ jobs:
               rpm
 
       - name: Install cargo-packager
-        run: cargo install cargo-packager --locked
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-packager
 
       # These four recipes are added by the sibling agent wiring Linux
       # packaging. They wrap `cargo packager --release --formats <fmt>` so
