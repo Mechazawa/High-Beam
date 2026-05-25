@@ -149,7 +149,7 @@ export component ViewFrameView {
                         // a click — matches platform conventions.
                         key-pressed(event) => {
                             if (block.has-on-click
-                                && (event.text == Key.Return || event.text == " ")) {
+                                && (event.text == Key.Return || event.text == Key.Space)) {
                                 root.block-clicked(block.on-click-id);
                                 return accept;
                             }
