@@ -247,7 +247,10 @@ impl Theme {
         let dark_colors_base = if user_set_base_colors {
             base_colors.clone()
         } else {
-            defaults.dark.colors.clone()
+            // `defaults.dark.colors` isn't read after this branch, so move
+            // rather than clone — the rest of `defaults` is dropped on the
+            // next scope exit.
+            defaults.dark.colors
         };
         let dark = ThemeVariant {
             colors: match raw_colors.dark {
