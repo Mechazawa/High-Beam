@@ -38,4 +38,8 @@ declare module 'highbeam:settings' {
     export * from './settings';
 }
 
+declare module 'highbeam:view' {
+    export * from './view';
+}
+
 export * from './types';

@@ -1,7 +1,8 @@
-// `highbeam:actions` — builders for `Result.action`. Requires the `actions`
-// capability. Returns plain objects matching the host's wire shape.
+// `highbeam:actions` — builders for `Result.action` and the closures
+// inside a view's `on*` handlers. Requires the `actions` capability.
+// Returns plain objects matching the host's wire shape.
 
-import type { Action } from './types';
+import type { Action, ViewDef } from './types';
 
 /**
  * Open a URL with the system handler (`/usr/bin/open` on macOS,
@@ -27,3 +28,22 @@ export function exec(cmd: string, args: readonly string[]): Action;
  * - Linux: best-effort `xdg-open <parent_dir>` — no selection.
  */
 export function reveal(path: string): Action;
+
+/**
+ * Push a view onto the stack. `props` are passed to the view's `setup`.
+ * `opts.reset` clears the stack first so the new frame is the only frame.
+ *
+ * See [docs/views.md](../../docs/views.md) for the contract a `ViewDef`
+ * must satisfy.
+ */
+export function showView<P extends object = object>(
+    view: ViewDef<P>,
+    props?: P,
+    opts?: { reset?: boolean },
+): Action;
+
+/**
+ * Pops the top frame. A bare `Action` constant — use as
+ * `onClick: closeView` (no call) or return it from a closure.
+ */
+export const closeView: Action;

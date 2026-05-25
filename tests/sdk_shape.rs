@@ -14,11 +14,12 @@ use high_beam::sdk::r#match::MatchModule;
 use high_beam::sdk::platform::PlatformModule;
 use high_beam::sdk::settings::SettingsModule;
 use high_beam::sdk::system::SystemModule;
+use high_beam::sdk::view::ViewModule;
 
 /// Mirrors `sdk/highbeam/<name>.d.ts`.
 fn expected_for(name: &str) -> &'static [&'static str] {
     match name {
-        "highbeam:actions" => &["openUrl", "copy", "exec", "reveal"],
+        "highbeam:actions" => &["openUrl", "copy", "exec", "reveal", "showView", "closeView"],
         "highbeam:http" => &["get", "post", "put", "patch", "delete"],
         "highbeam:clipboard" => &["read", "write"],
         "highbeam:fs" => &["readDir", "readFile", "readText", "readCache", "writeCache"],
@@ -27,6 +28,19 @@ fn expected_for(name: &str) -> &'static [&'static str] {
         "highbeam:system" => &["exec", "applescript"],
         "highbeam:platform" => &["os", "arch", "version", "isMacOS", "isLinux"],
         "highbeam:settings" => &["get", "getString", "getBool", "getInt"],
+        "highbeam:view" => &[
+            "Stack",
+            "Divider",
+            "Heading",
+            "Text",
+            "Spinner",
+            "ProgressBar",
+            "Button",
+            "Input",
+            "TextArea",
+            "Image",
+            "Row",
+        ],
         other => {
             panic!("expected_for({other}): no expected list — keep this in sync with sdk/highbeam")
         }
@@ -58,6 +72,7 @@ enum OneShotLoader {
     System,
     Platform,
     Settings,
+    View,
 }
 
 impl Loader for OneShotLoader {
@@ -72,6 +87,7 @@ impl Loader for OneShotLoader {
             Self::System => Module::declare_def::<SystemModule, _>(ctx.clone(), name),
             Self::Platform => Module::declare_def::<PlatformModule, _>(ctx.clone(), name),
             Self::Settings => Module::declare_def::<SettingsModule, _>(ctx.clone(), name),
+            Self::View => Module::declare_def::<ViewModule, _>(ctx.clone(), name),
         }
     }
 }
@@ -166,4 +182,9 @@ fn platform_module_exports_match_dts() {
 #[test]
 fn settings_module_exports_match_dts() {
     assert_module_exports("highbeam:settings", OneShotLoader::Settings);
+}
+
+#[test]
+fn view_module_exports_match_dts() {
+    assert_module_exports("highbeam:view", OneShotLoader::View);
 }

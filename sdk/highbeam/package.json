@@ -41,6 +41,14 @@
         "./platform": {
             "types": "./platform.d.ts",
             "import": "./platform.js"
+        },
+        "./settings": {
+            "types": "./settings.d.ts",
+            "import": "./settings.js"
+        },
+        "./view": {
+            "types": "./view.d.ts",
+            "import": "./view.js"
         }
     },
     "peerDependencies": {

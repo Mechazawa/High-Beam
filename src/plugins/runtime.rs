@@ -45,6 +45,7 @@ use crate::sdk::platform::PlatformModule;
 use crate::sdk::settings::{self, SettingsModule};
 use crate::sdk::system;
 use crate::sdk::timers;
+use crate::sdk::view::ViewModule;
 
 /// JS-side normalizer: turns whatever `query()` returns into a real async
 /// iterator. Re-eval cost per query is negligible.
@@ -60,6 +61,7 @@ const SYSTEM_MODULE: &str = "highbeam:system";
 const MATCH_MODULE: &str = "highbeam:match";
 const PLATFORM_MODULE: &str = "highbeam:platform";
 const SETTINGS_MODULE: &str = "highbeam:settings";
+const VIEW_MODULE: &str = "highbeam:view";
 /// Slot on `globalThis` for the plugin's `query` export. We can't carry a
 /// `Module<'js>` across iterator `.await` points, and
 /// `Persistent<Function<'static>>` holds a raw `!Send` pointer that can't
@@ -870,6 +872,7 @@ impl Loader for HighbeamLoader {
             MATCH_MODULE => Module::declare_def::<MatchModule, _>(ctx.clone(), name),
             PLATFORM_MODULE => Module::declare_def::<PlatformModule, _>(ctx.clone(), name),
             SETTINGS_MODULE => Module::declare_def::<SettingsModule, _>(ctx.clone(), name),
+            VIEW_MODULE => Module::declare_def::<ViewModule, _>(ctx.clone(), name),
             other => Err(JsError::new_loading_message(
                 name,
                 format!("`{other}` is registered in the capability table but not in the loader"),
