@@ -670,17 +670,30 @@ fn flatten_block(value: &serde_json::Value, out: &mut Vec<ViewBlock>) {
             .to_owned()
     };
 
-    let text = read_str("text");
+    // For Button + Row the visible "text" is what the SDK calls
+    // `label` — types.slint already documents text as doubling for
+    // the button label, so route the JSON field accordingly here so
+    // the Slint side only ever reads `block.text` for visible
+    // rendering.
+    let text = if kind == "button" || kind == "row" {
+        read_str("label")
+    } else {
+        read_str("text")
+    };
     let tone = read_str("tone");
     let size = read_str("size");
     let value_text = read_str("value");
     let id = read_str("id");
     // `label` doubles as the Input/TextArea `placeholder` since the
-    // two are mutually exclusive per block kind.
+    // two are mutually exclusive per block kind. Spinner/Progress
+    // keep their own `label` JSON field. Button/Row already
+    // consumed `label` above into `text`, so they leave this empty.
     let label = if kind == "input" || kind == "textarea" {
         read_str("placeholder")
-    } else {
+    } else if kind == "spinner" || kind == "progress" {
         read_str("label")
+    } else {
+        String::new()
     };
 
     let on_click_id = read_callback_id(obj.get("onClick"));

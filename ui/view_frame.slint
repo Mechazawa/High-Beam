@@ -147,6 +147,12 @@ export component ViewFrameView {
                         }
                     }
                     if block.kind == "button": button-focus := FocusScope {
+                        // FocusScope without explicit sizing fills the
+                        // parent layout; pin to the child's height so
+                        // each button is one row tall instead of
+                        // crowding everything else off-screen.
+                        height: 28px;
+
                         // Enter or Space on a focused button counts as
                         // a click — matches platform conventions.
                         key-pressed(event) => {
@@ -194,16 +200,19 @@ export component ViewFrameView {
                         }
                     }
                     if block.kind == "input": HorizontalLayout {
-                        // Slint's LineEdit owns its internal text state;
-                        // we seed it from `block.value` and notify Rust
-                        // on every edited(string) emission. The
-                        // controlled-cursor concern (Stage 4c
-                        // commitment) is handled by NOT mirroring
-                        // `block.value` back into `input.text` on
-                        // every re-render — only the first paint and
-                        // explicit value resets.
+                        // Slint's LineEdit owns its internal text
+                        // state. We seed it once on creation via
+                        // `init` so the initial `value` prop lands;
+                        // we deliberately do NOT bind `text: block.value`
+                        // because every state mutation re-renders the
+                        // tree and `block.value` would reset the
+                        // LineEdit on every keystroke (cursor +
+                        // focus lost mid-typing). Tradeoff: programmatic
+                        // resets after init don't propagate; plugin
+                        // authors who need that pop + re-push the
+                        // view.
                         input-edit := LineEdit {
-                            text: block.value;
+                            init => { self.text = block.value; }
                             placeholder-text: block.label;
                             font-size: root.font-size-subtitle;
                             edited(text) => {
