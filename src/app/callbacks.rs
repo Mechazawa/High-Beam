@@ -2,11 +2,13 @@
 //! cycling, install-confirmation routing. The runtime thread reaches in via
 //! a `mpsc` channel; this module owns the UI-thread side of the bridge.
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use slint::{ComponentHandle, ModelRc, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use tokio::sync::mpsc;
 
 use crate::QueryWindow;
@@ -599,7 +601,7 @@ fn paint_view_error(plugin: &str, handle: u64, message: &str, stack: &str, weak:
     }];
     window.set_view_frame_title(format!("{plugin} crashed").into());
     window.set_view_has_title(true);
-    window.set_view_blocks(ModelRc::new(VecModel::from(blocks)));
+    sync_view_blocks_model(&window, blocks);
     window.invoke_show_view_frame();
 }
 
@@ -641,8 +643,48 @@ fn paint_view_tree(plugin: &str, handle: u64, tree_json: &str, weak: &slint::Wea
 
     window.set_view_frame_title(title.unwrap_or_default().into());
     window.set_view_has_title(has_title);
-    window.set_view_blocks(ModelRc::new(VecModel::from(blocks)));
+    sync_view_blocks_model(&window, blocks);
     window.invoke_show_view_frame();
+}
+
+/// Update the persistent [`VecModel`] backing the window's
+/// `view_blocks` property in place. Slint's `for`-loop preserves
+/// child-element identity per row index — so as long as the model
+/// itself is the same `Rc`, the per-row `LineEdit` / `FocusScope`
+/// instances survive across re-renders. Replacing the whole
+/// `ModelRc` (the previous behaviour) rebuilt every child, which
+/// stole focus from an Input mid-typing on every keystroke.
+fn sync_view_blocks_model(window: &QueryWindow, blocks: Vec<ViewBlock>) {
+    // One persistent model per Slint thread (which is also the only
+    // thread that calls this).
+    thread_local! {
+        static MODEL: RefCell<Option<Rc<VecModel<ViewBlock>>>> = const { RefCell::new(None) };
+    }
+
+    let model = MODEL.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        if let Some(existing) = borrow.as_ref() {
+            return Rc::clone(existing);
+        }
+        let fresh = Rc::new(VecModel::<ViewBlock>::default());
+        window.set_view_blocks(ModelRc::from(Rc::clone(&fresh)));
+        *borrow = Some(Rc::clone(&fresh));
+        fresh
+    });
+
+    let new_len = blocks.len();
+    let cur_len = model.row_count();
+    let common = cur_len.min(new_len);
+
+    for (i, block) in blocks.iter().take(common).enumerate() {
+        model.set_row_data(i, block.clone());
+    }
+    for block in blocks.into_iter().skip(common) {
+        model.push(block);
+    }
+    while model.row_count() > new_len {
+        model.remove(model.row_count() - 1);
+    }
 }
 
 /// Walk one tree node, appending the rendered block(s) it represents to

@@ -84,6 +84,12 @@ export component ViewFrameView {
         ScrollView {
             VerticalLayout {
                 spacing: 4px;
+                // `stretch` (the default) would distribute extra space
+                // across rows, opening a vertical gap whenever the
+                // rendered tree is shorter than the view's height.
+                // Pin to the top so a 3-line view sits at the top
+                // and the rest of the area stays empty.
+                alignment: start;
 
                 for block in root.blocks: VerticalLayout {
                     if block.kind == "heading": Text {
