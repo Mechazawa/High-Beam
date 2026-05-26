@@ -435,6 +435,7 @@ fn clear_view_stack_for_hide(
     tracing::info!(count = popped.len(), "views: stack drained on launcher hide",);
 
     if let Some(window) = weak.upgrade() {
+        sync_view_blocks_model(&window, Vec::new());
         window.invoke_show_query();
     }
 }
@@ -908,6 +909,11 @@ fn handle_view_close_request(
     if depth == 0
         && let Some(window) = weak.upgrade()
     {
+        // Drain the persistent view-blocks model so the next view
+        // session starts with fresh Slint elements — otherwise a
+        // surviving LineEdit's internal text carries over from the
+        // previous session even though JS-side state is fresh.
+        sync_view_blocks_model(&window, Vec::new());
         window.invoke_show_query();
     }
 }
@@ -1008,6 +1014,11 @@ fn pop_view_frame(
     if depth == 0
         && let Some(window) = weak.upgrade()
     {
+        // Drain the persistent view-blocks model so the next view
+        // session starts with fresh Slint elements — otherwise a
+        // surviving LineEdit's internal text carries over from the
+        // previous session even though JS-side state is fresh.
+        sync_view_blocks_model(&window, Vec::new());
         window.invoke_show_query();
     }
 }
