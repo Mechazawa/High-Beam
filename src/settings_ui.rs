@@ -7,7 +7,9 @@
 //! pipeline; the settings view talks to the same `QueryWindow` but its
 //! state is independent of the query/results state.
 
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::thread;
 
 use serde_json::Value as JsonValue;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
@@ -63,19 +65,27 @@ struct Inner {
     /// `OnceLock` so the controller's already-wired callbacks see the
     /// registration as soon as the daemon installs it.
     hotkey_registration: OnceLock<Arc<HotkeyRegistration>>,
+    /// Mutators send `()` here; the writer thread drains the queue and
+    /// flushes once per burst.
+    dirty_tx: mpsc::Sender<()>,
 }
 
 impl SettingsController {
-    /// Build a controller from the manifest scan + initial loaded settings.
+    /// Build a controller and spawn the writer thread that drains the
+    /// dirty-signal channel.
     #[must_use]
     pub fn new(manifests: Vec<Manifest>, settings: Settings) -> Self {
-        Self {
-            inner: Arc::new(Inner {
-                manifests,
-                settings: Mutex::new(settings),
-                hotkey_registration: OnceLock::new(),
-            }),
-        }
+        let (dirty_tx, dirty_rx) = mpsc::channel::<()>();
+        let inner = Arc::new(Inner {
+            manifests,
+            settings: Mutex::new(settings),
+            hotkey_registration: OnceLock::new(),
+            dirty_tx,
+        });
+
+        spawn_writer_thread(Arc::downgrade(&inner), dirty_rx);
+
+        Self { inner }
     }
 
     /// Wire the live OS hotkey registration so capture / reset paths can
@@ -112,14 +122,13 @@ impl SettingsController {
             }
         });
 
-        let ctrl = self.clone();
         let weak = window.as_weak();
 
         window.on_close_settings(move || {
-            // Persist on close — the toggle/set callbacks also persist, but
-            // close acts as a final commit point if anything fell through.
+            // Each mutator already queued a dirty signal, so the writer
+            // thread will flush whatever's outstanding. Closing the view
+            // doesn't need its own write — the queued one is sufficient.
             if let Some(w) = weak.upgrade() {
-                ctrl.persist().log_warn("settings: persist on close failed");
                 w.set_current_view(0);
             }
         });
@@ -215,8 +224,8 @@ impl SettingsController {
         let ctrl = self.clone();
         let weak = window.as_weak();
 
-        window.on_cycle_alt_action_modifier(move || {
-            ctrl.cycle_alt_action_modifier();
+        window.on_set_alt_action_modifier(move |value| {
+            ctrl.set_alt_action_modifier(value.as_str());
 
             if let Some(w) = weak.upgrade() {
                 ctrl.refresh_global(&w);
@@ -249,27 +258,16 @@ impl SettingsController {
             settings.set_hotkey(value);
         }
 
-        if let Err(err) = self.persist() {
-            tracing::warn!(%err, "settings: persist after hotkey-set failed");
-        }
+        self.queue_persist();
     }
 
-    fn cycle_alt_action_modifier(&self) {
+    fn set_alt_action_modifier(&self, value: &str) {
         {
             let mut settings = self.inner.settings.lock().expect("settings lock");
-            let current = settings.alt_action_modifier();
-            let idx = crate::settings::ALT_ACTION_MODIFIER_CHOICES
-                .iter()
-                .position(|c| *c == current)
-                .unwrap_or(0);
-            let next_idx = (idx + 1) % crate::settings::ALT_ACTION_MODIFIER_CHOICES.len();
-
-            settings.set_alt_action_modifier(crate::settings::ALT_ACTION_MODIFIER_CHOICES[next_idx]);
+            settings.set_alt_action_modifier(value);
         }
 
-        if let Err(err) = self.persist() {
-            tracing::warn!(%err, "settings: persist after alt-action-modifier change failed");
-        }
+        self.queue_persist();
     }
 
     /// Last saved launcher window origin, or `None` if the user has never
@@ -373,24 +371,19 @@ impl SettingsController {
         if entries.is_empty() {
             return;
         }
-        let result = {
+
+        {
             let mut s = self.inner.settings.lock().expect("settings lock");
 
             for (name, version) in entries {
                 s.set_last_loaded_version(name, version.clone());
             }
-            s.save()
-        };
-
-        if let Err(err) = result {
-            tracing::warn!(%err, "settings: could not persist last_loaded_version after lifecycle dispatch");
         }
+
+        self.queue_persist();
     }
 
-    /// Record a new launcher window origin and flush to disk. Used by the
-    /// window layer after the user finishes a drag; persistence is best-
-    /// effort because losing the latest position is preferable to a
-    /// blocked hide path.
+    /// Record a new launcher window origin and queue a disk flush.
     ///
     /// # Panics
     ///
@@ -402,9 +395,7 @@ impl SettingsController {
             settings.set_launcher_position(position);
         }
 
-        if let Err(err) = self.persist() {
-            tracing::warn!(%err, "settings: persist after launcher-position-set failed");
-        }
+        self.queue_persist();
     }
 
     /// Forget the saved launcher position. The next show recenters via the
@@ -420,9 +411,7 @@ impl SettingsController {
             settings.clear_launcher_position();
         }
 
-        if let Err(err) = self.persist() {
-            tracing::warn!(%err, "settings: persist after launcher-position-clear failed");
-        }
+        self.queue_persist();
     }
 
     fn refresh_slots(&self, window: &QueryWindow) {
@@ -478,9 +467,7 @@ impl SettingsController {
             settings.set_plugin_enabled(plugin, enabled);
         }
 
-        if let Err(err) = self.persist() {
-            tracing::warn!(plugin, %err, "settings: persist after toggle failed");
-        }
+        self.queue_persist();
     }
 
     fn set_option(&self, plugin: &str, key: &str, value: JsonValue) {
@@ -489,9 +476,7 @@ impl SettingsController {
             settings.set_plugin_option(plugin, key, value);
         }
 
-        if let Err(err) = self.persist() {
-            tracing::warn!(plugin, key, %err, "settings: persist after option-set failed");
-        }
+        self.queue_persist();
     }
 
     /// String callback handles two kinds: actual `string` options (pass
@@ -547,10 +532,52 @@ impl SettingsController {
         self.set_option(plugin, key, value);
     }
 
-    fn persist(&self) -> std::io::Result<()> {
-        let settings = self.inner.settings.lock().expect("settings lock");
-        settings.save()
+    fn queue_persist(&self) {
+        self.inner
+            .dirty_tx
+            .send(())
+            .log_debug("settings: writer thread receiver gone");
     }
+
+    /// Synchronously save settings to disk, bypassing the writer thread.
+    /// For tests that assert on-disk state right after a mutation.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the settings mutex is poisoned. See
+    /// [`Self::launcher_position`] for the rationale.
+    pub fn flush(&self) {
+        let settings = self.inner.settings.lock().expect("settings lock");
+        settings.save().log_warn("settings: flush failed");
+    }
+}
+
+/// Block on the dirty-signal channel and flush after each burst. Exits
+/// when the last `SettingsController` clone drops the sender.
+fn spawn_writer_thread(weak_inner: Weak<Inner>, rx: mpsc::Receiver<()>) {
+    let spawn_result = thread::Builder::new()
+        .name("highbeam-settings-writer".into())
+        .spawn(move || {
+            while rx.recv().is_ok() {
+                // Drain coalesced signals before each save.
+                while rx.try_recv().is_ok() {}
+
+                let Some(inner) = weak_inner.upgrade() else {
+                    break;
+                };
+                let snapshot = match inner.settings.lock() {
+                    Ok(g) => g.clone(),
+                    Err(err) => {
+                        tracing::error!(?err, "settings: writer saw poisoned lock");
+                        break;
+                    }
+                };
+                drop(inner);
+                snapshot.save().log_warn("settings: writer save failed");
+            }
+        });
+
+    spawn_result.log_warn("settings: writer thread spawn failed");
 }
 
 fn option_row(
@@ -708,6 +735,10 @@ mod tests {
         let ctrl = SettingsController::new(manifests, settings);
 
         ctrl.set_option_for_kind("p", "limit", "999");
+        // Mutators queue an async write; flush synchronously so we can
+        // assert on the on-disk state without racing the writer thread.
+        ctrl.flush();
+
         let reloaded = Settings::load_from(&path);
         let opts = reloaded.plugin_options("p");
         assert_eq!(opts.get("limit"), Some(&JsonValue::Number(20.into())));
@@ -726,12 +757,11 @@ mod tests {
         assert!(!ctrl.alt_modifier_held(MOD_SHIFT));
         assert!(!ctrl.alt_modifier_held(0));
 
-        // Switching the setting via cycle reaches each choice in turn.
-        ctrl.cycle_alt_action_modifier(); // Alt -> Shift
+        ctrl.set_alt_action_modifier("Shift");
         assert!(ctrl.alt_modifier_held(MOD_SHIFT));
         assert!(!ctrl.alt_modifier_held(MOD_ALT));
 
-        ctrl.cycle_alt_action_modifier(); // Shift -> Cmd
+        ctrl.set_alt_action_modifier("Cmd");
         #[cfg(target_os = "macos")]
         {
             // Slint reports physical Cmd as `control` on macOS.
@@ -744,7 +774,7 @@ mod tests {
             assert!(!ctrl.alt_modifier_held(MOD_CONTROL));
         }
 
-        ctrl.cycle_alt_action_modifier(); // Cmd -> Ctrl
+        ctrl.set_alt_action_modifier("Ctrl");
         #[cfg(target_os = "macos")]
         {
             assert!(ctrl.alt_modifier_held(MOD_META));
@@ -756,7 +786,7 @@ mod tests {
             assert!(!ctrl.alt_modifier_held(MOD_META));
         }
 
-        ctrl.cycle_alt_action_modifier(); // Ctrl -> wraps back to Alt
+        ctrl.set_alt_action_modifier("Alt");
         assert!(ctrl.alt_modifier_held(MOD_ALT));
     }
 }
