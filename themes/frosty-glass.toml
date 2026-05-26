@@ -1,0 +1,34 @@
+# Frosty Glass — adapted from Jinseon Yoo's Alfred theme of the same name
+# (https://www.alfredapp.com/extras/theme/pIHG1CUr9j/). Translucent
+# near-white panel, neutral grey accents, generous corner rounding.
+#
+# To use: copy this file to `theme.toml` in your platform config dir.
+
+[colors]
+background = "#ffffffd9"   # frosted-glass panel — relies on backdrop blur where available
+foreground = "#323231"     # warm near-black text
+muted      = "#0000007a"   # 45 % black, matches the Alfred subtext setting
+highlight  = "#5a5a5a"     # neutral dark grey (the theme's accent)
+selection  = "#5a5a5a26"   # subtle grey wash on the selected row
+border     = "#cbcbcbf3"   # light grey separator at high alpha
+
+# Dark counterpart — Frosty Glass shipped only a light variant; the dark
+# values here keep the same neutral-grey aesthetic flipped to a dim
+# translucent charcoal.
+[colors.dark]
+background = "#1a1a1ad9"
+foreground = "#f0f0f0"
+muted      = "#ffffff7a"
+highlight  = "#a0a0a0"
+selection  = "#ffffff1a"
+border     = "#3a3a3a"
+
+[font]
+family        = ""
+size_query    = 32
+size_title    = 14
+size_subtitle = 12
+
+[window]
+width         = 760
+border_radius = 22   # the original is 22 px on the search field

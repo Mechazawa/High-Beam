@@ -1,0 +1,32 @@
+# Solarized — Ethan Schoonover's classic paired palette
+# (https://ethanschoonover.com/solarized). Light uses base3/base00, dark
+# uses base03/base0; the accent blue #268bd2 is shared between both modes.
+#
+# To use: copy this file to `theme.toml` in your platform config dir.
+
+[colors]
+# Light (base3) base — used when `theme_mode = "light"` or auto + light OS.
+background = "#fdf6e3f2"   # base3
+foreground = "#657b83"     # base00 (body text, light mode)
+muted      = "#93a1a1"     # base1
+highlight  = "#268bd2"     # Solarized blue
+selection  = "#268bd230"   # blue wash
+border     = "#eee8d5"     # base2
+
+[colors.dark]
+background = "#002b36f2"   # base03
+foreground = "#839496"     # base0 (body text, dark mode)
+muted      = "#586e75"     # base01
+highlight  = "#268bd2"
+selection  = "#268bd230"
+border     = "#073642"     # base02
+
+[font]
+family        = ""
+size_query    = 32
+size_title    = 14
+size_subtitle = 12
+
+[window]
+width         = 760
+border_radius = 14

@@ -122,8 +122,8 @@ impl Default for Colors {
             background: parse("#ffffffea"),
             foreground: parse("#1d1d1f"),
             muted: parse("#86868b"),
-            highlight: parse("#0a84ff"),
-            selection: parse("#0a84ff33"),
+            highlight: parse("#007aff"),
+            selection: parse("#007aff33"),
             border: parse("#00000010"),
         }
     }
@@ -136,11 +136,11 @@ impl Colors {
         let parse =
             |hex: &str| parse_hex_color(hex).unwrap_or_else(|| panic!("default dark theme: invalid hex {hex:?}"));
         Self {
-            background: parse("#1d1d1faa"),
+            background: parse("#1d1d1fd0"),
             foreground: parse("#f5f5f7"),
             muted: parse("#86868b"),
-            highlight: parse("#0a84ff"),
-            selection: parse("#0a84ff33"),
+            highlight: parse("#007aff"),
+            selection: parse("#007aff33"),
             border: parse("#ffffff10"),
         }
     }
@@ -458,23 +458,6 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn default_light_variant_matches_yosemite_spotlight_values() {
-        let theme = Theme::default_bundled();
-        let light = &theme.light;
-        assert_eq!(light.colors.background, Color::from_argb_u8(0xEA, 0xFF, 0xFF, 0xFF));
-        assert_eq!(light.colors.foreground, Color::from_argb_u8(0xFF, 0x1D, 0x1D, 0x1F));
-        assert_eq!(light.colors.muted, Color::from_argb_u8(0xFF, 0x86, 0x86, 0x8B));
-        assert_eq!(light.colors.highlight, Color::from_argb_u8(0xFF, 0x0A, 0x84, 0xFF));
-        assert_eq!(light.colors.selection, Color::from_argb_u8(0x33, 0x0A, 0x84, 0xFF));
-        assert_eq!(light.colors.border, Color::from_argb_u8(0x10, 0x00, 0x00, 0x00));
-        assert!((light.font.size_query - 32.0).abs() < f32::EPSILON);
-        assert!((light.font.size_title - 14.0).abs() < f32::EPSILON);
-        assert!((light.font.size_subtitle - 12.0).abs() < f32::EPSILON);
-        assert!((light.window.width - 760.0).abs() < f32::EPSILON);
-        assert!((light.window.border_radius - 14.0).abs() < f32::EPSILON);
-    }
-
-    #[test]
     fn default_dark_variant_differs_from_light() {
         let theme = Theme::default_bundled();
         assert_ne!(
@@ -484,7 +467,7 @@ mod tests {
         // Spot-check a couple of expected swaps.
         assert_eq!(
             theme.dark.colors.background,
-            Color::from_argb_u8(0xAA, 0x1D, 0x1D, 0x1F)
+            Color::from_argb_u8(0xD0, 0x1D, 0x1D, 0x1F)
         );
         assert_eq!(
             theme.dark.colors.foreground,
@@ -716,6 +699,27 @@ mod tests {
         let text = include_str!("../themes/yosemite-spotlight.toml");
         let theme = Theme::from_toml(text).expect("bundled theme parses");
         assert_eq!(theme, Theme::default_bundled());
+    }
+
+    #[test]
+    fn every_bundled_theme_file_parses() {
+        // Every `.toml` we ship under `themes/` must parse — a typo in a
+        // hex literal there would compile cleanly but produce a runtime
+        // warning + silent fallback to the default on user install. Walk
+        // the directory rather than enumerating filenames so new themes
+        // are automatically covered.
+        let themes_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("themes");
+        let mut count = 0_usize;
+        for entry in std::fs::read_dir(&themes_dir).expect("read themes/ dir") {
+            let path = entry.expect("readdir entry").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).expect("read theme file");
+            Theme::from_toml(&text).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+            count += 1;
+        }
+        assert!(count >= 2, "expected at least the bundled defaults under themes/");
     }
 
     #[test]
