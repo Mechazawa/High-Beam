@@ -307,23 +307,27 @@ pub(crate) fn hide_and_persist_position(window: &QueryWindow, settings: &Setting
 /// show would put the window in the void.
 ///
 /// On cold start the winit window hasn't been realised yet (Slint creates
-/// it in `about_to_wait` on the next event-loop tick), so `monitor_rects`
-/// returns empty and the off-screen check can't be made. In that case we
-/// seed the position into `WindowAttributes` via `slint::Window::set_position`
-/// — winit uses that as the new window's origin and validation runs the
-/// next time `show` fires with the winit window live.
+/// it in `about_to_wait` on the next event-loop tick), so we can't query
+/// monitors at all. In that case we seed the position into
+/// `WindowAttributes` via `slint::Window::set_position` — winit uses that
+/// as the new window's origin and the off-screen check runs the next time
+/// `show` fires with the winit window live. We distinguish "no winit yet"
+/// from "winit alive but `available_monitors()` is empty" (e.g. KVM
+/// mid-switch, lid closed during wake) so the latter still falls through
+/// to the recenter path and doesn't blindly trust a possibly-off-screen
+/// saved value.
 fn apply_saved_or_centered_position(window: &QueryWindow, settings: &SettingsController) {
     let Some(saved) = settings.launcher_position() else {
         center_on_focused_display(window);
         return;
     };
 
-    let rects = monitor_rects(window);
-
-    if rects.is_empty() {
+    if !window.window().has_winit_window() {
         set_outer_position(window, saved);
         return;
     }
+
+    let rects = monitor_rects(window);
 
     if !position_visible_on_any_monitor(saved, &rects) {
         tracing::info!(
@@ -704,11 +708,13 @@ mod tests {
 
     #[test]
     fn position_visible_requires_at_least_one_monitor() {
-        // No monitors in the slice means the pure check can't validate; the
-        // host short-circuits ahead of this call (`apply_saved_or_centered_position`
-        // treats empty rects as "winit window not yet realised, trust the
-        // saved value") so this branch fires only when monitors really are
-        // empty.
+        // Empty rects = winit is alive but `available_monitors()` returned
+        // nothing (e.g. KVM mid-switch, all displays disconnected). The
+        // host falls through to `center_on_focused_display` rather than
+        // trusting the saved value, so the pure check must return false.
+        // The "winit window not yet realised" cold-start case is handled
+        // above `monitor_rects` via `has_winit_window` and never reaches
+        // this branch.
         let pos = WindowPosition { x: 100, y: 100 };
         assert!(!position_visible_on_any_monitor(pos, &[]));
     }

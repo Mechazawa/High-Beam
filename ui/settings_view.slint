@@ -399,7 +399,20 @@ export component SettingsView {
                                 ComboBox {
                                     width: 160px;
                                     model: ["Alt", "Shift", "Cmd", "Ctrl"];
-                                    current-value: root.alt-action-modifier;
+                                    // `<=>` keeps the binding alive across
+                                    // user picks — a plain `:` binding gets
+                                    // severed the first time ComboBoxBase
+                                    // writes to current-value via select().
+                                    current-value <=> root.alt-action-modifier;
+                                    // current-index is independent of
+                                    // current-value inside ComboBoxBase, so
+                                    // derive it from the saved string or the
+                                    // popup highlight would point at "Alt"
+                                    // regardless of what's actually selected.
+                                    current-index: root.alt-action-modifier == "Shift" ? 1
+                                        : root.alt-action-modifier == "Cmd" ? 2
+                                        : root.alt-action-modifier == "Ctrl" ? 3
+                                        : 0;
                                     selected(value) => {
                                         root.set-alt-action-modifier(value);
                                     }
