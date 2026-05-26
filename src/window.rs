@@ -209,18 +209,10 @@ pub(crate) fn apply_theme(window: &QueryWindow, theme: &ThemeVariant) {
 }
 
 /// Show the window, position it (saved or centered), and focus the input.
-/// Idempotent — calling while already visible re-applies position and
-/// re-focuses ("focuses it if already open").
-///
-/// Focus-grab is platform-specific:
-/// * macOS uses `NSApp.activate(ignoringOtherApps:)` +
-///   `makeKeyAndOrderFront`; no token plumbing.
-/// * Wayland uses `xdg_activation_v1.activate(token, surface)` — the
-///   `activation_token` is forwarded from the invoking process (terminal
-///   keybind, IPC `--open`, etc.). Without it the compositor will not
-///   raise our surface above whatever is currently focused, and on
-///   GNOME-Mutter the launcher silently opens behind the active window.
-/// * X11 / other paths ignore the token; winit handles focus there.
+/// Idempotent. Focus-grab is platform-specific; on Wayland it needs
+/// `activation_token` (forwarded from the invoking process) or the
+/// compositor won't raise the surface — GNOME-Mutter opens it behind the
+/// active window. macOS uses `NSApp.activate`; X11 lets winit handle it.
 pub(crate) fn show(window: &QueryWindow, settings: &SettingsController, activation_token: Option<&str>) {
     // On Linux the previous dismiss may have left us in the `is-hidden`
     // collapsed-1×1 state instead of going through Slint's hide (which is
@@ -251,20 +243,15 @@ pub(crate) fn show(window: &QueryWindow, settings: &SettingsController, activati
     window.invoke_focus_input();
 }
 
-/// Hide the window. Clears the input text so the next open starts fresh —
-/// every close path (Esc, blur, programmatic) funnels through here.
-/// Does *not* persist position; use [`hide_and_persist_position`] for the
-/// user-driven close paths.
+/// Hide the window and clear the input so the next open starts fresh. Does
+/// *not* persist position — use [`hide_and_persist_position`] for that.
 ///
-/// On Linux this DELIBERATELY does NOT call `Window::hide()`. Slint 1.16's
-/// Wayland hide path destroys the underlying winit window via `suspend()`,
-/// and when the destroy fails (because Slint's renderer holds extra
-/// `Arc<winit::Window>` refs we can't drop from app code) the state still
-/// flips to "None" — so the *next* `show()` won't re-attach the surface
-/// and the launcher silently never opens again. Instead we set an
-/// `is-hidden` flag in the .slint file that collapses the visible content
-/// to 1×1 transparent, keeping Slint's `shown` state intact so subsequent
-/// activations work.
+/// On Linux this DELIBERATELY avoids `Window::hide()`: Slint 1.16's Wayland
+/// hide destroys the winit window and, when the destroy fails (renderer
+/// holds extra `Arc<winit::Window>` refs), leaves state in "None" so the
+/// next `show()` never re-attaches — the launcher silently dies. Instead we
+/// flip an `is-hidden` flag that collapses content to 1×1, keeping Slint's
+/// `shown` state intact.
 pub(crate) fn hide(window: &QueryWindow) {
     window.invoke_clear_input();
     #[cfg(target_os = "linux")]
