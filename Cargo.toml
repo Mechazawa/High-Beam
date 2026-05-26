@@ -2,7 +2,7 @@
 name = "high-beam"
 version = "0.2.2"
 edition = "2024"
-license = "MIT"
+license = "GPL-3.0-or-later"
 build = "build.rs"
 description = "Native Rust keyboard launcher (Spotlight / Alfred / Raycast / Ulauncher class)."
 authors = ["Bas Bieling"]
@@ -74,13 +74,13 @@ resources = [
     { src = "plugins/emoji-picker/emoji-data.json",    target = "plugins/emoji-picker/emoji-data.json" },
     { src = "plugins/obsidian/manifest.json",          target = "plugins/obsidian/manifest.json" },
     { src = "plugins/obsidian/plugin.js",              target = "plugins/obsidian/plugin.js" },
-    { src = "themes/yosemite-spotlight.toml",                   target = "themes/yosemite-spotlight.toml" },
-    { src = "themes/macos-tahoe.toml",                          target = "themes/macos-tahoe.toml" },
-    { src = "themes/frosty-glass.toml",                         target = "themes/frosty-glass.toml" },
-    { src = "themes/dracula.toml",                              target = "themes/dracula.toml" },
-    { src = "themes/nord.toml",                                 target = "themes/nord.toml" },
-    { src = "themes/solarized.toml",                            target = "themes/solarized.toml" },
-    { src = "themes/tokyo-night.toml",                          target = "themes/tokyo-night.toml" },
+    { src = "themes/yosemite-spotlight.toml",          target = "themes/yosemite-spotlight.toml" },
+    { src = "themes/macos-tahoe.toml",                 target = "themes/macos-tahoe.toml" },
+    { src = "themes/frosty-glass.toml",                target = "themes/frosty-glass.toml" },
+    { src = "themes/dracula.toml",                     target = "themes/dracula.toml" },
+    { src = "themes/nord.toml",                        target = "themes/nord.toml" },
+    { src = "themes/solarized.toml",                   target = "themes/solarized.toml" },
+    { src = "themes/tokyo-night.toml",                 target = "themes/tokyo-night.toml" },
 ]
 # `app`+`dmg` are macOS; `deb`/`pacman` are Linux. cargo-packager only
 # emits the format(s) valid for the current host OS — running on macOS

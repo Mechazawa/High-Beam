@@ -12,7 +12,7 @@ pkgrel=1
 pkgdesc="Native Rust keyboard launcher (Spotlight / Alfred / Raycast class)"
 arch=('x86_64')
 url="https://github.com/Mechazawa/high-beam"
-license=('MIT')
+license=('GPL-3.0-or-later')
 # Runtime deps mirror `[package.metadata.packager.pacman].depends` in
 # Cargo.toml. Keep the two in sync when you bump them.
 depends=('openssl' 'libxkbcommon' 'fontconfig')
