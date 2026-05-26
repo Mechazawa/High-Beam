@@ -97,7 +97,7 @@ jobs:
         run: just bundle
 
       - name: Upload macOS artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: macos
           path: |
@@ -168,7 +168,7 @@ jobs:
         run: just bundle-arch
 
       - name: Upload Linux artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: linux
           # cargo-packager writes .deb / .rpm / .pkg.tar.zst into
@@ -195,13 +195,13 @@ jobs:
           fetch-depth: 0
 
       - name: Download macOS artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: macos
           path: dist/macos
 
       - name: Download Linux artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: linux
           path: dist/linux
