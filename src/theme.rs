@@ -48,6 +48,27 @@ impl ThemeMode {
     }
 }
 
+/// Lenient, infallible parse — the read-side counterpart of [`as_str`].
+///
+/// Matched case-insensitively (so the title-cased settings-UI labels and a
+/// hand-capitalised `settings.toml` both work) and **total**: any unknown
+/// string degrades to [`ThemeMode::Auto`] rather than erroring, so a typo
+/// in the config never blocks daemon startup. That silent fallback is the
+/// deliberate trade — this is why it's `From` (infallible) and not
+/// `FromStr` (which would force a `Result` every caller just unwraps to
+/// the default anyway).
+///
+/// [`as_str`]: ThemeMode::as_str
+impl From<&str> for ThemeMode {
+    fn from(raw: &str) -> Self {
+        match raw.to_ascii_lowercase().as_str() {
+            "dark" => Self::Dark,
+            "light" => Self::Light,
+            _ => Self::Auto,
+        }
+    }
+}
+
 /// Resolved theme — both appearance variants are fully merged at load
 /// time, so [`Theme::variant_for`] is a cheap lookup. Defaults reproduce
 /// the bundled yosemite-spotlight theme (light values for light, dark

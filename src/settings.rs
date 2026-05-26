@@ -82,7 +82,8 @@ pub struct GlobalSettings {
     /// Which theme variant the launcher paints. `Auto` (the default)
     /// follows the OS appearance and repaints live when it flips; `Dark`
     /// / `Light` pin to one variant regardless. Unknown strings on disk
-    /// silently degrade to `Auto` — see [`normalize_theme_mode`].
+    /// silently degrade to `Auto` — see the `From<&str>` impl on
+    /// [`ThemeMode`].
     pub theme_mode: ThemeMode,
 }
 
@@ -121,20 +122,6 @@ pub fn normalize_alt_action_modifier(raw: &str) -> String {
         .iter()
         .find(|c| c.eq_ignore_ascii_case(raw))
         .map_or_else(|| DEFAULT_ALT_ACTION_MODIFIER.to_owned(), |c| (*c).to_owned())
-}
-
-/// Normalise a `theme_mode` string from disk to a [`ThemeMode`]. Matched
-/// case-insensitively against `auto` / `dark` / `light`; anything else
-/// degrades to [`ThemeMode::Auto`] (the default) so a typo never blocks
-/// startup. Mirrors [`normalize_alt_action_modifier`] in spirit.
-#[must_use]
-pub fn normalize_theme_mode(raw: &str) -> ThemeMode {
-    match raw.to_ascii_lowercase().as_str() {
-        "dark" => ThemeMode::Dark,
-        "light" => ThemeMode::Light,
-        "auto" => ThemeMode::Auto,
-        _ => ThemeMode::default(),
-    }
 }
 
 /// Per-plugin settings as we store them.
@@ -255,7 +242,7 @@ impl Settings {
             let theme_mode = raw_global
                 .theme_mode
                 .as_deref()
-                .map_or(ThemeMode::default(), normalize_theme_mode);
+                .map_or(ThemeMode::default(), ThemeMode::from);
 
             GlobalSettings {
                 hotkey: raw_global.hotkey.unwrap_or_else(|| DEFAULT_HOTKEY.to_owned()),
@@ -485,10 +472,10 @@ impl Settings {
     }
 
     /// Replace the theme-mode preference. Unknown values reset to
-    /// [`ThemeMode::Auto`] rather than persisting garbage on disk — same
-    /// guarantee the loader provides via [`normalize_theme_mode`].
+    /// [`ThemeMode::Auto`] rather than persisting garbage on disk — see
+    /// the lenient `From<&str>` impl on [`ThemeMode`].
     pub fn set_theme_mode(&mut self, value: &str) {
-        self.global.theme_mode = normalize_theme_mode(value);
+        self.global.theme_mode = ThemeMode::from(value);
     }
 
     /// Set the global hotkey accelerator string. Trimmed before storing so
