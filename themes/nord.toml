@@ -1,0 +1,32 @@
+# Nord — Arctic, north-bluish palette by Arctic Ice Studio
+# (https://www.nordtheme.com). Light variant uses Snow Storm, dark uses
+# Polar Night; Frost #88c0d0 is the accent in both.
+#
+# To use: copy this file to `theme.toml` in your platform config dir.
+
+[colors]
+# Light (Snow Storm) base — used when `theme_mode = "light"` or auto + light OS.
+background = "#eceff4f0"   # nord6 — Snow Storm 3
+foreground = "#2e3440"     # nord0  — Polar Night 0
+muted      = "#4c566a"     # nord3  — Polar Night 3
+highlight  = "#5e81ac"     # nord10 — Frost (deep)
+selection  = "#88c0d033"   # nord8 wash — Frost (bright)
+border     = "#d8dee9"     # nord4  — Snow Storm 1
+
+[colors.dark]
+background = "#2e3440f0"   # nord0
+foreground = "#eceff4"     # nord6
+muted      = "#d8dee9"     # nord4
+highlight  = "#88c0d0"     # nord8 — brighter Frost reads better against Polar Night
+selection  = "#88c0d033"
+border     = "#3b4252"     # nord1
+
+[font]
+family        = ""
+size_query    = 32
+size_title    = 14
+size_subtitle = 12
+
+[window]
+width         = 760
+border_radius = 14

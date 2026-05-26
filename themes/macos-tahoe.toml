@@ -1,0 +1,31 @@
+# macOS Tahoe — tracks the Liquid Glass redesign shipped in macOS 26 (2025).
+# Highly translucent panels, crisp text, the redesigned system blue accent.
+# Best paired with a Slint backend that can render true backdrop blur; on a
+# plain compositor the alpha values below still give a passable frosted look.
+#
+# To use: copy this file to `theme.toml` in your platform config dir.
+
+[colors]
+background = "#fefefedc"   # very translucent white — relies on the OS blur where available
+foreground = "#0a0a0c"     # near-black text for maximum contrast on glass
+muted      = "#6b6b6f"     # secondary content
+highlight  = "#0a7aff"     # Tahoe system blue (slightly brighter than Yosemite)
+selection  = "#0a7aff2e"   # subtle blue wash on the selected row
+border     = "#0000001a"   # delicate panel outline
+
+# Tahoe Dark — translucent near-black with the same blue accent.
+[colors.dark]
+background = "#15151acc"   # deeper-than-Spotlight charcoal, generous translucency
+foreground = "#f2f2f5"
+muted      = "#9a9aa0"
+border     = "#ffffff1f"
+
+[font]
+family        = ""
+size_query    = 32
+size_title    = 14
+size_subtitle = 12
+
+[window]
+width         = 760
+border_radius = 18    # Tahoe's rounder corners

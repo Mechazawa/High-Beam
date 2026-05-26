@@ -1,0 +1,32 @@
+# Tokyo Night — Enkia's modern dark theme (and matching Day light variant).
+# Storm (slightly lighter than the original) reads better as a launcher
+# panel than the pitch-black "Night" preset.
+#
+# To use: copy this file to `theme.toml` in your platform config dir.
+
+[colors]
+# Tokyo Night Storm — used when `theme_mode = "dark"` or auto + dark OS.
+background = "#24283bf2"   # storm panel
+foreground = "#c0caf5"     # storm foreground
+muted      = "#565f89"     # comment / subtle
+highlight  = "#7aa2f7"     # storm blue accent
+selection  = "#364a82"     # signature blue selection wash
+border     = "#1a1b26"     # one notch darker than panel for the outline
+
+[colors.light]
+background = "#e1e2e7f2"   # Tokyo Night Day panel
+foreground = "#3760bf"     # Day foreground
+muted      = "#848cb5"
+highlight  = "#2e7de9"     # Day accent blue
+selection  = "#2e7de933"
+border     = "#a8aecb"
+
+[font]
+family        = ""
+size_query    = 32
+size_title    = 14
+size_subtitle = 12
+
+[window]
+width         = 760
+border_radius = 14

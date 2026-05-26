@@ -1,0 +1,38 @@
+# Dracula — the canonical dark palette (https://draculatheme.com).
+# Officially dark-only; the [colors.light] block below is a faithful
+# inversion ("Dracula Light") for users who want the same accents under
+# `theme_mode = "light"`.
+#
+# To use: copy this file to `theme.toml` in your platform config dir.
+
+[colors]
+# Base is the dark palette so a launcher running with `theme_mode = "dark"`
+# (or auto + dark OS) hits the canonical Dracula values directly.
+background = "#282a36f2"   # the Dracula background (slightly translucent)
+foreground = "#f8f8f2"     # Dracula foreground
+muted      = "#6272a4"     # Dracula "comment" — secondary text
+highlight  = "#bd93f9"     # Dracula purple as the accent
+selection  = "#44475a"     # Dracula "current line" — the canonical selection wash
+border     = "#44475a"     # same neutral so the panel reads as one shape
+
+[colors.dark]
+# Dark = canonical (no overrides needed; declared so users adding tweaks
+# have an obvious anchor).
+
+[colors.light]
+background = "#f8f8f2f2"
+foreground = "#282a36"
+muted      = "#6272a4"
+highlight  = "#bd93f9"
+selection  = "#bd93f933"
+border     = "#00000014"
+
+[font]
+family        = ""
+size_query    = 32
+size_title    = 14
+size_subtitle = 12
+
+[window]
+width         = 760
+border_radius = 14
