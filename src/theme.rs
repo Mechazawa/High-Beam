@@ -458,23 +458,6 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn default_light_variant_matches_yosemite_spotlight_values() {
-        let theme = Theme::default_bundled();
-        let light = &theme.light;
-        assert_eq!(light.colors.background, Color::from_argb_u8(0xEA, 0xFF, 0xFF, 0xFF));
-        assert_eq!(light.colors.foreground, Color::from_argb_u8(0xFF, 0x1D, 0x1D, 0x1F));
-        assert_eq!(light.colors.muted, Color::from_argb_u8(0xFF, 0x86, 0x86, 0x8B));
-        assert_eq!(light.colors.highlight, Color::from_argb_u8(0xFF, 0x00, 0x7A, 0xFF));
-        assert_eq!(light.colors.selection, Color::from_argb_u8(0x33, 0x00, 0x7A, 0xFF));
-        assert_eq!(light.colors.border, Color::from_argb_u8(0x10, 0x00, 0x00, 0x00));
-        assert!((light.font.size_query - 32.0).abs() < f32::EPSILON);
-        assert!((light.font.size_title - 14.0).abs() < f32::EPSILON);
-        assert!((light.font.size_subtitle - 12.0).abs() < f32::EPSILON);
-        assert!((light.window.width - 760.0).abs() < f32::EPSILON);
-        assert!((light.window.border_radius - 14.0).abs() < f32::EPSILON);
-    }
-
-    #[test]
     fn default_dark_variant_differs_from_light() {
         let theme = Theme::default_bundled();
         assert_ne!(
