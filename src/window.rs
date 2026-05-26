@@ -316,6 +316,13 @@ pub(crate) fn hide_and_persist_position(window: &QueryWindow, settings: &Setting
 /// connected display. The off-screen check matters when the user unplugs
 /// the monitor the window was last positioned on — without it, the next
 /// show would put the window in the void.
+///
+/// On cold start the winit window hasn't been realised yet (Slint creates
+/// it in `about_to_wait` on the next event-loop tick), so `monitor_rects`
+/// returns empty and the off-screen check can't be made. In that case we
+/// seed the position into `WindowAttributes` via `slint::Window::set_position`
+/// — winit uses that as the new window's origin and validation runs the
+/// next time `show` fires with the winit window live.
 fn apply_saved_or_centered_position(window: &QueryWindow, settings: &SettingsController) {
     let Some(saved) = settings.launcher_position() else {
         center_on_focused_display(window);
@@ -323,6 +330,11 @@ fn apply_saved_or_centered_position(window: &QueryWindow, settings: &SettingsCon
     };
 
     let rects = monitor_rects(window);
+
+    if rects.is_empty() {
+        set_outer_position(window, saved);
+        return;
+    }
 
     if !position_visible_on_any_monitor(saved, &rects) {
         tracing::info!(
@@ -349,15 +361,13 @@ fn capture_outer_position(window: &QueryWindow) -> Option<WindowPosition> {
         .flatten()
 }
 
-/// Push the window's outer position via winit directly — `slint::Window::
-/// set_position` writes the inner/content position which on macOS differs
-/// from the outer `NSWindow` frame by the title bar height. We use the outer
-/// rect so a restored position lines up byte-identical with where the user
-/// dropped it.
+/// Push the window's outer position. `slint::Window::set_position` resolves
+/// to `winit::Window::set_outer_position` when the winit window is live, and
+/// to `WindowAttributes::position` (consumed at creation) when it isn't —
+/// so this works both for the live re-show path and for the cold-start path
+/// where Slint hasn't realised the winit window yet.
 fn set_outer_position(window: &QueryWindow, pos: WindowPosition) {
-    let _ = window.window().with_winit_window(|w: &winit::window::Window| {
-        w.set_outer_position(winit::dpi::PhysicalPosition::new(pos.x, pos.y));
-    });
+    window.window().set_position(slint::PhysicalPosition::new(pos.x, pos.y));
 }
 
 /// Kick off a native OS-driven window drag. winit's `drag_window()` blocks
@@ -705,9 +715,11 @@ mod tests {
 
     #[test]
     fn position_visible_requires_at_least_one_monitor() {
-        // No monitors known to winit (headless tests, backend not
-        // initialised) means we can't validate; the safe default is "treat
-        // as off-screen" so the host falls back to the centered path.
+        // No monitors in the slice means the pure check can't validate; the
+        // host short-circuits ahead of this call (`apply_saved_or_centered_position`
+        // treats empty rects as "winit window not yet realised, trust the
+        // saved value") so this branch fires only when monitors really are
+        // empty.
         let pos = WindowPosition { x: 100, y: 100 };
         assert!(!position_visible_on_any_monitor(pos, &[]));
     }

@@ -215,8 +215,8 @@ impl SettingsController {
         let ctrl = self.clone();
         let weak = window.as_weak();
 
-        window.on_cycle_alt_action_modifier(move || {
-            ctrl.cycle_alt_action_modifier();
+        window.on_set_alt_action_modifier(move |value| {
+            ctrl.set_alt_action_modifier(value.as_str());
 
             if let Some(w) = weak.upgrade() {
                 ctrl.refresh_global(&w);
@@ -254,17 +254,10 @@ impl SettingsController {
         }
     }
 
-    fn cycle_alt_action_modifier(&self) {
+    fn set_alt_action_modifier(&self, value: &str) {
         {
             let mut settings = self.inner.settings.lock().expect("settings lock");
-            let current = settings.alt_action_modifier();
-            let idx = crate::settings::ALT_ACTION_MODIFIER_CHOICES
-                .iter()
-                .position(|c| *c == current)
-                .unwrap_or(0);
-            let next_idx = (idx + 1) % crate::settings::ALT_ACTION_MODIFIER_CHOICES.len();
-
-            settings.set_alt_action_modifier(crate::settings::ALT_ACTION_MODIFIER_CHOICES[next_idx]);
+            settings.set_alt_action_modifier(value);
         }
 
         if let Err(err) = self.persist() {
@@ -726,12 +719,11 @@ mod tests {
         assert!(!ctrl.alt_modifier_held(MOD_SHIFT));
         assert!(!ctrl.alt_modifier_held(0));
 
-        // Switching the setting via cycle reaches each choice in turn.
-        ctrl.cycle_alt_action_modifier(); // Alt -> Shift
+        ctrl.set_alt_action_modifier("Shift");
         assert!(ctrl.alt_modifier_held(MOD_SHIFT));
         assert!(!ctrl.alt_modifier_held(MOD_ALT));
 
-        ctrl.cycle_alt_action_modifier(); // Shift -> Cmd
+        ctrl.set_alt_action_modifier("Cmd");
         #[cfg(target_os = "macos")]
         {
             // Slint reports physical Cmd as `control` on macOS.
@@ -744,7 +736,7 @@ mod tests {
             assert!(!ctrl.alt_modifier_held(MOD_CONTROL));
         }
 
-        ctrl.cycle_alt_action_modifier(); // Cmd -> Ctrl
+        ctrl.set_alt_action_modifier("Ctrl");
         #[cfg(target_os = "macos")]
         {
             assert!(ctrl.alt_modifier_held(MOD_META));
@@ -756,7 +748,7 @@ mod tests {
             assert!(!ctrl.alt_modifier_held(MOD_META));
         }
 
-        ctrl.cycle_alt_action_modifier(); // Ctrl -> wraps back to Alt
+        ctrl.set_alt_action_modifier("Alt");
         assert!(ctrl.alt_modifier_held(MOD_ALT));
     }
 }
