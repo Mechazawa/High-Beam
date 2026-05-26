@@ -24,7 +24,7 @@ jobs:
     steps:
       # fetch-depth: 0 so the release job can `git describe` across the
       # full history when computing the previous-tag range.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -111,7 +111,7 @@ jobs:
     timeout-minutes: 45
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -190,7 +190,7 @@ jobs:
 
     steps:
       # fetch-depth: 0 for the `git describe` / `git log` range below.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
