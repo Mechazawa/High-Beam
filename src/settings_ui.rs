@@ -17,6 +17,7 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use crate::QueryWindow;
 use crate::daemon::HotkeyRegistration;
 use crate::hotkey::{MOD_ALT, MOD_CONTROL, MOD_META, MOD_SHIFT, format_hotkey_spec, slint_flag_for_modifier};
+use crate::logging::LogErr;
 use crate::plugins::manifest::{Manifest, OptionDef, OptionKind};
 use crate::settings::{Settings, WindowPosition};
 use crate::ui::{PluginOption, PluginSlot};
@@ -64,22 +65,14 @@ struct Inner {
     /// `OnceLock` so the controller's already-wired callbacks see the
     /// registration as soon as the daemon installs it.
     hotkey_registration: OnceLock<Arc<HotkeyRegistration>>,
-    /// "Settings are dirty, please flush" channel feeding the dedicated
-    /// writer thread. Every mutator sends `()` here; the writer drains
-    /// all pending signals between disk writes so a burst of edits
-    /// collapses into a single `Settings::save()`. Holding the sender on
-    /// `Inner` means dropping the last `SettingsController` clone closes
-    /// the channel and lets the writer thread exit cleanly.
+    /// Mutators send `()` here; the writer thread drains the queue and
+    /// flushes once per burst.
     dirty_tx: mpsc::Sender<()>,
 }
 
 impl SettingsController {
-    /// Build a controller from the manifest scan + initial loaded settings.
-    ///
-    /// Spawns a dedicated writer thread that owns the dirty-signal receiver.
-    /// The writer keeps a `Weak` reference to `Inner` so its existence does
-    /// not extend the controller's lifetime; once the last clone is dropped,
-    /// the channel closes and the writer exits.
+    /// Build a controller and spawn the writer thread that drains the
+    /// dirty-signal channel.
     #[must_use]
     pub fn new(manifests: Vec<Manifest>, settings: Settings) -> Self {
         let (dirty_tx, dirty_rx) = mpsc::channel::<()>();
@@ -390,10 +383,7 @@ impl SettingsController {
         self.queue_persist();
     }
 
-    /// Record a new launcher window origin. The disk write is dispatched
-    /// to the writer thread via the dirty-signal channel, so the caller
-    /// (typically the Slint UI thread firing on dismiss) returns
-    /// immediately while the writer drains the queue in the background.
+    /// Record a new launcher window origin and queue a disk flush.
     ///
     /// # Panics
     ///
@@ -542,24 +532,15 @@ impl SettingsController {
         self.set_option(plugin, key, value);
     }
 
-    /// Send a "settings are dirty" signal to the writer thread.
-    /// Non-blocking; the writer drains all pending signals between disk
-    /// writes so a rapid burst of mutations collapses into one save.
     fn queue_persist(&self) {
-        // The only `Err` path is "receiver dropped", which only happens
-        // when the writer thread has already exited (panic, lock
-        // poisoning, or process tear-down). Nothing actionable here —
-        // we'd just be writing into a dropped channel — but log so a
-        // truly stuck writer is visible in the journal.
-        if self.inner.dirty_tx.send(()).is_err() {
-            tracing::debug!("settings: writer thread receiver gone; dirty signal dropped");
-        }
+        self.inner
+            .dirty_tx
+            .send(())
+            .log_debug("settings: writer thread receiver gone");
     }
 
-    /// Synchronously flush the current settings to disk, bypassing the
-    /// writer thread. For the single-shot exit path (where the writer
-    /// thread would race the process death) and for tests that want to
-    /// assert on-disk state immediately after a mutation.
+    /// Synchronously save settings to disk, bypassing the writer thread.
+    /// For tests that assert on-disk state right after a mutation.
     ///
     /// # Panics
     ///
@@ -567,25 +548,18 @@ impl SettingsController {
     /// [`Self::launcher_position`] for the rationale.
     pub fn flush(&self) {
         let settings = self.inner.settings.lock().expect("settings lock");
-
-        if let Err(err) = settings.save() {
-            tracing::warn!(%err, "settings: flush failed");
-        }
+        settings.save().log_warn("settings: flush failed");
     }
 }
 
-/// Drain dirty signals from `rx` and persist the current settings until
-/// the channel closes. The writer holds a `Weak` to `Inner` so its
-/// existence doesn't extend the controller's lifetime — once every
-/// `SettingsController` clone is dropped, `Inner` drops, the sender
-/// goes with it, and `recv()` returns `Err` so the loop exits.
+/// Block on the dirty-signal channel and flush after each burst. Exits
+/// when the last `SettingsController` clone drops the sender.
 fn spawn_writer_thread(weak_inner: Weak<Inner>, rx: mpsc::Receiver<()>) {
-    let result = thread::Builder::new()
+    let spawn_result = thread::Builder::new()
         .name("highbeam-settings-writer".into())
         .spawn(move || {
             while rx.recv().is_ok() {
-                // Coalesce any signals queued while we were about to wake
-                // up so a burst of edits collapses into one disk pass.
+                // Drain coalesced signals before each save.
                 while rx.try_recv().is_ok() {}
 
                 let Some(inner) = weak_inner.upgrade() else {
@@ -598,19 +572,12 @@ fn spawn_writer_thread(weak_inner: Weak<Inner>, rx: mpsc::Receiver<()>) {
                         break;
                     }
                 };
-                // Drop the Arc before the disk I/O so we don't extend
-                // Inner's lifetime across a potentially slow write.
                 drop(inner);
-
-                if let Err(err) = snapshot.save() {
-                    tracing::warn!(%err, "settings: writer-thread save failed");
-                }
+                snapshot.save().log_warn("settings: writer save failed");
             }
         });
 
-    if let Err(err) = result {
-        tracing::warn!(%err, "settings: writer thread spawn failed");
-    }
+    spawn_result.log_warn("settings: writer thread spawn failed");
 }
 
 fn option_row(

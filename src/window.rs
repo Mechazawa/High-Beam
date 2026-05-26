@@ -277,10 +277,8 @@ pub(crate) fn hide(window: &QueryWindow) {
     quit_if_once();
 }
 
-/// Snapshot the current window position, hand it to the settings
-/// controller (which queues a write on its dedicated writer thread),
-/// then hide. The disk write is decoupled from the dismiss path so the
-/// hide stays observably instant regardless of disk latency.
+/// Persist the current window position, then hide. The position write
+/// is queued onto the settings writer thread so the hide stays snappy.
 pub(crate) fn hide_and_persist_position(window: &QueryWindow, settings: &SettingsController) {
     // Persist-dismiss fires BEFORE the hide so subscribers see the input
     // while it's still live — `clear-input` zeroes the text on hide.
@@ -288,34 +286,20 @@ pub(crate) fn hide_and_persist_position(window: &QueryWindow, settings: &Setting
 
     if let Some(pos) = capture_outer_position(window) {
         settings.set_launcher_position(pos);
-
-        // Single-shot is about to `quit_event_loop` + exit the process,
-        // which would race the writer thread. Force a synchronous flush
-        // so the dragged position actually lands on disk before exit.
-        if ONCE_MODE.load(Ordering::Relaxed) {
-            settings.flush();
-        }
     }
 
     hide(window);
 }
 
-/// Apply the persisted launcher position, falling back to the centered
-/// default when no position is saved or the saved one is no longer on any
-/// connected display. The off-screen check matters when the user unplugs
-/// the monitor the window was last positioned on — without it, the next
-/// show would put the window in the void.
+/// Apply the persisted launcher position, recentering when nothing is
+/// saved or the saved value is no longer on any connected display.
 ///
-/// On cold start the winit window hasn't been realised yet (Slint creates
-/// it in `about_to_wait` on the next event-loop tick), so we can't query
-/// monitors at all. In that case we seed the position into
-/// `WindowAttributes` via `slint::Window::set_position` — winit uses that
-/// as the new window's origin and the off-screen check runs the next time
-/// `show` fires with the winit window live. We distinguish "no winit yet"
-/// from "winit alive but `available_monitors()` is empty" (e.g. KVM
-/// mid-switch, lid closed during wake) so the latter still falls through
-/// to the recenter path and doesn't blindly trust a possibly-off-screen
-/// saved value.
+/// On cold start the winit window doesn't exist yet (Slint creates it on
+/// the next event-loop tick), so we seed `WindowAttributes::position` via
+/// `slint::Window::set_position` and let the off-screen check re-run on
+/// the following show. `has_winit_window()` distinguishes that case from
+/// "winit alive but `available_monitors()` is empty" so the latter still
+/// recenters instead of trusting a possibly-off-screen value.
 fn apply_saved_or_centered_position(window: &QueryWindow, settings: &SettingsController) {
     let Some(saved) = settings.launcher_position() else {
         center_on_focused_display(window);
@@ -354,11 +338,9 @@ fn capture_outer_position(window: &QueryWindow) -> Option<WindowPosition> {
         .flatten()
 }
 
-/// Push the window's outer position. `slint::Window::set_position` resolves
-/// to `winit::Window::set_outer_position` when the winit window is live, and
-/// to `WindowAttributes::position` (consumed at creation) when it isn't —
-/// so this works both for the live re-show path and for the cold-start path
-/// where Slint hasn't realised the winit window yet.
+/// Push the window's outer position. Resolves to
+/// `winit::Window::set_outer_position` when the winit window is live, or
+/// seeds `WindowAttributes::position` for the cold-start path.
 fn set_outer_position(window: &QueryWindow, pos: WindowPosition) {
     window.window().set_position(slint::PhysicalPosition::new(pos.x, pos.y));
 }
@@ -708,13 +690,8 @@ mod tests {
 
     #[test]
     fn position_visible_requires_at_least_one_monitor() {
-        // Empty rects = winit is alive but `available_monitors()` returned
-        // nothing (e.g. KVM mid-switch, all displays disconnected). The
-        // host falls through to `center_on_focused_display` rather than
-        // trusting the saved value, so the pure check must return false.
-        // The "winit window not yet realised" cold-start case is handled
-        // above `monitor_rects` via `has_winit_window` and never reaches
-        // this branch.
+        // Empty rects = winit alive but no monitors connected; the host
+        // falls through to recenter rather than trusting the saved value.
         let pos = WindowPosition { x: 100, y: 100 };
         assert!(!position_visible_on_any_monitor(pos, &[]));
     }
