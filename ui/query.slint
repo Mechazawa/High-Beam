@@ -51,6 +51,10 @@ export component QueryWindow inherits Window {
     in-out property <bool> showing-global: true;
     in-out property <string> hotkey-value: "Shift+Space";
     in-out property <string> alt-action-modifier: "Alt";
+    // Title-cased label ("Auto" / "Dark" / "Light") for display in the
+    // settings pane. Rust pushes the canonical value whenever the user
+    // cycles it.
+    in-out property <string> theme-mode: "Auto";
     // Resolved Slint-side flag name corresponding to the configured alt
     // modifier, accounting for macOS's Cmd↔Ctrl flag swap. Rust pushes
     // it via `set-alt-action-modifier-flag` whenever the setting changes.
@@ -172,6 +176,7 @@ export component QueryWindow inherits Window {
     callback capture-hotkey(bool, bool, bool, bool, string) -> bool;
     callback reset-hotkey-to-default();
     callback cycle-alt-action-modifier();
+    callback cycle-theme-mode();
     callback select-global();
     // Whether the hotkey field is currently listening for a key combo —
     // drives the prompt text + highlighted border in the global pane.
@@ -367,6 +372,7 @@ export component QueryWindow inherits Window {
             hotkey-value <=> root.hotkey-value;
             capturing-hotkey <=> root.capturing-hotkey;
             alt-action-modifier <=> root.alt-action-modifier;
+            theme-mode <=> root.theme-mode;
 
             foreground-color: root.foreground-color;
             muted-color: root.muted-color;
@@ -387,6 +393,7 @@ export component QueryWindow inherits Window {
             capture-hotkey(meta, ctrl, shift, alt, text) => { return root.capture-hotkey(meta, ctrl, shift, alt, text); }
             reset-hotkey-to-default => { root.reset-hotkey-to-default(); }
             cycle-alt-action-modifier => { root.cycle-alt-action-modifier(); }
+            cycle-theme-mode => { root.cycle-theme-mode(); }
             select-global => { root.select-global(); }
             recenter-window => { root.recenter-window(); }
             open-config-dir => { root.open-config-dir(); }

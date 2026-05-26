@@ -104,6 +104,7 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
     let _os_appearance_guard = {
         let weak = window.as_weak();
         let controller = settings_controller.clone();
+        let theme = Arc::clone(&theme);
         os_appearance::subscribe(move |appearance| {
             let weak = weak.clone();
             let theme = Arc::clone(&theme);
@@ -117,7 +118,7 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
         })
     };
 
-    settings_controller.wire(&window);
+    settings_controller.wire(&window, theme);
 
     // `--once` flips a process-wide flag read by every dismiss path in
     // `window`. When set, dismissing the launcher also quits the event

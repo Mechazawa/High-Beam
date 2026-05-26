@@ -95,7 +95,11 @@ impl SettingsController {
     /// Wire every settings callback on the given window. Idempotent; call
     /// once per window. The controller is held by both the closures and by
     /// the caller (it owns no Slint state of its own).
-    pub fn wire(&self, window: &QueryWindow) {
+    ///
+    /// `theme` is captured by the theme-mode cycler so a user toggle
+    /// re-applies the resolved variant immediately, without waiting for
+    /// the next OS-appearance flip.
+    pub fn wire(&self, window: &QueryWindow, theme: Arc<crate::theme::Theme>) {
         // Initial render so the user sees populated UI the first time they
         // open settings rather than empty placeholders.
         self.refresh_slots(window);
@@ -223,6 +227,8 @@ impl SettingsController {
             }
         });
 
+        self.wire_theme_mode_cycle(window, theme);
+
         let weak = window.as_weak();
         window.on_select_global(move || {
             // The Slint side already flipped `showing-global` to true; this
@@ -241,6 +247,7 @@ impl SettingsController {
         window.set_alt_action_modifier_flag(SharedString::from(slint_flag_for_modifier(
             settings.alt_action_modifier(),
         )));
+        window.set_theme_mode(SharedString::from(theme_mode_label(settings.theme_mode())));
     }
 
     fn set_hotkey(&self, value: &str) {
@@ -269,6 +276,45 @@ impl SettingsController {
 
         if let Err(err) = self.persist() {
             tracing::warn!(%err, "settings: persist after alt-action-modifier change failed");
+        }
+    }
+
+    /// Hook the theme-mode click-to-cycle into `window`. Lives separate
+    /// from [`Self::wire`] so the latter stays under the line cap.
+    fn wire_theme_mode_cycle(&self, window: &QueryWindow, theme: Arc<crate::theme::Theme>) {
+        let ctrl = self.clone();
+        let weak = window.as_weak();
+        window.on_cycle_theme_mode(move || {
+            ctrl.cycle_theme_mode();
+
+            if let Some(w) = weak.upgrade() {
+                ctrl.refresh_global(&w);
+                // Re-apply right now so the user sees the variant flip
+                // immediately rather than after the next OS-appearance
+                // poll tick (which only fires for `Auto` anyway).
+                crate::window::apply_theme(
+                    &w,
+                    theme.variant_for(ctrl.theme_mode(), crate::os_appearance::current()),
+                );
+            }
+        });
+    }
+
+    fn cycle_theme_mode(&self) {
+        use crate::theme::ThemeMode;
+
+        {
+            let mut settings = self.inner.settings.lock().expect("settings lock");
+            let next = match settings.theme_mode() {
+                ThemeMode::Auto => ThemeMode::Dark,
+                ThemeMode::Dark => ThemeMode::Light,
+                ThemeMode::Light => ThemeMode::Auto,
+            };
+            settings.set_theme_mode(next.as_str());
+        }
+
+        if let Err(err) = self.persist() {
+            tracing::warn!(%err, "settings: persist after theme-mode change failed");
         }
     }
 
@@ -631,6 +677,19 @@ fn next_choice(current: &str, choices: &[String]) -> String {
     choices.get(next).cloned().unwrap_or_else(|| current.to_owned())
 }
 
+/// Title-cased label for the theme-mode pill in the settings UI.
+/// [`crate::theme::ThemeMode::as_str`] returns the lowercase on-disk
+/// spelling; this helper provides the display variant the user reads in
+/// the click-to-cycle row.
+fn theme_mode_label(mode: crate::theme::ThemeMode) -> &'static str {
+    use crate::theme::ThemeMode;
+    match mode {
+        ThemeMode::Auto => "Auto",
+        ThemeMode::Dark => "Dark",
+        ThemeMode::Light => "Light",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -648,6 +707,33 @@ mod tests {
         // If the current value isn't a known choice (manifest renamed since
         // the user's last save), restart from the first valid option.
         assert_eq!(next_choice("xxx", &choices), "b");
+    }
+
+    #[test]
+    fn cycle_theme_mode_visits_each_variant_then_wraps() {
+        use crate::theme::ThemeMode;
+
+        let settings = Settings::default();
+        let ctrl = SettingsController::new(vec![], settings);
+
+        assert_eq!(ctrl.theme_mode(), ThemeMode::Auto);
+        ctrl.cycle_theme_mode();
+        assert_eq!(ctrl.theme_mode(), ThemeMode::Dark);
+        ctrl.cycle_theme_mode();
+        assert_eq!(ctrl.theme_mode(), ThemeMode::Light);
+        ctrl.cycle_theme_mode();
+        assert_eq!(ctrl.theme_mode(), ThemeMode::Auto, "wraps back to Auto");
+    }
+
+    #[test]
+    fn theme_mode_label_is_title_cased() {
+        // UI label diverges from the on-disk lowercase form; lock the
+        // spelling so a refactor of `ThemeMode::as_str` (which is the
+        // writer surface) doesn't accidentally flow into the UI.
+        use crate::theme::ThemeMode;
+        assert_eq!(theme_mode_label(ThemeMode::Auto), "Auto");
+        assert_eq!(theme_mode_label(ThemeMode::Dark), "Dark");
+        assert_eq!(theme_mode_label(ThemeMode::Light), "Light");
     }
 
     fn manifest_with_options(name: &str, options_json: &str) -> Manifest {
