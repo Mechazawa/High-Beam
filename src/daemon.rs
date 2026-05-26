@@ -94,18 +94,18 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
 
     let settings_controller = SettingsController::new(manifests, settings_for_ui);
 
-    // Subscribe unconditionally — the callback reads `theme_mode` from the
+    // Watch unconditionally — the callback reads `theme_mode` from the
     // controller on every fire, so a future settings-UI toggle from `Dark`
     // / `Light` back to `Auto` immediately picks up live OS flips without
     // a daemon restart. `variant_for` already pins the variant when the
     // user's preference isn't `Auto`, so the wasted-wakeup cost on a
     // pinned mode is one settings-mutex lock per 2 s — well below the
     // wake-up itself.
-    let _os_appearance_guard = {
+    let _appearance_watcher = {
         let weak = window.as_weak();
         let controller = settings_controller.clone();
         let theme = Arc::clone(&theme);
-        os_appearance::subscribe(move |appearance| {
+        os_appearance::Watcher::start(move |appearance| {
             let weak = weak.clone();
             let theme = Arc::clone(&theme);
             let mode = controller.theme_mode();

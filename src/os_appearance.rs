@@ -1,9 +1,9 @@
 //! OS appearance detection for the theme auto-switch.
 //!
-//! Wraps `dark-light` and adds a polling subscription. `dark-light` 2.0
-//! dropped its upstream `subscribe()` helper, so [`subscribe`] spawns a
-//! background thread that re-detects every [`POLL_INTERVAL`] and fires
-//! the callback only on transitions. A 2 s ceiling on toggle-to-repaint
+//! Wraps `dark-light` and adds a polling watcher. `dark-light` 2.0
+//! dropped its upstream `subscribe()` helper, so [`Watcher::start`]
+//! spawns a background thread that re-detects every [`POLL_INTERVAL`] and
+//! fires the callback only on transitions. A 2 s ceiling on toggle-to-repaint
 //! latency is well below what a user can perceive for a theme flip; the
 //! cost is one extra wakeup every 2 s while the launcher daemon is
 //! running.
@@ -66,79 +66,82 @@ pub fn current() -> Appearance {
     }
 }
 
-/// Subscribe to OS appearance changes. The callback fires only on
-/// transitions (not on the initial value — the caller already has that
-/// from [`current`]), runs on the watcher thread, and must therefore be
-/// `Send + 'static`. Drop the returned guard to stop the watcher.
-///
-/// The watcher polls every [`POLL_INTERVAL`]; OS-level notification APIs
-/// vary too much across platforms to wrap cheaply, and a 2 s ceiling on
-/// repaint latency is fine for a theme flip.
-///
-/// Thread-spawn failure (resource exhaustion, `EAGAIN` from `clone`,
-/// container `RLIMIT_NPROC`) degrades gracefully: the returned guard is
-/// inert (no watcher, callback never fires) and a warning is logged.
-/// Matches the daemon-wide doctrine that a single failing subsystem must
-/// not refuse the launcher's startup — the variant `daemon::run` already
-/// painted at startup remains in place; only live auto-switch is lost.
-#[must_use = "the returned SubscriptionGuard stops the watcher on Drop — discarding it terminates auto-switch immediately"]
-pub fn subscribe<F>(callback: F) -> SubscriptionGuard
-where
-    F: Fn(Appearance) + Send + 'static,
-{
-    let stop = Arc::new(AtomicBool::new(false));
-    let stop_thread = Arc::clone(&stop);
-    let initial = current();
-
-    let handle = match thread::Builder::new()
-        .name("highbeam-os-appearance".into())
-        .spawn(move || run_watcher(&stop_thread, initial, callback))
-    {
-        Ok(handle) => Some(handle),
-        Err(err) => {
-            tracing::warn!(%err, "os-appearance: could not spawn watcher; auto-switch disabled this session");
-            // Pre-stop so a future `Drop` is idempotent — there's nothing
-            // to signal, but the invariant "stop is true after Drop"
-            // still holds.
-            stop.store(true, Ordering::Relaxed);
-            None
-        }
-    };
-
-    SubscriptionGuard { stop, handle }
-}
-
-fn run_watcher<F>(stop: &Arc<AtomicBool>, initial: Appearance, callback: F)
-where
-    F: Fn(Appearance) + Send + 'static,
-{
-    let mut last = initial;
-    // Sleep at the end of the loop body — checking `stop` once per
-    // iteration is enough because the guard's `Drop` sets it before the
-    // next poll wakes up. Net iteration shape: check → poll → fire? →
-    // sleep.
-    while !stop.load(Ordering::Relaxed) {
-        let next = current();
-
-        if next != last {
-            last = next;
-            callback(next);
-        }
-
-        thread::sleep(POLL_INTERVAL);
-    }
-}
-
-/// Drop-guard that stops the watcher thread on Drop. The thread sees the
-/// flag on its next loop iteration, so shutdown is bounded by
-/// [`POLL_INTERVAL`] — no `join()` is awaited; the OS reaps the thread
-/// when the process exits.
-pub struct SubscriptionGuard {
+/// Background watcher for OS appearance changes. A live RAII handle:
+/// [`Watcher::start`] spawns the polling thread, and dropping the
+/// returned `Watcher` stops it. The thread sees the stop flag on its next
+/// loop iteration, so shutdown is bounded by [`POLL_INTERVAL`] — no
+/// `join()` is awaited; the OS reaps the thread when the process exits.
+pub struct Watcher {
     stop: Arc<AtomicBool>,
     handle: Option<thread::JoinHandle<()>>,
 }
 
-impl Drop for SubscriptionGuard {
+impl Watcher {
+    /// Start watching for OS appearance changes. The callback fires only
+    /// on transitions (not on the initial value — the caller already has
+    /// that from [`current`]), runs on the watcher thread, and must
+    /// therefore be `Send + 'static`.
+    ///
+    /// The watcher polls every [`POLL_INTERVAL`]; OS-level notification
+    /// APIs vary too much across platforms to wrap cheaply, and a 2 s
+    /// ceiling on repaint latency is fine for a theme flip.
+    ///
+    /// Thread-spawn failure (resource exhaustion, `EAGAIN` from `clone`,
+    /// container `RLIMIT_NPROC`) degrades gracefully: the returned handle
+    /// is inert (no thread, callback never fires) and a warning is
+    /// logged. Matches the daemon-wide doctrine that a single failing
+    /// subsystem must not refuse the launcher's startup — the variant
+    /// `daemon::run` already painted at startup remains in place; only
+    /// live auto-switch is lost.
+    #[must_use = "dropping the returned Watcher stops the thread — discarding it terminates auto-switch immediately"]
+    pub fn start<F>(callback: F) -> Self
+    where
+        F: Fn(Appearance) + Send + 'static,
+    {
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_thread = Arc::clone(&stop);
+        let initial = current();
+
+        let handle = match thread::Builder::new()
+            .name("highbeam-os-appearance".into())
+            .spawn(move || Self::run(&stop_thread, initial, callback))
+        {
+            Ok(handle) => Some(handle),
+            Err(err) => {
+                tracing::warn!(%err, "os-appearance: could not spawn watcher; auto-switch disabled this session");
+                // Pre-stop so a future `Drop` is idempotent — there's
+                // nothing to signal, but the invariant "stop is true
+                // after Drop" still holds.
+                stop.store(true, Ordering::Relaxed);
+                None
+            }
+        };
+
+        Self { stop, handle }
+    }
+
+    fn run<F>(stop: &Arc<AtomicBool>, initial: Appearance, callback: F)
+    where
+        F: Fn(Appearance) + Send + 'static,
+    {
+        let mut last = initial;
+        // Sleep at the end of the loop body — checking `stop` once per
+        // iteration is enough because `Drop` sets it before the next poll
+        // wakes up. Net iteration shape: check → poll → fire? → sleep.
+        while !stop.load(Ordering::Relaxed) {
+            let next = current();
+
+            if next != last {
+                last = next;
+                callback(next);
+            }
+
+            thread::sleep(POLL_INTERVAL);
+        }
+    }
+}
+
+impl Drop for Watcher {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
         // Detach: joining would block up to POLL_INTERVAL on daemon
