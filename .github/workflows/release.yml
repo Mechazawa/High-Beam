@@ -1,14 +1,6 @@
-# Release pipeline for high-beam. Triggers strictly on `v*` tags, never on
-# branch push / PR — tagging is the explicit "publish a release" intent.
-#
-# Pipeline shape:
-#   build-macos (macos-latest)  → .app + .dmg (signed when secrets present)
-#   build-linux (ubuntu-latest) → tarball + .deb + .rpm + .pkg.tar.zst
-#   release     (ubuntu-latest) → AI-summarised notes + GitHub release
-#
-# The release job tolerates a flaky GitHub Models API by falling back to
-# the raw commit log — the inference endpoint going down should never
-# block a tag from publishing.
+# Tag-driven (`v*`) release: build macOS + Linux bundles, then publish a
+# GitHub release with AI-summarised notes (falls back to the raw commit log
+# if the Models endpoint is down, so a tag always publishes).
 name: Release
 
 on:
@@ -32,7 +24,7 @@ jobs:
     steps:
       # fetch-depth: 0 so the release job can `git describe` across the
       # full history when computing the previous-tag range.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -119,7 +111,7 @@ jobs:
     timeout-minutes: 45
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -163,10 +155,6 @@ jobs:
         with:
           tool: cargo-generate-rpm
 
-      # These four recipes are added by the sibling agent wiring Linux
-      # packaging. They wrap `cargo packager --release --formats <fmt>` so
-      # the workflow stays format-agnostic. If a recipe is renamed, update
-      # the matching `just` call below.
       - name: Build tarball
         run: just bundle-tarball
 
@@ -202,7 +190,7 @@ jobs:
 
     steps:
       # fetch-depth: 0 for the `git describe` / `git log` range below.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 

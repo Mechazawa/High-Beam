@@ -12,13 +12,10 @@ import { isLinux } from "highbeam:platform";
 const TRIGGERS = ["define ", "dict "];
 const SUBTITLE_MAX = 80;
 const MAX_RESULTS = 3;
-// Defs come back small from `wn`/`dict`; cap stdout collection at 1 MiB so a
-// pathological output can't drown the runtime.
 const EXEC_TIMEOUT_MS = 1200;
 
-// Tool detection cache — `which` is cheap but not free, and the host
-// re-imports the module rarely so this survives across queries.
-// `null` = not yet probed; `false` = probed and missing; `true` = available.
+// Tool-probe cache, surviving across queries. `null` = not yet probed,
+// `false` = probed and missing, `true` = available.
 const toolCache = {
     wn: null,
     dict: null,
@@ -40,28 +37,13 @@ async function which(tool, signal) {
     return toolCache[tool];
 }
 
-// `wn <word> -over` (the "overview" report) groups senses by part-of-speech
-// using stanzas that look like:
-//
-//   Overview of noun rust
-//
-//   The noun rust has 4 senses (first 1 from tagged texts)
-//
+// `wn <word> -over` sense lines look like:
 //   1. (5) rust, rusting -- (a red or brown oxide coating on iron...)
-//   2. corrosion, rusting -- (a destructive process...)
-//
-//   Overview of verb rust
-//   ...
-//
-// Each sense line starts with `<n>.` optionally followed by `(freq)`,
-// then a comma-separated synonym list, then ` -- ` and `(definition)`
-// (the definition may include `; "example"` suffixes inside the parens).
-// We strip the outer parens and keep everything inside as the definition.
+// i.e. `<n>.` + optional `(freq)` + synonyms + ` -- ` + `(definition)`. We
+// keep the inside of the outer parens as the definition.
 function parseWordNetOverview(stdout) {
     const senses = [];
-    // Match across the whole text in case lines are wrapped — wn does wrap
-    // long synonym lists. The non-greedy `[\s\S]*?` plus a lookahead handles
-    // both end-of-line and the next sense / next overview header.
+    // Whole-text match (`[\s\S]*?`) since wn wraps long synonym lists.
     const re = /^\s*\d+\.\s*(?:\(\d+\)\s*)?([\s\S]*?)\s--\s\(([\s\S]*?)\)\s*$/gm;
     let m;
     while ((m = re.exec(stdout)) !== null) {
@@ -75,25 +57,9 @@ function parseWordNetOverview(stdout) {
     return senses;
 }
 
-// `dict <word>` output looks like:
-//
-//   3 definitions found
-//
-//   From The Collaborative International Dictionary of English v.0.48 [gcide]:
-//
-//     Rust \Rust\, n. ...
-//        1. (Chem.) The reddish yellow coating ...
-//        2. A minute fungus ...
-//
-//   From WordNet (r) 3.0 (2006) [wn]:
-//
-//     rust
-//         n 1: a red or brown oxide coating ...
-//
-// Multi-database: we collect each `From ... [<short>]:` block's body and
-// flatten the leading whitespace; the first non-empty block is the headline
-// definition. We surface only the first block — the second is usually a
-// near-duplicate (e.g. WordNet repeated under the dict umbrella).
+// `dict <word>` emits one `From <source> [<short>]:` block per database. We
+// take the first block's body as the headline (later blocks are usually
+// near-duplicates) and flatten its leading indent.
 function parseDictOutput(stdout) {
     const lines = stdout.split("\n");
     const blocks = [];

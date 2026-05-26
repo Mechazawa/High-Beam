@@ -10,8 +10,8 @@
 
 ### macOS
 
-`global-hotkey` registers `Shift+Space` at startup. The hotkey is currently
-hardcoded; user configurability is post-v1.
+`global-hotkey` registers `Shift+Space` at startup. The combo is
+configurable in Settings → Global and re-registered live.
 
 If macOS prompts for input-monitoring or accessibility permission, grant it
 once — High Beam itself doesn't need it (the `global-hotkey` crate operates

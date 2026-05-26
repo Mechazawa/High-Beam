@@ -27,9 +27,9 @@ export interface ReadFileOptions {
 }
 
 /**
- * Walk a directory. Yields one [`DirEntry`] per entry; with
- * `{ recursive: true }`, descends into subdirectories before yielding their
- * children's sibling directories.
+ * Walk a directory, yielding one [`DirEntry`] per entry. With
+ * `{ recursive: true }` it also yields entries in nested subdirectories
+ * (depth-first; order within a directory is OS-dependent / unspecified).
  *
  * Cap: `fs.read`.
  */

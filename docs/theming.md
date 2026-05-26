@@ -64,14 +64,22 @@ height grows with result count up to a hardcoded cap (~9 rows).
 
 `border_radius` is in pixels.
 
-## Example: dark mode
+## Dark / light mode
+
+Each `[colors]`, `[font]`, and `[window]` table may carry `.dark` / `.light`
+sub-tables that override the base for the matching appearance; anything a
+sub-table omits inherits from the base above it. The `theme_mode` setting in
+`settings.toml` chooses which to paint — `"auto"` (default: follows the OS
+and repaints live when it flips), `"dark"`, or `"light"`.
+
+TOML requires the base fields before any sub-table:
 
 ```toml
 [colors]
+background = "#ffffffea"   # light base
+foreground = "#1d1d1f"
+
+[colors.dark]              # applied in dark mode
 background = "#1c1c1eee"
 foreground = "#f5f5f7"
-muted      = "#8e8e93"
-highlight  = "#0a84ff"
-selection  = "#0a84ff44"
-border     = "#ffffff10"
 ```
