@@ -97,9 +97,9 @@ Notes:
   `data:image/<type>;base64,...` URI) but is not in the `Result` interface
   exported from `types.d.ts`. Set it as a property anyway — the host reads
   it. `plugins/app-launcher` does this.
-- `Action` has two host-only variants (`{ kind: 'quit' }` and
-  `{ kind: 'noop' }`) emitted by the Core built-in. Plugins don't construct
-  them.
+- `Action` has host-only variants (`quit`, `openSettings`, `reloadPlugin`,
+  `installPlugin`, `updatePlugins`, `noop`) emitted by the Core built-in.
+  Plugins don't construct them.
 
 ## `highbeam:actions`
 

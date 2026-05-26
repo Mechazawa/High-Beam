@@ -143,8 +143,10 @@ fontconfig = "*"
 libxkbcommon = "*"
 
 # lto/codegen-units: smaller + faster binary at the cost of release compile
-# time. `panic` is deliberately left at `unwind` — a panicking plugin task
-# must surface as a recoverable JoinError, not abort the daemon.
+# time. strip: the shipped binary is stripped, but symbols stay in
+# target/release/deps/*.dSYM so crash reports still resolve locally. panic is
+# deliberately left at `unwind` — a panicking plugin task must surface as a
+# recoverable JoinError, not abort the daemon.
 [profile.release]
 lto = "fat"
 codegen-units = 1
