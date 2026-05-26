@@ -24,7 +24,6 @@ concurrency:
 jobs:
   vitest:
     name: vitest (${{ matrix.plugin }})
-    # Node/vitest is platform-agnostic — no need for 10x-billed macOS.
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
