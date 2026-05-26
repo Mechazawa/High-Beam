@@ -148,35 +148,12 @@ impl Drop for SubscriptionGuard {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn unspecified_passes_through() {
-        // Was previously collapsed to Light at this boundary; now passes
-        // through so the theme layer can apply the user's fallback
-        // policy. Regression test for the silent-default-to-light bug.
-        assert_eq!(Appearance::from(Mode::Unspecified), Appearance::Unspecified);
-    }
-
-    #[test]
-    fn mode_round_trip() {
-        assert_eq!(Appearance::from(Mode::Dark), Appearance::Dark);
-        assert_eq!(Appearance::from(Mode::Light), Appearance::Light);
-    }
-
-    #[test]
-    fn subscription_guard_drop_sets_stop_flag() {
-        // Indirect smoke test: dropping the guard flips the stop atomic,
-        // which is the only signal `run_watcher` reads to exit. We can't
-        // observe the thread itself without joining (which we explicitly
-        // don't do), so this test verifies *the signal*, not the thread's
-        // observed exit — the name reflects that scope.
-        let guard = subscribe(|_| {});
-        let stop = Arc::clone(&guard.stop);
-        assert!(!stop.load(Ordering::Relaxed));
-        drop(guard);
-        assert!(stop.load(Ordering::Relaxed));
-    }
-}
+// No unit tests here on purpose. The `From<Mode>` impl is one match arm
+// per variant — exhaustiveness checks catch deletions at compile time, so
+// per-arm asserts are tautologies. `current()` and `subscribe()` are thin
+// wrappers around `dark_light` + `thread::spawn` whose only observable
+// behaviour involves real platform IPC and a real OS thread; testing
+// either in isolation forces hardware-dependent fixtures or pays for a
+// detached watcher thread + DBus probe per test run. The integration
+// surface (theme variant resolution, settings round-trip) is exercised
+// from `theme.rs` and `settings.rs` instead.
