@@ -26,6 +26,10 @@ export component SettingsView {
     in-out property <string> hotkey-value: "Shift+Space";
     in-out property <bool> capturing-hotkey: false;
     in-out property <string> alt-action-modifier: "Alt";
+    // Title-cased label ("Auto" / "Dark" / "Light") for display. The
+    // controller normalises whatever the user wrote on disk, so this
+    // property always carries one of those three exact strings.
+    in-out property <string> theme-mode: "Auto";
 
     // Theme tokens
     in property <color> foreground-color;
@@ -52,6 +56,7 @@ export component SettingsView {
     callback open-config-dir();
     callback sync-rail-selection();
     callback set-alt-action-modifier(string);
+    callback set-theme-mode(string);
 
     // Called by QueryWindow.show-settings() to give the rail immediate focus.
     public function focus-rail() {
@@ -416,6 +421,41 @@ export component SettingsView {
                             }
                             Text {
                                 text: "Hold this key while pressing Enter or clicking a result to run its alternate action (when the plugin supplies one).";
+                                color: root.muted-color;
+                                font-size: root.font-size-subtitle;
+                                wrap: word-wrap;
+                            }
+                        }
+
+                        // Theme mode group.
+                        VerticalLayout {
+                            spacing: 4px;
+                            Text {
+                                text: "Theme mode";
+                                color: root.foreground-color;
+                                font-size: root.font-size-title;
+                            }
+                            HorizontalLayout {
+                                alignment: start;
+                                ComboBox {
+                                    width: 160px;
+                                    model: ["Auto", "Dark", "Light"];
+                                    // Two-way: a plain `:` binding gets
+                                    // severed on the first user pick.
+                                    current-value <=> root.theme-mode;
+                                    // ComboBoxBase keeps current-index
+                                    // independent of current-value, so
+                                    // derive it from the saved string.
+                                    current-index: root.theme-mode == "Dark" ? 1
+                                        : root.theme-mode == "Light" ? 2
+                                        : 0;
+                                    selected(value) => {
+                                        root.set-theme-mode(value);
+                                    }
+                                }
+                            }
+                            Text {
+                                text: "Auto follows the OS appearance and repaints live when it flips. Dark and Light pin the launcher to one variant regardless of the system.";
                                 color: root.muted-color;
                                 font-size: root.font-size-subtitle;
                                 wrap: word-wrap;

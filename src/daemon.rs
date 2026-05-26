@@ -5,7 +5,6 @@
 use std::error::Error;
 use std::io;
 use std::path::{Path, PathBuf};
-#[cfg(target_os = "macos")]
 use std::sync::Arc;
 use std::thread;
 
@@ -16,6 +15,7 @@ use crate::app;
 use crate::bundle_install;
 use crate::ipc::{Command, Server};
 use crate::logging::{self, LogErr};
+use crate::os_appearance;
 use crate::plugins::loader::{self, LoaderOptions};
 use crate::settings::Settings;
 use crate::settings_ui::SettingsController;
@@ -71,7 +71,6 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
     slint::BackendSelector::new().backend_name("winit".into()).select()?;
 
     let window = QueryWindow::new()?;
-    window::apply_theme(&window, &Theme::load_or_default());
 
     // Wire the settings view. We scan manifests synchronously here (cheap —
     // just reads `manifest.json` from each plugin dir) so the controller can
@@ -84,9 +83,36 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
     // hot-reload is out of scope for v1, so the daemon-startup value is what
     // we register with the OS.
     let hotkey_spec = settings_for_ui.global().hotkey.clone();
+
+    // Arc so the watcher thread can hold a clone for the daemon's lifetime.
+    let theme = Arc::new(Theme::load_or_default());
+    window::apply_theme(
+        &window,
+        theme.variant_for(settings_for_ui.theme_mode(), os_appearance::current()),
+    );
+
     let settings_controller = SettingsController::new(manifests, settings_for_ui);
 
-    settings_controller.wire(&window);
+    // Watch unconditionally: the callback re-reads `theme_mode` each fire,
+    // so toggling back to `Auto` later takes effect without a restart.
+    let _appearance_watcher = {
+        let weak = window.as_weak();
+        let controller = settings_controller.clone();
+        let theme = Arc::clone(&theme);
+        os_appearance::Watcher::start(move |appearance| {
+            let weak = weak.clone();
+            let theme = Arc::clone(&theme);
+            let mode = controller.theme_mode();
+            slint::invoke_from_event_loop(move || {
+                if let Some(w) = weak.upgrade() {
+                    window::apply_theme(&w, theme.variant_for(mode, appearance));
+                }
+            })
+            .log_debug("os-appearance: post repaint to event loop");
+        })
+    };
+
+    settings_controller.wire(&window, theme);
 
     // `--once` flips a process-wide flag read by every dismiss path in
     // `window`. When set, dismissing the launcher also quits the event

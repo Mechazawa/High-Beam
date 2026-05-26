@@ -103,11 +103,10 @@ impl SettingsController {
     }
 
     /// Wire every settings callback on the given window. Idempotent; call
-    /// once per window. The controller is held by both the closures and by
-    /// the caller (it owns no Slint state of its own).
-    pub fn wire(&self, window: &QueryWindow) {
-        // Initial render so the user sees populated UI the first time they
-        // open settings rather than empty placeholders.
+    /// once per window. `theme` lets the theme-mode handler re-apply the
+    /// variant on pick, without waiting for the next OS-appearance flip.
+    pub fn wire(&self, window: &QueryWindow, theme: Arc<crate::theme::Theme>) {
+        // Populate before the user first opens settings.
         self.refresh_slots(window);
         self.refresh_global(window);
 
@@ -232,6 +231,8 @@ impl SettingsController {
             }
         });
 
+        self.wire_theme_mode_select(window, theme);
+
         let weak = window.as_weak();
         window.on_select_global(move || {
             // The Slint side already flipped `showing-global` to true; this
@@ -250,6 +251,7 @@ impl SettingsController {
         window.set_alt_action_modifier_flag(SharedString::from(slint_flag_for_modifier(
             settings.alt_action_modifier(),
         )));
+        window.set_theme_mode(SharedString::from(theme_mode_label(settings.theme_mode())));
     }
 
     fn set_hotkey(&self, value: &str) {
@@ -265,6 +267,34 @@ impl SettingsController {
         {
             let mut settings = self.inner.settings.lock().expect("settings lock");
             settings.set_alt_action_modifier(value);
+        }
+
+        self.queue_persist();
+    }
+
+    /// Hook the theme-mode dropdown into `window`. Split from [`Self::wire`]
+    /// to keep it under the line cap.
+    fn wire_theme_mode_select(&self, window: &QueryWindow, theme: Arc<crate::theme::Theme>) {
+        let ctrl = self.clone();
+        let weak = window.as_weak();
+        window.on_set_theme_mode(move |value| {
+            ctrl.set_theme_mode(value.as_str());
+
+            if let Some(w) = weak.upgrade() {
+                ctrl.refresh_global(&w);
+                // Re-apply now rather than waiting for the next poll tick.
+                crate::window::apply_theme(
+                    &w,
+                    theme.variant_for(ctrl.theme_mode(), crate::os_appearance::current()),
+                );
+            }
+        });
+    }
+
+    fn set_theme_mode(&self, value: &str) {
+        {
+            let mut settings = self.inner.settings.lock().expect("settings lock");
+            settings.set_theme_mode(value);
         }
 
         self.queue_persist();
@@ -355,6 +385,19 @@ impl SettingsController {
     #[must_use]
     pub fn snapshot(&self) -> Settings {
         self.inner.settings.lock().expect("settings lock").clone()
+    }
+
+    /// Current `theme_mode` setting. Read by the OS-appearance watcher on
+    /// every tick so toggling between `Auto` / `Dark` / `Light` in a
+    /// future settings-UI surface takes effect without a daemon restart.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the settings mutex is poisoned. See
+    /// [`Self::launcher_position`] for the rationale.
+    #[must_use]
+    pub fn theme_mode(&self) -> crate::theme::ThemeMode {
+        self.inner.settings.lock().expect("settings lock").theme_mode()
     }
 
     /// Record the manifest version each `(plugin, Some(version))` pair was
@@ -643,6 +686,19 @@ fn next_choice(current: &str, choices: &[String]) -> String {
     let next = (idx + 1) % choices.len().max(1);
 
     choices.get(next).cloned().unwrap_or_else(|| current.to_owned())
+}
+
+/// Title-cased label for the theme-mode pill in the settings UI.
+/// [`crate::theme::ThemeMode::as_str`] returns the lowercase on-disk
+/// spelling; this helper provides the display variant the user reads in
+/// the click-to-cycle row.
+fn theme_mode_label(mode: crate::theme::ThemeMode) -> &'static str {
+    use crate::theme::ThemeMode;
+    match mode {
+        ThemeMode::Auto => "Auto",
+        ThemeMode::Dark => "Dark",
+        ThemeMode::Light => "Light",
+    }
 }
 
 #[cfg(test)]
