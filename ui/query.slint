@@ -309,6 +309,30 @@ export component QueryWindow inherits Window {
     // Settings view geometry: wider + taller than the launcher so the plugin
     // list and option inputs both have breathing room.
     property <length> settings-height: 480px;
+    // Plugin view-frame geometry: same vertical budget as settings so a
+    // typical view (a few headings + buttons + an input) doesn't have
+    // to scroll. Views that produce more content than fits in this
+    // window still scroll via the inner ScrollView.
+    property <length> view-frame-height: 480px;
+
+    // Window height per current-view. Pulled into a pure function so
+    // the property binding stays a single name rather than a
+    // four-way ternary.
+    pure function window-height-for-view() -> length {
+        if (root.current-view == root.VIEW-SETTINGS) {
+            return settings-height;
+        }
+
+        if (root.current-view == root.VIEW-CONFIRM) {
+            return settings-height;
+        }
+
+        if (root.current-view == root.VIEW-VIEWS) {
+            return view-frame-height;
+        }
+
+        return input-height + (results.length > 0 ? rows-height + 1px : 0);
+    }
 
     // Size is *not* collapsed when `is-hidden` is true — shrinking to 1×1
     // sends `xdg_toplevel.set_max_size(1,1)` which fails Wayland's min/max
@@ -318,11 +342,7 @@ export component QueryWindow inherits Window {
     // visual result (the window background is `transparent` already, so
     // an invisible inner Rectangle paints nothing).
     width: root.window-width;
-    height: root.current-view == root.VIEW-SETTINGS
-        ? settings-height
-        : root.current-view == root.VIEW-CONFIRM
-            ? settings-height
-            : input-height + (results.length > 0 ? rows-height + 1px : 0);
+    height: root.window-height-for-view();
 
     // Translucent rounded panel sits inside a transparent window so the corner
     // radius reads cleanly on the desktop. `visible: !is-hidden` paired with
