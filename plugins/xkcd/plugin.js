@@ -1,13 +1,7 @@
-// xkcd comic lookup. Triggered by `xkcd <arg>`:
-//   - `xkcd latest`     → newest comic
-//   - `xkcd random`     → uniformly random comic from 1..latest
-//   - `xkcd <number>`   → that comic by number (404 → no results)
-//   - `xkcd <text>`     → fuzzy title search against a cached index
-//
-// The title index is cached to `fs.cache` as `xkcd-index.json`. The
-// `onEnable` hook rebuilds the full archive on install / update; in the
-// meantime the first text search bootstraps the latest 500 comics (~10s)
-// and subsequent loads refresh incrementally.
+// xkcd lookup via `xkcd <arg>`: `latest`, `random`, a number, or text
+// (fuzzy title search against a cached index). The index lives in fs.cache;
+// `onEnable` rebuilds the full archive, otherwise the first text search
+// bootstraps the latest 500 and later loads refresh incrementally.
 
 import { openUrl } from "highbeam:actions";
 import { get } from "highbeam:http";
