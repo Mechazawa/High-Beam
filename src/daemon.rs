@@ -84,8 +84,7 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
     // we register with the OS.
     let hotkey_spec = settings_for_ui.global().hotkey.clone();
 
-    // Theme stays in an Arc — the OS-appearance watcher thread holds a
-    // clone for the daemon's lifetime.
+    // Arc so the watcher thread can hold a clone for the daemon's lifetime.
     let theme = Arc::new(Theme::load_or_default());
     window::apply_theme(
         &window,
@@ -94,13 +93,8 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
 
     let settings_controller = SettingsController::new(manifests, settings_for_ui);
 
-    // Watch unconditionally — the callback reads `theme_mode` from the
-    // controller on every fire, so a future settings-UI toggle from `Dark`
-    // / `Light` back to `Auto` immediately picks up live OS flips without
-    // a daemon restart. `variant_for` already pins the variant when the
-    // user's preference isn't `Auto`, so the wasted-wakeup cost on a
-    // pinned mode is one settings-mutex lock per 2 s — well below the
-    // wake-up itself.
+    // Watch unconditionally: the callback re-reads `theme_mode` each fire,
+    // so toggling back to `Auto` later takes effect without a restart.
     let _appearance_watcher = {
         let weak = window.as_weak();
         let controller = settings_controller.clone();

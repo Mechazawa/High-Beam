@@ -103,15 +103,10 @@ impl SettingsController {
     }
 
     /// Wire every settings callback on the given window. Idempotent; call
-    /// once per window. The controller is held by both the closures and by
-    /// the caller (it owns no Slint state of its own).
-    ///
-    /// `theme` is captured by the theme-mode dropdown handler so a user
-    /// pick re-applies the resolved variant immediately, without waiting
-    /// for the next OS-appearance flip.
+    /// once per window. `theme` lets the theme-mode handler re-apply the
+    /// variant on pick, without waiting for the next OS-appearance flip.
     pub fn wire(&self, window: &QueryWindow, theme: Arc<crate::theme::Theme>) {
-        // Initial render so the user sees populated UI the first time they
-        // open settings rather than empty placeholders.
+        // Populate before the user first opens settings.
         self.refresh_slots(window);
         self.refresh_global(window);
 
@@ -277,8 +272,8 @@ impl SettingsController {
         self.queue_persist();
     }
 
-    /// Hook the theme-mode dropdown into `window`. Lives separate from
-    /// [`Self::wire`] so the latter stays under the line cap.
+    /// Hook the theme-mode dropdown into `window`. Split from [`Self::wire`]
+    /// to keep it under the line cap.
     fn wire_theme_mode_select(&self, window: &QueryWindow, theme: Arc<crate::theme::Theme>) {
         let ctrl = self.clone();
         let weak = window.as_weak();
@@ -287,9 +282,7 @@ impl SettingsController {
 
             if let Some(w) = weak.upgrade() {
                 ctrl.refresh_global(&w);
-                // Re-apply right now so the user sees the variant flip
-                // immediately rather than after the next OS-appearance
-                // poll tick (which only fires for `Auto` anyway).
+                // Re-apply now rather than waiting for the next poll tick.
                 crate::window::apply_theme(
                     &w,
                     theme.variant_for(ctrl.theme_mode(), crate::os_appearance::current()),

@@ -1,18 +1,7 @@
 //! OS appearance detection for the theme auto-switch.
 //!
-//! Wraps `dark-light` and adds a polling watcher. `dark-light` 2.0
-//! dropped its upstream `subscribe()` helper, so [`Watcher::start`]
-//! spawns a background thread that re-detects every [`POLL_INTERVAL`] and
-//! fires the callback only on transitions. A 2 s ceiling on toggle-to-repaint
-//! latency is well below what a user can perceive for a theme flip; the
-//! cost is one extra wakeup every 2 s while the launcher daemon is
-//! running.
-//!
-//! `dark-light` can return `Mode::Unspecified` when the platform can't
-//! tell (older Linux desktops without the portal, headless tests). We
-//! surface that as [`Appearance::Unspecified`] so the caller can apply a
-//! user-controlled fallback policy in [`crate::theme::Theme::variant_for`]
-//! instead of silently picking light.
+//! Wraps `dark-light`, whose 2.0 release dropped its `subscribe()` helper —
+//! so [`Watcher::start`] polls every [`POLL_INTERVAL`] and fires on change.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -21,23 +10,18 @@ use std::time::Duration;
 
 use dark_light::Mode;
 
-/// Poll interval for the background watcher. Short enough that a theme
-/// flip feels instant, long enough that the wakeup cost is negligible.
+use crate::logging::LogErr;
+
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 
-/// Resolved OS appearance.
-///
-/// Three-valued: `Unspecified` is surfaced (not collapsed) so the theme
-/// layer can pick a fallback that respects the user's preference rather
-/// than silently defaulting to light at this boundary.
+/// Resolved OS appearance. `Unspecified` is kept distinct (not collapsed to
+/// `Light`) so [`crate::theme::Theme::variant_for`] owns the fallback policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Appearance {
     Dark,
     Light,
-    /// The OS didn't report a preference (e.g. Linux desktop without an
-    /// `org.freedesktop.portal.Settings` responder). Theme resolution
-    /// falls back to its documented policy in
-    /// [`crate::theme::Theme::variant_for`].
+    /// OS reported no preference (e.g. Linux without an
+    /// `org.freedesktop.portal.Settings` responder).
     Unspecified,
 }
 
@@ -51,49 +35,31 @@ impl From<Mode> for Appearance {
     }
 }
 
-/// One-shot read of the current OS appearance. Errors from the platform
-/// query degrade to [`Appearance::Unspecified`] with a warning — the
-/// daemon must never refuse to start because the probe failed, and the
-/// caller already has a fallback for the unspecified case.
+/// One-shot read of the current OS appearance. A failed probe degrades to
+/// `Unspecified` rather than erroring — startup must not hinge on it.
 #[must_use]
 pub fn current() -> Appearance {
-    match dark_light::detect() {
-        Ok(mode) => mode.into(),
-        Err(err) => {
-            tracing::warn!(%err, "os-appearance: detect failed; reporting Unspecified");
-            Appearance::Unspecified
-        }
-    }
+    dark_light::detect()
+        .log_warn("os-appearance: detect failed; reporting Unspecified")
+        .map_or(Appearance::Unspecified, Into::into)
 }
 
-/// Background watcher for OS appearance changes. A live RAII handle:
-/// [`Watcher::start`] spawns the polling thread, and dropping the
-/// returned `Watcher` stops it. The thread sees the stop flag on its next
-/// loop iteration, so shutdown is bounded by [`POLL_INTERVAL`] — no
-/// `join()` is awaited; the OS reaps the thread when the process exits.
+/// Live RAII handle for the appearance-polling thread: [`Watcher::start`]
+/// spawns it, dropping the `Watcher` stops it (within one [`POLL_INTERVAL`]).
 pub struct Watcher {
     stop: Arc<AtomicBool>,
     handle: Option<thread::JoinHandle<()>>,
 }
 
 impl Watcher {
-    /// Start watching for OS appearance changes. The callback fires only
-    /// on transitions (not on the initial value — the caller already has
-    /// that from [`current`]), runs on the watcher thread, and must
-    /// therefore be `Send + 'static`.
+    /// Start the watcher. `callback` fires only on transitions (the caller
+    /// already has the initial value from [`current`]) and runs on the
+    /// watcher thread, hence `Send + 'static`.
     ///
-    /// The watcher polls every [`POLL_INTERVAL`]; OS-level notification
-    /// APIs vary too much across platforms to wrap cheaply, and a 2 s
-    /// ceiling on repaint latency is fine for a theme flip.
-    ///
-    /// Thread-spawn failure (resource exhaustion, `EAGAIN` from `clone`,
-    /// container `RLIMIT_NPROC`) degrades gracefully: the returned handle
-    /// is inert (no thread, callback never fires) and a warning is
-    /// logged. Matches the daemon-wide doctrine that a single failing
-    /// subsystem must not refuse the launcher's startup — the variant
-    /// `daemon::run` already painted at startup remains in place; only
-    /// live auto-switch is lost.
-    #[must_use = "dropping the returned Watcher stops the thread — discarding it terminates auto-switch immediately"]
+    /// A failed thread spawn degrades to an inert handle (no thread, no
+    /// callbacks) plus a warning — a single failing subsystem must not block
+    /// the daemon; only live auto-switch is lost.
+    #[must_use = "dropping the Watcher stops the thread, ending auto-switch"]
     pub fn start<F>(callback: F) -> Self
     where
         F: Fn(Appearance) + Send + 'static,
@@ -102,20 +68,15 @@ impl Watcher {
         let stop_thread = Arc::clone(&stop);
         let initial = current();
 
-        let handle = match thread::Builder::new()
+        let handle = thread::Builder::new()
             .name("highbeam-os-appearance".into())
             .spawn(move || Self::run(&stop_thread, initial, callback))
-        {
-            Ok(handle) => Some(handle),
-            Err(err) => {
-                tracing::warn!(%err, "os-appearance: could not spawn watcher; auto-switch disabled this session");
-                // Pre-stop so a future `Drop` is idempotent — there's
-                // nothing to signal, but the invariant "stop is true
-                // after Drop" still holds.
-                stop.store(true, Ordering::Relaxed);
-                None
-            }
-        };
+            .log_warn("os-appearance: spawn failed; auto-switch disabled this session");
+
+        // No thread to signal — pre-stop keeps Drop idempotent.
+        if handle.is_none() {
+            stop.store(true, Ordering::Relaxed);
+        }
 
         Self { stop, handle }
     }
@@ -125,9 +86,8 @@ impl Watcher {
         F: Fn(Appearance) + Send + 'static,
     {
         let mut last = initial;
-        // Sleep at the end of the loop body — checking `stop` once per
-        // iteration is enough because `Drop` sets it before the next poll
-        // wakes up. Net iteration shape: check → poll → fire? → sleep.
+        // Sleep last: Drop sets `stop` before the next wake, so one check
+        // per iteration suffices.
         while !stop.load(Ordering::Relaxed) {
             let next = current();
 
@@ -144,19 +104,12 @@ impl Watcher {
 impl Drop for Watcher {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
-        // Detach: joining would block up to POLL_INTERVAL on daemon
-        // shutdown. The thread is well-behaved and the process is about
-        // to exit anyway.
+        // Detached, not joined: joining would block up to POLL_INTERVAL on
+        // shutdown for a thread the OS reaps at exit anyway.
         drop(self.handle.take());
     }
 }
 
-// No unit tests here on purpose. The `From<Mode>` impl is one match arm
-// per variant — exhaustiveness checks catch deletions at compile time, so
-// per-arm asserts are tautologies. `current()` and `subscribe()` are thin
-// wrappers around `dark_light` + `thread::spawn` whose only observable
-// behaviour involves real platform IPC and a real OS thread; testing
-// either in isolation forces hardware-dependent fixtures or pays for a
-// detached watcher thread + DBus probe per test run. The integration
-// surface (theme variant resolution, settings round-trip) is exercised
-// from `theme.rs` and `settings.rs` instead.
+// No unit tests: `From<Mode>` is one arm per variant (exhaustiveness already
+// guards it), and `current` / `Watcher` only do platform IPC + a real
+// thread. Behaviour is covered via theme.rs / settings.rs.

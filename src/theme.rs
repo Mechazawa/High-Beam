@@ -48,17 +48,10 @@ impl ThemeMode {
     }
 }
 
-/// Lenient, infallible parse — the read-side counterpart of [`as_str`].
-///
-/// Matched case-insensitively (so the title-cased settings-UI labels and a
-/// hand-capitalised `settings.toml` both work) and **total**: any unknown
-/// string degrades to [`ThemeMode::Auto`] rather than erroring, so a typo
-/// in the config never blocks daemon startup. That silent fallback is the
-/// deliberate trade — this is why it's `From` (infallible) and not
-/// `FromStr` (which would force a `Result` every caller just unwraps to
-/// the default anyway).
-///
-/// [`as_str`]: ThemeMode::as_str
+/// Read-side counterpart of `as_str`: case-insensitive and total —
+/// unknown input falls back to `Auto` so a config typo can't block
+/// startup. `From` (not `FromStr`) because that fallback is deliberate,
+/// never an error.
 impl From<&str> for ThemeMode {
     fn from(raw: &str) -> Self {
         match raw.to_ascii_lowercase().as_str() {
@@ -80,9 +73,8 @@ pub struct Theme {
 }
 
 impl Default for Theme {
-    /// Forwards to [`Self::default_bundled`] so the auto-derived path can't
-    /// accidentally produce a theme where the dark variant is silently
-    /// equal to the light one.
+    /// Forwards to `default_bundled` so a derived default can't yield
+    /// dark == light.
     fn default() -> Self {
         Self::default_bundled()
     }
@@ -120,15 +112,11 @@ pub struct Window {
     pub border_radius: f32,
 }
 
-/// Light-mode defaults — also serve as the `base` everywhere no override
-/// is provided.
+/// Light-mode defaults; also the `base` wherever no override is given.
 impl Default for Colors {
     fn default() -> Self {
-        // These hex literals are the runtime source of truth — the bundled
-        // `themes/yosemite-spotlight.toml` and the .slint property defaults
-        // exist for parity; only Rust reads at runtime. `expect` (not
-        // `unwrap`) so a typo in one of these literals panics with a
-        // message that names the offender at the panic site.
+        // Runtime source of truth — the bundled .toml mirrors these for
+        // parity. `panic` (not silent) names a bad literal at its site.
         let parse = |hex: &str| parse_hex_color(hex).unwrap_or_else(|| panic!("default theme: invalid hex {hex:?}"));
         Self {
             background: parse("#ffffffea"),
@@ -142,10 +130,7 @@ impl Default for Colors {
 }
 
 impl Colors {
-    /// Hardcoded dark counterpart of [`Self::default`] — the runtime
-    /// source of truth for the dark variant of the bundled theme.
-    /// Hand-picked to track the macOS Spotlight dark aesthetic: near-black
-    /// translucent panel, light text, same blue accents.
+    /// Dark counterpart of [`Self::default`] — the bundled dark palette.
     #[must_use]
     fn default_dark() -> Self {
         let parse =
@@ -203,10 +188,8 @@ impl Theme {
         }
     }
 
-    /// In-Rust fallback when the file is missing or unreadable. Light
-    /// variant uses [`Colors::default`]; dark variant uses
-    /// [`Colors::default_dark`]. Font/window are appearance-agnostic, so
-    /// both variants share the base values.
+    /// In-Rust fallback for a missing/unreadable file. Font + window are
+    /// appearance-agnostic, so both variants share them.
     #[must_use]
     pub fn default_bundled() -> Self {
         Self {
@@ -250,19 +233,9 @@ impl Theme {
         let raw_font = raw.font.unwrap_or_default();
         let raw_window = raw.window.unwrap_or_default();
 
-        // The user's `[colors]` flat fields are *per-field* overrides on
-        // top of the mode-specific defaults — so nudging one base colour
-        // (e.g. `background = "#fafafa"`) doesn't drop the bundled dark
-        // palette for the untouched fields. Each variant gets its own
-        // base resolution from its own appearance defaults, then the
-        // matching `[colors.dark]` / `[colors.light]` sub-table layers on
-        // top.
-        //
-        // Backwards-compat note: a pre-dark-mode theme file that sets
-        // *every* base field renders identically in both modes (the user
-        // explicitly took ownership of every value). A file that sets
-        // only some base fields gets mode-specific defaults for the
-        // rest — almost always what the user wants.
+        // `[colors]` flat fields apply per-field over each mode's defaults,
+        // so nudging one base colour doesn't drop the dark palette for the
+        // rest. The `[colors.dark]` / `[colors.light]` sub-tables layer on top.
         let light_base_colors = raw_colors.base.apply(&defaults.light.colors, "colors")?;
         let dark_base_colors = raw_colors.base.apply(&defaults.dark.colors, "colors")?;
         let light_base_font = raw_font.base.apply(&defaults.light.font);
@@ -302,18 +275,9 @@ impl Theme {
         Ok(Self { dark, light })
     }
 
-    /// Pick the variant to paint, given the user's preference and the
-    /// current OS appearance. `Auto` follows the system; `Dark` / `Light`
-    /// pin regardless of what the OS reports.
-    ///
-    /// When the OS reports [`Appearance::Unspecified`] (Linux without an
-    /// `org.freedesktop.portal.Settings` responder, headless tests, the
-    /// rare error path of the platform probe), `Auto` falls back to the
-    /// light variant. The fallback lives at this site rather than at the
-    /// `os_appearance` boundary so it's discoverable next to the rest of
-    /// the variant-selection policy, and so a future
-    /// `preferred_fallback_appearance` setting can be slotted in here
-    /// without touching the watcher.
+    /// Pick the variant to paint. `Auto` follows the system; `Dark` /
+    /// `Light` pin regardless. `Auto` + `Unspecified` falls back to light —
+    /// the fallback policy lives here, not at the `os_appearance` boundary.
     #[must_use]
     pub fn variant_for(&self, mode: ThemeMode, system: Appearance) -> &ThemeVariant {
         match (mode, system) {
