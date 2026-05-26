@@ -13,13 +13,13 @@ use slint::ComponentHandle;
 use crate::QueryWindow;
 use crate::app;
 use crate::bundle_install;
-use crate::dark_mode;
 use crate::ipc::{Command, Server};
 use crate::logging::{self, LogErr};
+use crate::os_appearance;
 use crate::plugins::loader::{self, LoaderOptions};
 use crate::settings::Settings;
 use crate::settings_ui::SettingsController;
-use crate::theme::{Theme, ThemeMode};
+use crate::theme::Theme;
 use crate::window;
 
 pub struct Options {
@@ -83,33 +83,39 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
     // hot-reload is out of scope for v1, so the daemon-startup value is what
     // we register with the OS.
     let hotkey_spec = settings_for_ui.global().hotkey.clone();
-    let theme_mode = settings_for_ui.theme_mode();
 
-    // Theme stays in an Arc — the dark-mode watcher thread holds a clone
-    // for the daemon's lifetime when auto-switch is active.
+    // Theme stays in an Arc — the OS-appearance watcher thread holds a
+    // clone for the daemon's lifetime.
     let theme = Arc::new(Theme::load_or_default());
-    window::apply_theme(&window, theme.variant_for(theme_mode, dark_mode::current()));
-
-    // Subscribe to OS appearance flips only in Auto mode — `Dark`/`Light`
-    // pin the variant regardless of the system, so a watcher would just
-    // burn wakeups. The guard's `Drop` stops the watcher; binding it to
-    // `_dark_mode_guard` keeps it alive for the rest of `run`.
-    let _dark_mode_guard = (theme_mode == ThemeMode::Auto).then(|| {
-        let weak = window.as_weak();
-        let theme = Arc::clone(&theme);
-        dark_mode::subscribe(move |appearance| {
-            let weak = weak.clone();
-            let theme = Arc::clone(&theme);
-            slint::invoke_from_event_loop(move || {
-                if let Some(w) = weak.upgrade() {
-                    window::apply_theme(&w, theme.variant_for(ThemeMode::Auto, appearance));
-                }
-            })
-            .log_debug("dark-mode: post repaint to event loop");
-        })
-    });
+    window::apply_theme(
+        &window,
+        theme.variant_for(settings_for_ui.theme_mode(), os_appearance::current()),
+    );
 
     let settings_controller = SettingsController::new(manifests, settings_for_ui);
+
+    // Subscribe unconditionally — the callback reads `theme_mode` from the
+    // controller on every fire, so a future settings-UI toggle from `Dark`
+    // / `Light` back to `Auto` immediately picks up live OS flips without
+    // a daemon restart. `variant_for` already pins the variant when the
+    // user's preference isn't `Auto`, so the wasted-wakeup cost on a
+    // pinned mode is one settings-mutex lock per 2 s — well below the
+    // wake-up itself.
+    let _os_appearance_guard = {
+        let weak = window.as_weak();
+        let controller = settings_controller.clone();
+        os_appearance::subscribe(move |appearance| {
+            let weak = weak.clone();
+            let theme = Arc::clone(&theme);
+            let mode = controller.theme_mode();
+            slint::invoke_from_event_loop(move || {
+                if let Some(w) = weak.upgrade() {
+                    window::apply_theme(&w, theme.variant_for(mode, appearance));
+                }
+            })
+            .log_debug("os-appearance: post repaint to event loop");
+        })
+    };
 
     settings_controller.wire(&window);
 

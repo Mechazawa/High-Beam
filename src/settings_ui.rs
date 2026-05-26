@@ -359,6 +359,19 @@ impl SettingsController {
         self.inner.settings.lock().expect("settings lock").clone()
     }
 
+    /// Current `theme_mode` setting. Read by the OS-appearance watcher on
+    /// every tick so toggling between `Auto` / `Dark` / `Light` in a
+    /// future settings-UI surface takes effect without a daemon restart.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the settings mutex is poisoned. See
+    /// [`Self::launcher_position`] for the rationale.
+    #[must_use]
+    pub fn theme_mode(&self) -> crate::theme::ThemeMode {
+        self.inner.settings.lock().expect("settings lock").theme_mode()
+    }
+
     /// Record the manifest version each `(plugin, Some(version))` pair was
     /// last loaded with, then persist once. The lifecycle-hook layer uses
     /// this so a crash mid-hook can't replay the work on the next boot.

@@ -9,8 +9,8 @@
 //!
 //! The user's [`crate::settings::Settings::theme_mode`] decides which
 //! variant `apply_theme` paints. Reload is restart-only; in `Auto` mode a
-//! background watcher (see [`crate::dark_mode`]) repaints on system flips
-//! without a restart.
+//! background watcher (see [`crate::os_appearance`]) repaints on system
+//! flips without a restart.
 //!
 //! Token surface mirrors `QueryWindow`'s `in-out` properties. Missing or
 //! malformed file falls back to the bundled yosemite-spotlight default.
@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use serde::Deserialize;
 use slint::Color;
 
-use crate::dark_mode::SystemAppearance;
+use crate::os_appearance::Appearance;
 use crate::paths;
 
 /// User's chosen theme-mode preference. `Auto` follows the OS appearance
@@ -282,13 +282,22 @@ impl Theme {
     }
 
     /// Pick the variant to paint, given the user's preference and the
-    /// current system appearance. `Auto` follows the system; `Dark` /
-    /// `Light` pin regardless.
+    /// current OS appearance. `Auto` follows the system; `Dark` / `Light`
+    /// pin regardless of what the OS reports.
+    ///
+    /// When the OS reports [`Appearance::Unspecified`] (Linux without an
+    /// `org.freedesktop.portal.Settings` responder, headless tests, the
+    /// rare error path of the platform probe), `Auto` falls back to the
+    /// light variant. The fallback lives at this site rather than at the
+    /// `os_appearance` boundary so it's discoverable next to the rest of
+    /// the variant-selection policy, and so a future
+    /// `preferred_fallback_appearance` setting can be slotted in here
+    /// without touching the watcher.
     #[must_use]
-    pub fn variant_for(&self, mode: ThemeMode, system: SystemAppearance) -> &ThemeVariant {
+    pub fn variant_for(&self, mode: ThemeMode, system: Appearance) -> &ThemeVariant {
         match (mode, system) {
-            (ThemeMode::Dark, _) | (ThemeMode::Auto, SystemAppearance::Dark) => &self.dark,
-            (ThemeMode::Light, _) | (ThemeMode::Auto, SystemAppearance::Light) => &self.light,
+            (ThemeMode::Dark, _) | (ThemeMode::Auto, Appearance::Dark) => &self.dark,
+            (ThemeMode::Light, _) | (ThemeMode::Auto, Appearance::Light | Appearance::Unspecified) => &self.light,
         }
     }
 }
@@ -682,25 +691,35 @@ mod tests {
     fn variant_for_honors_explicit_mode() {
         let theme = Theme::default_bundled();
         // Dark setting wins regardless of system.
-        assert_eq!(theme.variant_for(ThemeMode::Dark, SystemAppearance::Light), &theme.dark);
-        assert_eq!(theme.variant_for(ThemeMode::Dark, SystemAppearance::Dark), &theme.dark);
+        assert_eq!(theme.variant_for(ThemeMode::Dark, Appearance::Light), &theme.dark);
+        assert_eq!(theme.variant_for(ThemeMode::Dark, Appearance::Dark), &theme.dark);
         // Light setting wins regardless of system.
-        assert_eq!(
-            theme.variant_for(ThemeMode::Light, SystemAppearance::Light),
-            &theme.light
-        );
-        assert_eq!(
-            theme.variant_for(ThemeMode::Light, SystemAppearance::Dark),
-            &theme.light
-        );
+        assert_eq!(theme.variant_for(ThemeMode::Light, Appearance::Light), &theme.light);
+        assert_eq!(theme.variant_for(ThemeMode::Light, Appearance::Dark), &theme.light);
     }
 
     #[test]
     fn variant_for_auto_follows_system() {
         let theme = Theme::default_bundled();
-        assert_eq!(theme.variant_for(ThemeMode::Auto, SystemAppearance::Dark), &theme.dark);
+        assert_eq!(theme.variant_for(ThemeMode::Auto, Appearance::Dark), &theme.dark);
+        assert_eq!(theme.variant_for(ThemeMode::Auto, Appearance::Light), &theme.light);
+    }
+
+    #[test]
+    fn variant_for_auto_unspecified_falls_back_to_light() {
+        // When the OS can't tell us (Linux without a portal responder,
+        // headless tests, the rare error path of the platform probe),
+        // `Auto` falls back to the light variant. Pinned modes still
+        // win regardless of the system signal.
+        let theme = Theme::default_bundled();
         assert_eq!(
-            theme.variant_for(ThemeMode::Auto, SystemAppearance::Light),
+            theme.variant_for(ThemeMode::Auto, Appearance::Unspecified),
+            &theme.light
+        );
+        // Pinned modes ignore the Unspecified signal entirely.
+        assert_eq!(theme.variant_for(ThemeMode::Dark, Appearance::Unspecified), &theme.dark);
+        assert_eq!(
+            theme.variant_for(ThemeMode::Light, Appearance::Unspecified),
             &theme.light
         );
     }

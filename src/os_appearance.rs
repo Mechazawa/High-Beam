@@ -1,17 +1,18 @@
-//! System appearance detection for the theme auto-switch.
+//! OS appearance detection for the theme auto-switch.
 //!
 //! Wraps `dark-light` and adds a polling subscription. `dark-light` 2.0
 //! dropped its upstream `subscribe()` helper, so [`subscribe`] spawns a
-//! background thread that re-detects every [`POLL_INTERVAL`] and fires the
-//! callback only on transitions. A 2 s ceiling on toggle-to-repaint
+//! background thread that re-detects every [`POLL_INTERVAL`] and fires
+//! the callback only on transitions. A 2 s ceiling on toggle-to-repaint
 //! latency is well below what a user can perceive for a theme flip; the
 //! cost is one extra wakeup every 2 s while the launcher daemon is
 //! running.
 //!
-//! `dark-light` returns `Mode::Unspecified` when the platform can't tell
-//! (older Linux desktops without the portal, headless tests). We collapse
-//! that to [`SystemAppearance::Light`] — it matches the historic bundled
-//! theme so users who upgrade don't see a surprise palette flip.
+//! `dark-light` can return `Mode::Unspecified` when the platform can't
+//! tell (older Linux desktops without the portal, headless tests). We
+//! surface that as [`Appearance::Unspecified`] so the caller can apply a
+//! user-controlled fallback policy in [`crate::theme::Theme::variant_for`]
+//! instead of silently picking light.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -24,42 +25,48 @@ use dark_light::Mode;
 /// flip feels instant, long enough that the wakeup cost is negligible.
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 
-/// Resolved system appearance.
+/// Resolved OS appearance.
 ///
-/// Two-valued because that's what the UI cares about — `Unspecified`
-/// gets normalised to [`Self::Light`] at the boundary so the rest of the
-/// app only ever sees `Dark` or `Light`.
+/// Three-valued: `Unspecified` is surfaced (not collapsed) so the theme
+/// layer can pick a fallback that respects the user's preference rather
+/// than silently defaulting to light at this boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SystemAppearance {
+pub enum Appearance {
     Dark,
     Light,
+    /// The OS didn't report a preference (e.g. Linux desktop without an
+    /// `org.freedesktop.portal.Settings` responder). Theme resolution
+    /// falls back to its documented policy in
+    /// [`crate::theme::Theme::variant_for`].
+    Unspecified,
 }
 
-impl From<Mode> for SystemAppearance {
+impl From<Mode> for Appearance {
     fn from(mode: Mode) -> Self {
         match mode {
             Mode::Dark => Self::Dark,
-            Mode::Light | Mode::Unspecified => Self::Light,
+            Mode::Light => Self::Light,
+            Mode::Unspecified => Self::Unspecified,
         }
     }
 }
 
-/// One-shot read of the current system appearance. Errors from the
-/// platform query degrade to [`SystemAppearance::Light`] with a warning —
-/// the daemon must never refuse to start because the dark-mode probe
-/// failed.
+/// One-shot read of the current OS appearance. Errors from the platform
+/// query degrade to [`Appearance::Unspecified`] with a warning — the
+/// daemon must never refuse to start because the probe failed, and the
+/// caller already has a fallback for the unspecified case.
 #[must_use]
-pub fn current() -> SystemAppearance {
+pub fn current() -> Appearance {
     match dark_light::detect() {
         Ok(mode) => mode.into(),
         Err(err) => {
-            tracing::warn!(%err, "dark-mode: detect failed; assuming light");
-            SystemAppearance::Light
+            tracing::warn!(%err, "os-appearance: detect failed; reporting Unspecified");
+            Appearance::Unspecified
         }
     }
 }
 
-/// Subscribe to system appearance changes. The callback fires only on
+/// Subscribe to OS appearance changes. The callback fires only on
 /// transitions (not on the initial value — the caller already has that
 /// from [`current`]), runs on the watcher thread, and must therefore be
 /// `Send + 'static`. Drop the returned guard to stop the watcher.
@@ -77,19 +84,19 @@ pub fn current() -> SystemAppearance {
 #[must_use = "the returned SubscriptionGuard stops the watcher on Drop — discarding it terminates auto-switch immediately"]
 pub fn subscribe<F>(callback: F) -> SubscriptionGuard
 where
-    F: Fn(SystemAppearance) + Send + 'static,
+    F: Fn(Appearance) + Send + 'static,
 {
     let stop = Arc::new(AtomicBool::new(false));
     let stop_thread = Arc::clone(&stop);
     let initial = current();
 
     let handle = match thread::Builder::new()
-        .name("highbeam-dark-mode".into())
+        .name("highbeam-os-appearance".into())
         .spawn(move || run_watcher(&stop_thread, initial, callback))
     {
         Ok(handle) => Some(handle),
         Err(err) => {
-            tracing::warn!(%err, "dark-mode: could not spawn watcher; auto-switch disabled this session");
+            tracing::warn!(%err, "os-appearance: could not spawn watcher; auto-switch disabled this session");
             // Pre-stop so a future `Drop` is idempotent — there's nothing
             // to signal, but the invariant "stop is true after Drop"
             // still holds.
@@ -101,24 +108,24 @@ where
     SubscriptionGuard { stop, handle }
 }
 
-fn run_watcher<F>(stop: &Arc<AtomicBool>, initial: SystemAppearance, callback: F)
+fn run_watcher<F>(stop: &Arc<AtomicBool>, initial: Appearance, callback: F)
 where
-    F: Fn(SystemAppearance) + Send + 'static,
+    F: Fn(Appearance) + Send + 'static,
 {
     let mut last = initial;
+    // Sleep at the end of the loop body — checking `stop` once per
+    // iteration is enough because the guard's `Drop` sets it before the
+    // next poll wakes up. Net iteration shape: check → poll → fire? →
+    // sleep.
     while !stop.load(Ordering::Relaxed) {
-        thread::sleep(POLL_INTERVAL);
-
-        if stop.load(Ordering::Relaxed) {
-            break;
-        }
-
         let next = current();
 
         if next != last {
             last = next;
             callback(next);
         }
+
+        thread::sleep(POLL_INTERVAL);
     }
 }
 
@@ -146,14 +153,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unspecified_normalises_to_light() {
-        assert_eq!(SystemAppearance::from(Mode::Unspecified), SystemAppearance::Light);
+    fn unspecified_passes_through() {
+        // Was previously collapsed to Light at this boundary; now passes
+        // through so the theme layer can apply the user's fallback
+        // policy. Regression test for the silent-default-to-light bug.
+        assert_eq!(Appearance::from(Mode::Unspecified), Appearance::Unspecified);
     }
 
     #[test]
     fn mode_round_trip() {
-        assert_eq!(SystemAppearance::from(Mode::Dark), SystemAppearance::Dark);
-        assert_eq!(SystemAppearance::from(Mode::Light), SystemAppearance::Light);
+        assert_eq!(Appearance::from(Mode::Dark), Appearance::Dark);
+        assert_eq!(Appearance::from(Mode::Light), Appearance::Light);
     }
 
     #[test]
