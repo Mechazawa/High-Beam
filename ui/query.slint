@@ -175,8 +175,8 @@ export component QueryWindow inherits Window {
     // `select-global` flips the rail selection to the global entry.
     callback capture-hotkey(bool, bool, bool, bool, string) -> bool;
     callback reset-hotkey-to-default();
-    callback cycle-alt-action-modifier();
-    callback cycle-theme-mode();
+    callback set-alt-action-modifier(string);
+    callback set-theme-mode(string);
     callback select-global();
     // Whether the hotkey field is currently listening for a key combo —
     // drives the prompt text + highlighted border in the global pane.
@@ -392,8 +392,8 @@ export component QueryWindow inherits Window {
             cycle-option-enum(plugin, key) => { root.cycle-option-enum(plugin, key); }
             capture-hotkey(meta, ctrl, shift, alt, text) => { return root.capture-hotkey(meta, ctrl, shift, alt, text); }
             reset-hotkey-to-default => { root.reset-hotkey-to-default(); }
-            cycle-alt-action-modifier => { root.cycle-alt-action-modifier(); }
-            cycle-theme-mode => { root.cycle-theme-mode(); }
+            set-alt-action-modifier(value) => { root.set-alt-action-modifier(value); }
+            set-theme-mode(value) => { root.set-theme-mode(value); }
             select-global => { root.select-global(); }
             recenter-window => { root.recenter-window(); }
             open-config-dir => { root.open-config-dir(); }

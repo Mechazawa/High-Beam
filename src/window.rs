@@ -6,7 +6,6 @@
 
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::thread;
 use std::time::Instant;
 
 use base64::Engine;
@@ -281,49 +280,39 @@ pub(crate) fn hide(window: &QueryWindow) {
     quit_if_once();
 }
 
-/// Snapshot the current window position, hand it to a background thread
-/// for fire-and-forget persistence, then hide. The disk write must not
-/// block the UI thread — same pattern the frecency picks use — so the
-/// hide is observably instant regardless of disk latency.
+/// Persist the current window position, then hide. The position write
+/// is queued onto the settings writer thread so the hide stays snappy.
 pub(crate) fn hide_and_persist_position(window: &QueryWindow, settings: &SettingsController) {
     // Persist-dismiss fires BEFORE the hide so subscribers see the input
     // while it's still live — `clear-input` zeroes the text on hide.
     window.invoke_persist_dismiss(window.get_query_text());
 
     if let Some(pos) = capture_outer_position(window) {
-        if ONCE_MODE.load(Ordering::Relaxed) {
-            // In single-shot we're about to `quit_event_loop` and exit
-            // the process — spawning a fire-and-forget thread races the
-            // process death, so do the disk write inline. The user already
-            // committed (Esc/Enter); the extra few ms is invisible.
-            settings.set_launcher_position(pos);
-        } else {
-            let settings = settings.clone();
-
-            if let Err(err) = thread::Builder::new()
-                .name("highbeam-settings-position".into())
-                .spawn(move || {
-                    settings.set_launcher_position(pos);
-                })
-            {
-                tracing::warn!(%err, "settings: position-persist thread spawn failed");
-            }
-        }
+        settings.set_launcher_position(pos);
     }
 
     hide(window);
 }
 
-/// Apply the persisted launcher position, falling back to the centered
-/// default when no position is saved or the saved one is no longer on any
-/// connected display. The off-screen check matters when the user unplugs
-/// the monitor the window was last positioned on — without it, the next
-/// show would put the window in the void.
+/// Apply the persisted launcher position, recentering when nothing is
+/// saved or the saved value is no longer on any connected display.
+///
+/// On cold start the winit window doesn't exist yet (Slint creates it on
+/// the next event-loop tick), so we seed `WindowAttributes::position` via
+/// `slint::Window::set_position` and let the off-screen check re-run on
+/// the following show. `has_winit_window()` distinguishes that case from
+/// "winit alive but `available_monitors()` is empty" so the latter still
+/// recenters instead of trusting a possibly-off-screen value.
 fn apply_saved_or_centered_position(window: &QueryWindow, settings: &SettingsController) {
     let Some(saved) = settings.launcher_position() else {
         center_on_focused_display(window);
         return;
     };
+
+    if !window.window().has_winit_window() {
+        set_outer_position(window, saved);
+        return;
+    }
 
     let rects = monitor_rects(window);
 
@@ -352,15 +341,11 @@ fn capture_outer_position(window: &QueryWindow) -> Option<WindowPosition> {
         .flatten()
 }
 
-/// Push the window's outer position via winit directly — `slint::Window::
-/// set_position` writes the inner/content position which on macOS differs
-/// from the outer `NSWindow` frame by the title bar height. We use the outer
-/// rect so a restored position lines up byte-identical with where the user
-/// dropped it.
+/// Push the window's outer position. Resolves to
+/// `winit::Window::set_outer_position` when the winit window is live, or
+/// seeds `WindowAttributes::position` for the cold-start path.
 fn set_outer_position(window: &QueryWindow, pos: WindowPosition) {
-    let _ = window.window().with_winit_window(|w: &winit::window::Window| {
-        w.set_outer_position(winit::dpi::PhysicalPosition::new(pos.x, pos.y));
-    });
+    window.window().set_position(slint::PhysicalPosition::new(pos.x, pos.y));
 }
 
 /// Kick off a native OS-driven window drag. winit's `drag_window()` blocks
@@ -708,9 +693,8 @@ mod tests {
 
     #[test]
     fn position_visible_requires_at_least_one_monitor() {
-        // No monitors known to winit (headless tests, backend not
-        // initialised) means we can't validate; the safe default is "treat
-        // as off-screen" so the host falls back to the centered path.
+        // Empty rects = winit alive but no monitors connected; the host
+        // falls through to recenter rather than trusting the saved value.
         let pos = WindowPosition { x: 100, y: 100 };
         assert!(!position_visible_on_any_monitor(pos, &[]));
     }
