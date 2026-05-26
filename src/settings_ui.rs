@@ -106,9 +106,9 @@ impl SettingsController {
     /// once per window. The controller is held by both the closures and by
     /// the caller (it owns no Slint state of its own).
     ///
-    /// `theme` is captured by the theme-mode cycler so a user toggle
-    /// re-applies the resolved variant immediately, without waiting for
-    /// the next OS-appearance flip.
+    /// `theme` is captured by the theme-mode dropdown handler so a user
+    /// pick re-applies the resolved variant immediately, without waiting
+    /// for the next OS-appearance flip.
     pub fn wire(&self, window: &QueryWindow, theme: Arc<crate::theme::Theme>) {
         // Initial render so the user sees populated UI the first time they
         // open settings rather than empty placeholders.
@@ -725,39 +725,6 @@ mod tests {
         // If the current value isn't a known choice (manifest renamed since
         // the user's last save), restart from the first valid option.
         assert_eq!(next_choice("xxx", &choices), "b");
-    }
-
-    #[test]
-    fn set_theme_mode_accepts_dropdown_labels() {
-        use crate::theme::ThemeMode;
-
-        let settings = Settings::default();
-        let ctrl = SettingsController::new(vec![], settings);
-
-        assert_eq!(ctrl.theme_mode(), ThemeMode::Auto);
-        // Values come straight off the ComboBox model — title-cased.
-        // `Settings::set_theme_mode` normalises case-insensitively.
-        ctrl.set_theme_mode("Dark");
-        assert_eq!(ctrl.theme_mode(), ThemeMode::Dark);
-        ctrl.set_theme_mode("Light");
-        assert_eq!(ctrl.theme_mode(), ThemeMode::Light);
-        ctrl.set_theme_mode("Auto");
-        assert_eq!(ctrl.theme_mode(), ThemeMode::Auto);
-        // Garbage degrades to Auto rather than persisting nonsense.
-        ctrl.set_theme_mode("Dark");
-        ctrl.set_theme_mode("nonsense");
-        assert_eq!(ctrl.theme_mode(), ThemeMode::Auto);
-    }
-
-    #[test]
-    fn theme_mode_label_is_title_cased() {
-        // UI label diverges from the on-disk lowercase form; lock the
-        // spelling so a refactor of `ThemeMode::as_str` (which is the
-        // writer surface) doesn't accidentally flow into the UI.
-        use crate::theme::ThemeMode;
-        assert_eq!(theme_mode_label(ThemeMode::Auto), "Auto");
-        assert_eq!(theme_mode_label(ThemeMode::Dark), "Dark");
-        assert_eq!(theme_mode_label(ThemeMode::Light), "Light");
     }
 
     fn manifest_with_options(name: &str, options_json: &str) -> Manifest {

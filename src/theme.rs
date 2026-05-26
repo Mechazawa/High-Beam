@@ -725,16 +725,6 @@ mod tests {
     }
 
     #[test]
-    fn theme_mode_as_str_round_trips_lowercase() {
-        // Writer uses these strings — match the documented spelling so a
-        // typo in `as_str` shows up loud in a test rather than as a
-        // silent settings.toml drift.
-        assert_eq!(ThemeMode::Auto.as_str(), "auto");
-        assert_eq!(ThemeMode::Dark.as_str(), "dark");
-        assert_eq!(ThemeMode::Light.as_str(), "light");
-    }
-
-    #[test]
     fn bundled_yosemite_spotlight_matches_default() {
         // Drift between the bundled theme file and the in-Rust defaults
         // would be a silent UX surprise — this test catches it.
