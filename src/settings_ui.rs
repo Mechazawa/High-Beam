@@ -7,7 +7,9 @@
 //! pipeline; the settings view talks to the same `QueryWindow` but its
 //! state is independent of the query/results state.
 
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::thread;
 
 use serde_json::Value as JsonValue;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
@@ -15,7 +17,6 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use crate::QueryWindow;
 use crate::daemon::HotkeyRegistration;
 use crate::hotkey::{MOD_ALT, MOD_CONTROL, MOD_META, MOD_SHIFT, format_hotkey_spec, slint_flag_for_modifier};
-use crate::logging::LogErr;
 use crate::plugins::manifest::{Manifest, OptionDef, OptionKind};
 use crate::settings::{Settings, WindowPosition};
 use crate::ui::{PluginOption, PluginSlot};
@@ -63,19 +64,35 @@ struct Inner {
     /// `OnceLock` so the controller's already-wired callbacks see the
     /// registration as soon as the daemon installs it.
     hotkey_registration: OnceLock<Arc<HotkeyRegistration>>,
+    /// "Settings are dirty, please flush" channel feeding the dedicated
+    /// writer thread. Every mutator sends `()` here; the writer drains
+    /// all pending signals between disk writes so a burst of edits
+    /// collapses into a single `Settings::save()`. Holding the sender on
+    /// `Inner` means dropping the last `SettingsController` clone closes
+    /// the channel and lets the writer thread exit cleanly.
+    dirty_tx: mpsc::Sender<()>,
 }
 
 impl SettingsController {
     /// Build a controller from the manifest scan + initial loaded settings.
+    ///
+    /// Spawns a dedicated writer thread that owns the dirty-signal receiver.
+    /// The writer keeps a `Weak` reference to `Inner` so its existence does
+    /// not extend the controller's lifetime; once the last clone is dropped,
+    /// the channel closes and the writer exits.
     #[must_use]
     pub fn new(manifests: Vec<Manifest>, settings: Settings) -> Self {
-        Self {
-            inner: Arc::new(Inner {
-                manifests,
-                settings: Mutex::new(settings),
-                hotkey_registration: OnceLock::new(),
-            }),
-        }
+        let (dirty_tx, dirty_rx) = mpsc::channel::<()>();
+        let inner = Arc::new(Inner {
+            manifests,
+            settings: Mutex::new(settings),
+            hotkey_registration: OnceLock::new(),
+            dirty_tx,
+        });
+
+        spawn_writer_thread(Arc::downgrade(&inner), dirty_rx);
+
+        Self { inner }
     }
 
     /// Wire the live OS hotkey registration so capture / reset paths can
@@ -112,14 +129,13 @@ impl SettingsController {
             }
         });
 
-        let ctrl = self.clone();
         let weak = window.as_weak();
 
         window.on_close_settings(move || {
-            // Persist on close — the toggle/set callbacks also persist, but
-            // close acts as a final commit point if anything fell through.
+            // Each mutator already queued a dirty signal, so the writer
+            // thread will flush whatever's outstanding. Closing the view
+            // doesn't need its own write — the queued one is sufficient.
             if let Some(w) = weak.upgrade() {
-                ctrl.persist().log_warn("settings: persist on close failed");
                 w.set_current_view(0);
             }
         });
@@ -249,9 +265,7 @@ impl SettingsController {
             settings.set_hotkey(value);
         }
 
-        if let Err(err) = self.persist() {
-            tracing::warn!(%err, "settings: persist after hotkey-set failed");
-        }
+        self.queue_persist();
     }
 
     fn set_alt_action_modifier(&self, value: &str) {
@@ -260,9 +274,7 @@ impl SettingsController {
             settings.set_alt_action_modifier(value);
         }
 
-        if let Err(err) = self.persist() {
-            tracing::warn!(%err, "settings: persist after alt-action-modifier change failed");
-        }
+        self.queue_persist();
     }
 
     /// Last saved launcher window origin, or `None` if the user has never
@@ -366,24 +378,22 @@ impl SettingsController {
         if entries.is_empty() {
             return;
         }
-        let result = {
+
+        {
             let mut s = self.inner.settings.lock().expect("settings lock");
 
             for (name, version) in entries {
                 s.set_last_loaded_version(name, version.clone());
             }
-            s.save()
-        };
-
-        if let Err(err) = result {
-            tracing::warn!(%err, "settings: could not persist last_loaded_version after lifecycle dispatch");
         }
+
+        self.queue_persist();
     }
 
-    /// Record a new launcher window origin and flush to disk. Used by the
-    /// window layer after the user finishes a drag; persistence is best-
-    /// effort because losing the latest position is preferable to a
-    /// blocked hide path.
+    /// Record a new launcher window origin. The disk write is dispatched
+    /// to the writer thread via the dirty-signal channel, so the caller
+    /// (typically the Slint UI thread firing on dismiss) returns
+    /// immediately while the writer drains the queue in the background.
     ///
     /// # Panics
     ///
@@ -395,9 +405,7 @@ impl SettingsController {
             settings.set_launcher_position(position);
         }
 
-        if let Err(err) = self.persist() {
-            tracing::warn!(%err, "settings: persist after launcher-position-set failed");
-        }
+        self.queue_persist();
     }
 
     /// Forget the saved launcher position. The next show recenters via the
@@ -413,9 +421,7 @@ impl SettingsController {
             settings.clear_launcher_position();
         }
 
-        if let Err(err) = self.persist() {
-            tracing::warn!(%err, "settings: persist after launcher-position-clear failed");
-        }
+        self.queue_persist();
     }
 
     fn refresh_slots(&self, window: &QueryWindow) {
@@ -471,9 +477,7 @@ impl SettingsController {
             settings.set_plugin_enabled(plugin, enabled);
         }
 
-        if let Err(err) = self.persist() {
-            tracing::warn!(plugin, %err, "settings: persist after toggle failed");
-        }
+        self.queue_persist();
     }
 
     fn set_option(&self, plugin: &str, key: &str, value: JsonValue) {
@@ -482,9 +486,7 @@ impl SettingsController {
             settings.set_plugin_option(plugin, key, value);
         }
 
-        if let Err(err) = self.persist() {
-            tracing::warn!(plugin, key, %err, "settings: persist after option-set failed");
-        }
+        self.queue_persist();
     }
 
     /// String callback handles two kinds: actual `string` options (pass
@@ -540,9 +542,74 @@ impl SettingsController {
         self.set_option(plugin, key, value);
     }
 
-    fn persist(&self) -> std::io::Result<()> {
+    /// Send a "settings are dirty" signal to the writer thread.
+    /// Non-blocking; the writer drains all pending signals between disk
+    /// writes so a rapid burst of mutations collapses into one save.
+    fn queue_persist(&self) {
+        // The only `Err` path is "receiver dropped", which only happens
+        // when the writer thread has already exited (panic, lock
+        // poisoning, or process tear-down). Nothing actionable here —
+        // we'd just be writing into a dropped channel — but log so a
+        // truly stuck writer is visible in the journal.
+        if self.inner.dirty_tx.send(()).is_err() {
+            tracing::debug!("settings: writer thread receiver gone; dirty signal dropped");
+        }
+    }
+
+    /// Synchronously flush the current settings to disk, bypassing the
+    /// writer thread. For the single-shot exit path (where the writer
+    /// thread would race the process death) and for tests that want to
+    /// assert on-disk state immediately after a mutation.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the settings mutex is poisoned. See
+    /// [`Self::launcher_position`] for the rationale.
+    pub fn flush(&self) {
         let settings = self.inner.settings.lock().expect("settings lock");
-        settings.save()
+
+        if let Err(err) = settings.save() {
+            tracing::warn!(%err, "settings: flush failed");
+        }
+    }
+}
+
+/// Drain dirty signals from `rx` and persist the current settings until
+/// the channel closes. The writer holds a `Weak` to `Inner` so its
+/// existence doesn't extend the controller's lifetime — once every
+/// `SettingsController` clone is dropped, `Inner` drops, the sender
+/// goes with it, and `recv()` returns `Err` so the loop exits.
+fn spawn_writer_thread(weak_inner: Weak<Inner>, rx: mpsc::Receiver<()>) {
+    let result = thread::Builder::new()
+        .name("highbeam-settings-writer".into())
+        .spawn(move || {
+            while rx.recv().is_ok() {
+                // Coalesce any signals queued while we were about to wake
+                // up so a burst of edits collapses into one disk pass.
+                while rx.try_recv().is_ok() {}
+
+                let Some(inner) = weak_inner.upgrade() else {
+                    break;
+                };
+                let snapshot = match inner.settings.lock() {
+                    Ok(g) => g.clone(),
+                    Err(err) => {
+                        tracing::error!(?err, "settings: writer saw poisoned lock");
+                        break;
+                    }
+                };
+                // Drop the Arc before the disk I/O so we don't extend
+                // Inner's lifetime across a potentially slow write.
+                drop(inner);
+
+                if let Err(err) = snapshot.save() {
+                    tracing::warn!(%err, "settings: writer-thread save failed");
+                }
+            }
+        });
+
+    if let Err(err) = result {
+        tracing::warn!(%err, "settings: writer thread spawn failed");
     }
 }
 
@@ -701,6 +768,10 @@ mod tests {
         let ctrl = SettingsController::new(manifests, settings);
 
         ctrl.set_option_for_kind("p", "limit", "999");
+        // Mutators queue an async write; flush synchronously so we can
+        // assert on the on-disk state without racing the writer thread.
+        ctrl.flush();
+
         let reloaded = Settings::load_from(&path);
         let opts = reloaded.plugin_options("p");
         assert_eq!(opts.get("limit"), Some(&JsonValue::Number(20.into())));

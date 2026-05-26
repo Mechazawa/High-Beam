@@ -6,7 +6,6 @@
 
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::thread;
 use std::time::Instant;
 
 use base64::Engine;
@@ -278,33 +277,23 @@ pub(crate) fn hide(window: &QueryWindow) {
     quit_if_once();
 }
 
-/// Snapshot the current window position, hand it to a background thread
-/// for fire-and-forget persistence, then hide. The disk write must not
-/// block the UI thread — same pattern the frecency picks use — so the
-/// hide is observably instant regardless of disk latency.
+/// Snapshot the current window position, hand it to the settings
+/// controller (which queues a write on its dedicated writer thread),
+/// then hide. The disk write is decoupled from the dismiss path so the
+/// hide stays observably instant regardless of disk latency.
 pub(crate) fn hide_and_persist_position(window: &QueryWindow, settings: &SettingsController) {
     // Persist-dismiss fires BEFORE the hide so subscribers see the input
     // while it's still live — `clear-input` zeroes the text on hide.
     window.invoke_persist_dismiss(window.get_query_text());
 
     if let Some(pos) = capture_outer_position(window) {
-        if ONCE_MODE.load(Ordering::Relaxed) {
-            // In single-shot we're about to `quit_event_loop` and exit
-            // the process — spawning a fire-and-forget thread races the
-            // process death, so do the disk write inline. The user already
-            // committed (Esc/Enter); the extra few ms is invisible.
-            settings.set_launcher_position(pos);
-        } else {
-            let settings = settings.clone();
+        settings.set_launcher_position(pos);
 
-            if let Err(err) = thread::Builder::new()
-                .name("highbeam-settings-position".into())
-                .spawn(move || {
-                    settings.set_launcher_position(pos);
-                })
-            {
-                tracing::warn!(%err, "settings: position-persist thread spawn failed");
-            }
+        // Single-shot is about to `quit_event_loop` + exit the process,
+        // which would race the writer thread. Force a synchronous flush
+        // so the dragged position actually lands on disk before exit.
+        if ONCE_MODE.load(Ordering::Relaxed) {
+            settings.flush();
         }
     }
 
