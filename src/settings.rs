@@ -749,16 +749,6 @@ mod tests {
     }
 
     #[test]
-    fn theme_mode_defaults_to_auto() {
-        let s = Settings::default();
-        assert_eq!(s.theme_mode(), ThemeMode::Auto);
-
-        // Same when `[global]` block is present but field absent.
-        let s = Settings::from_toml("[global]\n").expect("parse");
-        assert_eq!(s.theme_mode(), ThemeMode::Auto);
-    }
-
-    #[test]
     fn theme_mode_round_trips_through_toml() {
         let mut s = Settings::default();
         s.set_theme_mode("dark");
@@ -794,22 +784,23 @@ mod tests {
     }
 
     #[test]
-    fn theme_mode_unknown_value_falls_back_to_auto() {
-        // Loader path: a typo on disk degrades to Auto.
-        let s = Settings::from_toml("[global]\ntheme_mode = \"garbage\"\n").expect("parse");
-        assert_eq!(s.theme_mode(), ThemeMode::Auto);
+    fn theme_mode_normalizes_noncanonical_input() {
+        // Two real, otherwise-uncovered failure modes guarded here:
+        //   1. The settings-UI ComboBox emits title-cased "Dark" — if
+        //      normalisation became case-sensitive the dropdown would
+        //      silently stop working.
+        //   2. A typo in a hand-edited settings.toml must degrade to Auto,
+        //      never block daemon startup.
+        let dark = Settings::from_toml("[global]\ntheme_mode = \"Dark\"\n").expect("parse");
+        assert_eq!(dark.theme_mode(), ThemeMode::Dark, "title-case accepted");
 
-        // Setter path: same guarantee — UI inputs go through normalise.
+        let typo = Settings::from_toml("[global]\ntheme_mode = \"garbage\"\n").expect("parse");
+        assert_eq!(typo.theme_mode(), ThemeMode::Auto, "unknown degrades to Auto");
+
+        // Setter path goes through the same normaliser.
         let mut s = Settings::default();
         s.set_theme_mode("nonsense");
         assert_eq!(s.theme_mode(), ThemeMode::Auto);
-    }
-
-    #[test]
-    fn theme_mode_match_is_case_insensitive() {
-        // Hand-edited TOML often capitalises — accept it.
-        let s = Settings::from_toml("[global]\ntheme_mode = \"Dark\"\n").expect("parse");
-        assert_eq!(s.theme_mode(), ThemeMode::Dark);
     }
 
     #[test]
