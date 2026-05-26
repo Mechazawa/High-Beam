@@ -269,12 +269,15 @@
             }
         }
 
-        // Drop the registry entry so the view object itself can be GC'd
-        // once no other references remain.
-        const registry = globalThis.__highbeam_view_registry;
-        if (registry && registry.byHandle) {
-            delete registry.byHandle[String(handle)];
-        }
+        // Keep the registry entry alive even after close. A result row
+        // the host cached for an earlier keystroke still references
+        // the same handle — re-picking that row should re-open the
+        // same view, which can only work if `byHandle[handle]` still
+        // resolves to the original `ViewDef`. The bounded leak (one
+        // ViewDef per showView yield) clears when the plugin context
+        // is reloaded or the daemon restarts; in practice the count
+        // stays low because the SDK only mints on showView calls,
+        // not on every render.
         instances.delete(handle);
     }
 
