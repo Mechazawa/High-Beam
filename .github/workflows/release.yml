@@ -257,14 +257,12 @@ jobs:
           import json, pathlib
           changelog = pathlib.Path("changelog.txt").read_text()
           system = (
-              "Write concise GitHub release notes from a git commit log. "
-              "Group user-facing changes under a few short `##` headings "
-              "(e.g. 'Themes', 'Settings', 'Fixes'). Keep it tight — a line "
-              "or short bullets per group, factual, no marketing language, "
-              "no intro or outro. Skip CI / chore / lint / refactor commits. "
-              "Do NOT include a title or any heading naming the version; "
-              "GitHub shows that already. Output markdown starting with the "
-              "first `##` heading."
+              "Write concise GitHub release notes from a git commit log: a "
+              "short flat list of the user-facing changes, one bullet each, "
+              "factual. No headings, no marketing language, no intro or "
+              "outro. Skip CI / chore / lint / refactor commits. Do not "
+              "include a title or version heading; GitHub shows that "
+              "already. Output markdown."
           )
           payload = {
               # gpt-4o-mini: fast, capable enough for changelog summaries,
