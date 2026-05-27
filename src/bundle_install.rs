@@ -187,23 +187,24 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
 /// copied. Non-recursive — the themes dir is flat. The skip-existing rule is
 /// what makes theme seeding safe to run on every launch.
 fn copy_missing_files(src: &Path, dst: &Path, extension: &str) -> io::Result<usize> {
-    let copied = fs::read_dir(src)?
+    fs::read_dir(src)?
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| path.is_file() && path.extension().and_then(|e| e.to_str()) == Some(extension))
-        .filter_map(|from| {
-            let to = dst.join(from.file_name()?);
+        .try_fold(0_usize, |copied, from| {
+            let Some(name) = from.file_name() else {
+                return Ok(copied);
+            };
+            let to = dst.join(name);
 
             if to.exists() {
-                return None;
+                return Ok(copied);
             }
 
-            Some(fs::copy(&from, &to).map(|_| ()))
-        })
-        .collect::<io::Result<Vec<()>>>()?
-        .len();
+            fs::copy(&from, &to)?;
 
-    Ok(copied)
+            Ok(copied + 1)
+        })
 }
 
 #[cfg(test)]

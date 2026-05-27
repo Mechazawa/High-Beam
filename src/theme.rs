@@ -193,11 +193,8 @@ impl Theme {
 
         match fs::read_to_string(&path) {
             Ok(text) => Self::from_toml_or_default(&text, &path),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                tracing::warn!(theme = name, path = %path.display(), "theme: file not found; using default");
-
-                Self::default_bundled()
-            }
+            // Not-found (stale selection) and any other read error both fall
+            // back to the builtin — no behavioural split, so one arm.
             Err(err) => {
                 tracing::warn!(theme = name, path = %path.display(), %err, "theme: could not read; using default");
 

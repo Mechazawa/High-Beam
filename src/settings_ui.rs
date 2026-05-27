@@ -114,6 +114,7 @@ impl SettingsController {
         // Populate before the user first opens settings.
         self.refresh_slots(window);
         self.refresh_global(window);
+        self.refresh_themes(window);
 
         let ctrl = self.clone();
         let weak = window.as_weak();
@@ -123,6 +124,9 @@ impl SettingsController {
                 ctrl.refresh_slots(&w);
                 ctrl.refresh_options(&w);
                 ctrl.refresh_global(&w);
+                // Rescan the themes dir on open so a file dropped in or
+                // removed since last open shows up.
+                ctrl.refresh_themes(&w);
             }
         });
 
@@ -250,15 +254,15 @@ impl SettingsController {
     }
 
     fn refresh_global(&self, window: &QueryWindow) {
-        // Snapshot under the lock, then release it before the themes-dir scan
-        // in `refresh_theme_choices` — no I/O while holding the settings lock.
-        let (hotkey, alt_mod, theme_mode, theme_name) = {
+        // Snapshot under the lock, then release it before pushing into Slint.
+        // The theme dropdown is refreshed separately in `refresh_themes` (it
+        // does a disk scan we don't want on every global mutation).
+        let (hotkey, alt_mod, theme_mode) = {
             let settings = self.inner.settings.lock().expect("settings lock");
             (
                 settings.global().hotkey.clone(),
                 settings.alt_action_modifier().to_owned(),
                 settings.theme_mode(),
-                settings.theme().to_owned(),
             )
         };
 
@@ -266,18 +270,34 @@ impl SettingsController {
         window.set_alt_action_modifier(SharedString::from(alt_mod.as_str()));
         window.set_alt_action_modifier_flag(SharedString::from(slint_flag_for_modifier(&alt_mod)));
         window.set_theme_mode(SharedString::from(theme_mode_label(theme_mode)));
-
-        Self::refresh_theme_choices(window, &theme_name);
     }
 
-    /// Rebuild the theme dropdown: model is the reserved `default` followed by
-    /// the themes-dir `*.toml` stems, and the index is derived from the saved
-    /// selection (falling back to `default` when the saved name is gone — e.g.
-    /// the user deleted the file). Called on every settings open, so a file
-    /// dropped in or removed shows up without a restart.
+    /// Rebuild the theme dropdown from the themes dir and the saved selection.
+    /// Reads the current name under the settings lock, then scans the dir
+    /// (outside the lock — no I/O while holding it). Split from
+    /// [`Self::refresh_global`] so the disk scan only runs when the theme
+    /// surface actually changes (settings open, theme pick), not on every
+    /// unrelated global mutation (hotkey, alt-modifier, theme-mode).
+    fn refresh_themes(&self, window: &QueryWindow) {
+        let selected = self.theme();
+
+        Self::refresh_theme_choices(window, &selected);
+    }
+
+    /// Build the dropdown model — the reserved `default` followed by the
+    /// themes-dir `*.toml` stems — and point the index at the saved selection
+    /// (falling back to `default` when the saved name is gone, e.g. the user
+    /// deleted the file). A stem literally named `default` is dropped so the
+    /// reserved entry stays unique; [`crate::theme::Theme::load_named`] maps
+    /// `default` to the builtin regardless, so such a file is unreachable by
+    /// design.
     fn refresh_theme_choices(window: &QueryWindow, selected: &str) {
         let names: Vec<String> = std::iter::once(crate::settings::DEFAULT_THEME.to_owned())
-            .chain(crate::theme::available_theme_names())
+            .chain(
+                crate::theme::available_theme_names()
+                    .into_iter()
+                    .filter(|name| name != crate::settings::DEFAULT_THEME),
+            )
             .collect();
         let index = names.iter().position(|name| name == selected).unwrap_or(0);
         let model: Vec<SharedString> = names.into_iter().map(SharedString::from).collect();
@@ -331,7 +351,9 @@ impl SettingsController {
             ctrl.swap_active_theme(&theme_for_select);
 
             if let Some(w) = weak.upgrade() {
-                ctrl.refresh_global(&w);
+                // Resync the dropdown index to the pick; the other global
+                // fields are untouched, so no full `refresh_global`.
+                ctrl.refresh_themes(&w);
                 Self::apply_active_theme(&w, &theme_for_select, ctrl.theme_mode());
             }
         });
