@@ -106,10 +106,8 @@ impl SettingsController {
 
     /// Wire every settings callback on the given window. Idempotent; call
     /// once per window. `theme` is the live active theme shared with the
-    /// daemon's appearance watcher: the theme-mode handler re-applies its
-    /// variant on pick, and the theme selector / reload swap the inner
-    /// `Theme` so the change takes effect without an OS-appearance flip or a
-    /// restart.
+    /// daemon's appearance watcher; the selector / reload swap it in place so
+    /// picks apply without a restart.
     pub fn wire(&self, window: &QueryWindow, theme: Arc<RwLock<Theme>>) {
         // Populate before the user first opens settings.
         self.refresh_slots(window);
@@ -124,8 +122,7 @@ impl SettingsController {
                 ctrl.refresh_slots(&w);
                 ctrl.refresh_options(&w);
                 ctrl.refresh_global(&w);
-                // Rescan the themes dir on open so a file dropped in or
-                // removed since last open shows up.
+                // Rescan so files added/removed since last open show up.
                 ctrl.refresh_themes(&w);
             }
         });
@@ -254,9 +251,8 @@ impl SettingsController {
     }
 
     fn refresh_global(&self, window: &QueryWindow) {
-        // Snapshot under the lock, then release it before pushing into Slint.
-        // The theme dropdown is refreshed separately in `refresh_themes` (it
-        // does a disk scan we don't want on every global mutation).
+        // Theme dropdown is refreshed separately (`refresh_themes`) to keep its
+        // disk scan off every global mutation.
         let (hotkey, alt_mod, theme_mode) = {
             let settings = self.inner.settings.lock().expect("settings lock");
             (
@@ -272,25 +268,19 @@ impl SettingsController {
         window.set_theme_mode(SharedString::from(theme_mode_label(theme_mode)));
     }
 
-    /// Rebuild the theme dropdown from the themes dir and the saved selection.
-    /// Reads the current name under the settings lock, then scans the dir
-    /// (outside the lock — no I/O while holding it). Split from
-    /// [`Self::refresh_global`] so the disk scan only runs when the theme
-    /// surface actually changes (settings open, theme pick), not on every
-    /// unrelated global mutation (hotkey, alt-modifier, theme-mode).
+    /// Reads the selection, then scans the themes dir outside the lock. Split
+    /// from [`Self::refresh_global`] to keep the disk scan off unrelated
+    /// global mutations.
     fn refresh_themes(&self, window: &QueryWindow) {
         let selected = self.theme();
 
         Self::refresh_theme_choices(window, &selected);
     }
 
-    /// Build the dropdown model — the reserved `default` followed by the
-    /// themes-dir `*.toml` stems — and point the index at the saved selection
-    /// (falling back to `default` when the saved name is gone, e.g. the user
-    /// deleted the file). A stem literally named `default` is dropped so the
-    /// reserved entry stays unique; [`crate::theme::Theme::load_named`] maps
-    /// `default` to the builtin regardless, so such a file is unreachable by
-    /// design.
+    /// Model is the reserved `default` plus the themes-dir stems; the index
+    /// points at `selected`, falling back to `default` when its file is gone.
+    /// A stem named `default` is dropped — [`crate::theme::Theme::load_named`]
+    /// maps that name to the builtin, so such a file is unreachable anyway.
     fn refresh_theme_choices(window: &QueryWindow, selected: &str) {
         let names: Vec<String> = std::iter::once(crate::settings::DEFAULT_THEME.to_owned())
             .chain(
@@ -324,10 +314,8 @@ impl SettingsController {
         self.queue_persist();
     }
 
-    /// Hook the theme-mode dropdown, the theme selector, and the reload
-    /// button into `window`. Split from [`Self::wire`] to keep it under the
-    /// line cap. All three re-apply the active theme immediately rather than
-    /// waiting for the next OS-appearance poll tick.
+    /// Theme-mode, theme selector, and reload. All re-apply immediately rather
+    /// than waiting for the next OS-appearance poll tick.
     fn wire_theme_controls(&self, window: &QueryWindow, theme: Arc<RwLock<Theme>>) {
         let ctrl = self.clone();
         let weak = window.as_weak();
@@ -351,8 +339,6 @@ impl SettingsController {
             ctrl.swap_active_theme(&theme_for_select);
 
             if let Some(w) = weak.upgrade() {
-                // Resync the dropdown index to the pick; the other global
-                // fields are untouched, so no full `refresh_global`.
                 ctrl.refresh_themes(&w);
                 Self::apply_active_theme(&w, &theme_for_select, ctrl.theme_mode());
             }
@@ -362,8 +348,7 @@ impl SettingsController {
         let weak = window.as_weak();
 
         window.on_reload_theme(move || {
-            // Re-read the file from disk in case the user edited it, then
-            // re-apply. No settings write — the selection didn't change.
+            // No settings write — only picks up on-disk edits to the selection.
             ctrl.swap_active_theme(&theme);
 
             if let Some(w) = weak.upgrade() {

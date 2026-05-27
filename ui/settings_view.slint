@@ -31,9 +31,8 @@ export component SettingsView {
     // controller normalises whatever the user wrote on disk, so this
     // property always carries one of those three exact strings.
     in-out property <string> theme-mode: "Auto";
-    // Theme selector: the dropdown options (reserved "default" + themes-dir
-    // stems) and the index of the active one. Both come from the controller
-    // on each settings open.
+    // Reserved "default" + themes-dir stems, and the active index — both from
+    // the controller on each settings open.
     in property <[string]> theme-names: ["default"];
     in property <int> theme-index: 0;
 
@@ -413,9 +412,7 @@ export component SettingsView {
                                 ThemedComboBox {
                                     width: 160px;
                                     model: ["Alt", "Shift", "Cmd", "Ctrl"];
-                                    // Index derived from the saved string; the
-                                    // controller refreshes that string on pick,
-                                    // so the display updates reactively.
+                                    // Derived from the string the controller refreshes on pick.
                                     current-index: root.alt-action-modifier == "Shift" ? 1
                                         : root.alt-action-modifier == "Cmd" ? 2
                                         : root.alt-action-modifier == "Ctrl" ? 3
@@ -466,9 +463,7 @@ export component SettingsView {
                                         root.set-theme(value);
                                     }
                                 }
-                                // Re-reads the selected theme file and applies
-                                // it — for picking up on-disk edits without a
-                                // restart or re-selecting.
+                                // Picks up on-disk edits without re-selecting.
                                 reload-touch := TouchArea {
                                     width: 110px;
                                     height: 28px;
@@ -511,9 +506,7 @@ export component SettingsView {
                                 ThemedComboBox {
                                     width: 160px;
                                     model: ["Auto", "Dark", "Light"];
-                                    // Index derived from the saved string; the
-                                    // controller refreshes it on pick, so the
-                                    // display updates reactively.
+                                    // Derived from the string the controller refreshes on pick.
                                     current-index: root.theme-mode == "Dark" ? 1
                                         : root.theme-mode == "Light" ? 2
                                         : 0;

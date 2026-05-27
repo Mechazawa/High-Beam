@@ -845,10 +845,8 @@ mod tests {
 
     #[test]
     fn theme_default_omitted_from_disk() {
-        // Round-trip a named theme back to "default" to exercise the
-        // `theme == DEFAULT_THEME => None` write branch — setting default on
-        // a fresh Settings is a no-op and wouldn't catch a regression where
-        // the reserved name leaks back to disk.
+        // Round-trip a named theme back to default — a fresh-default no-op
+        // wouldn't catch the reserved name leaking back to disk.
         let mut s = Settings::default();
         s.set_theme("nord");
         s.set_hotkey("Cmd+K");
@@ -878,9 +876,7 @@ mod tests {
 
     #[test]
     fn theme_defaults_when_absent() {
-        // No `[global]` at all, and a `[global]` without `theme`, both fall
-        // back to the builtin rather than an empty string the loader would
-        // choke on.
+        // Absent must yield the builtin, not an empty string the loader chokes on.
         let s = Settings::from_toml("").expect("empty parses");
         assert_eq!(s.theme(), DEFAULT_THEME);
 

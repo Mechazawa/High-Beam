@@ -72,9 +72,7 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
         bundle_install::install_default_plugins_if_needed();
     }
 
-    // Themes seed independently of the plugins-dir override — the theme
-    // selector reads the platform themes dir regardless of where plugins
-    // are loaded from.
+    // Independent of the plugins-dir override — themes live in the config dir.
     bundle_install::install_default_themes_if_needed();
 
     // Pin the winit backend explicitly — we rely on it for monitor enumeration
@@ -95,10 +93,8 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
     // we register with the OS.
     let hotkey_spec = settings_for_ui.global().hotkey.clone();
 
-    // `RwLock` so the settings UI can swap the active theme (on pick / reload)
-    // while the watcher thread reads it; `Arc` so the watcher holds a clone for
-    // the daemon's lifetime. Reads dominate (every appearance flip / repaint),
-    // writes are rare (user picks a theme), so `RwLock` over `Mutex`.
+    // Swapped on pick/reload, read on every repaint — hence `RwLock`, shared
+    // with the appearance watcher via `Arc`.
     let theme = Arc::new(RwLock::new(Theme::load_named(settings_for_ui.theme())));
     {
         let theme = theme.read().expect("theme lock");

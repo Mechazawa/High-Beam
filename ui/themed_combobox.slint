@@ -1,13 +1,8 @@
-// Theme-token-styled dropdown, used everywhere the settings view needs a
-// selector. The std-widgets `ComboBox` paints with Slint's backend style and
-// ignores our theme tokens, so we hand-roll one that takes the launcher
-// colors and font.
+// Token-styled dropdown — the std-widgets `ComboBox` ignores our theme colors.
 //
-// Presentational + index-driven: the caller supplies `model` and a one-way
-// `current-index` (derived from whatever it persists), and we emit
-// `selected(value)` on a pick. We never self-assign `current-index` — the
-// caller's binding stays intact and re-evaluates after it persists the new
-// value, so the display updates without any two-way plumbing here.
+// Index-driven and one-way: we never self-assign `current-index`, so the
+// caller's binding stays intact and re-evaluates after it persists the pick.
+// Display updates need no two-way plumbing.
 
 export component ThemedComboBox {
     in property <[string]> model;
@@ -52,7 +47,6 @@ export component ThemedComboBox {
                 overflow: elide;
             }
 
-            // Chevron, pushed to the trailing edge.
             Text {
                 text: "▾";
                 color: root.muted-color;

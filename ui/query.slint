@@ -55,8 +55,7 @@ export component QueryWindow inherits Window {
     // settings pane. Rust pushes the canonical value whenever the user
     // cycles it.
     in-out property <string> theme-mode: "Auto";
-    // Theme selector model + active index. Rust rebuilds both on every
-    // settings open (reserved "default" + themes-dir stems).
+    // Reserved "default" + themes-dir stems; rebuilt by Rust on settings open.
     in-out property <[string]> theme-names: ["default"];
     in-out property <int> theme-index: 0;
     // Resolved Slint-side flag name corresponding to the configured alt
