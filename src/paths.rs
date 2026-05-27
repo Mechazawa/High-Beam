@@ -69,8 +69,8 @@ pub fn socket_path() -> io::Result<PathBuf> {
     }
 }
 
-/// Platform-specific config directory used for `theme.toml` and other
-/// user-edited settings.
+/// Platform-specific config directory used for `settings.toml`, the
+/// `themes/` folder, and other user-edited settings.
 ///
 /// - macOS: `~/Library/Application Support/high-beam/`
 /// - Linux: `$XDG_CONFIG_HOME/high-beam/` (default `~/.config/high-beam/`)
@@ -97,6 +97,14 @@ pub(crate) fn data_dir() -> Option<PathBuf> {
 /// first-launch bundle-seed lay plugins here.
 pub(crate) fn plugins_dir() -> Option<PathBuf> {
     data_dir().map(|d| d.join("plugins"))
+}
+
+/// Per-user themes directory under [`config_dir`]. The theme selector lists
+/// the `*.toml` files here; the first-launch bundle-seed lays the shipped
+/// themes in. Lives under the config dir (not data) because these are
+/// user-editable like `settings.toml`.
+pub(crate) fn themes_dir() -> Option<PathBuf> {
+    config_dir().ok().map(|d| d.join("themes"))
 }
 
 /// Platform-specific cache directory. macOS: `~/Library/Caches/high-beam/`;

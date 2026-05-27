@@ -40,6 +40,11 @@ pub const DEFAULT_ALT_ACTION_MODIFIER: &str = "Alt";
 /// default at load time.
 pub const ALT_ACTION_MODIFIER_CHOICES: &[&str] = &["Alt", "Shift", "Cmd", "Ctrl"];
 
+/// Reserved theme name that selects the in-Rust builtin theme rather than a
+/// file in the themes dir. Kept here so the loader, the settings UI, and the
+/// disk-omission check all agree on the spelling.
+pub const DEFAULT_THEME: &str = "default";
+
 /// User-edited launcher state.
 ///
 /// The on-disk shape is the `SettingsFile` TOML schema (private, below);
@@ -85,6 +90,12 @@ pub struct GlobalSettings {
     /// silently degrade to `Auto` — see the `From<&str>` impl on
     /// [`ThemeMode`].
     pub theme_mode: ThemeMode,
+    /// Which theme the launcher paints. The reserved value [`DEFAULT_THEME`]
+    /// selects the in-Rust builtin; any other value names a `<stem>.toml`
+    /// file in the themes dir (see [`crate::paths::themes_dir`]). A missing
+    /// or malformed file falls back to the builtin at load time, so a stale
+    /// name on disk never blocks startup.
+    pub theme: String,
 }
 
 /// Saved outer-position of the launcher window, in physical pixels relative
@@ -110,6 +121,7 @@ impl Default for GlobalSettings {
             query_history_max_entries: DEFAULT_QUERY_HISTORY_MAX_ENTRIES,
             alt_action_modifier: DEFAULT_ALT_ACTION_MODIFIER.to_owned(),
             theme_mode: ThemeMode::default(),
+            theme: DEFAULT_THEME.to_owned(),
         }
     }
 }
@@ -243,6 +255,7 @@ impl Settings {
                 .theme_mode
                 .as_deref()
                 .map_or(ThemeMode::default(), ThemeMode::from);
+            let theme = raw_global.theme.unwrap_or_else(|| DEFAULT_THEME.to_owned());
 
             GlobalSettings {
                 hotkey: raw_global.hotkey.unwrap_or_else(|| DEFAULT_HOTKEY.to_owned()),
@@ -250,6 +263,7 @@ impl Settings {
                 query_history_max_entries: max_entries,
                 alt_action_modifier: alt_mod,
                 theme_mode,
+                theme,
             }
         };
 
@@ -311,6 +325,11 @@ impl Settings {
                 ThemeMode::Auto => None,
                 mode => Some(mode.as_str().to_owned()),
             };
+            let theme = if self.global.theme == DEFAULT_THEME {
+                None
+            } else {
+                Some(self.global.theme.clone())
+            };
 
             Some(GlobalFile {
                 hotkey: Some(self.global.hotkey.clone()),
@@ -322,6 +341,7 @@ impl Settings {
                 },
                 alt_action_modifier: alt_mod,
                 theme_mode,
+                theme,
             })
         };
         let file = SettingsFile { global, plugins };
@@ -478,6 +498,26 @@ impl Settings {
         self.global.theme_mode = ThemeMode::from(value);
     }
 
+    /// User's selected theme — the reserved [`DEFAULT_THEME`] for the
+    /// builtin, or a `<stem>.toml` file name in the themes dir.
+    #[must_use]
+    pub fn theme(&self) -> &str {
+        &self.global.theme
+    }
+
+    /// Replace the selected theme. Trimmed before storing; an empty value
+    /// resets to [`DEFAULT_THEME`] so a stray pick can't persist a blank
+    /// name the loader would then fail to resolve.
+    pub fn set_theme(&mut self, value: &str) {
+        let trimmed = value.trim();
+
+        self.global.theme = if trimmed.is_empty() {
+            DEFAULT_THEME.to_owned()
+        } else {
+            trimmed.to_owned()
+        };
+    }
+
     /// Set the global hotkey accelerator string. Trimmed before storing so
     /// `"Shift+Space "` from a stray `TextInput` doesn't fail the parser later.
     pub fn set_hotkey(&mut self, hotkey: &str) {
@@ -519,6 +559,8 @@ struct GlobalFile {
     alt_action_modifier: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     theme_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    theme: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -788,6 +830,62 @@ mod tests {
         let mut s = Settings::default();
         s.set_theme_mode("nonsense");
         assert_eq!(s.theme_mode(), ThemeMode::Auto);
+    }
+
+    #[test]
+    fn theme_round_trips_through_toml() {
+        let mut s = Settings::default();
+        s.set_theme("dracula");
+        let text = s.to_toml();
+        assert!(text.contains("theme = \"dracula\""), "got: {text}");
+
+        let loaded = Settings::from_toml(&text).expect("parse");
+        assert_eq!(loaded.theme(), "dracula");
+    }
+
+    #[test]
+    fn theme_default_omitted_from_disk() {
+        // Round-trip a named theme back to "default" to exercise the
+        // `theme == DEFAULT_THEME => None` write branch — setting default on
+        // a fresh Settings is a no-op and wouldn't catch a regression where
+        // the reserved name leaks back to disk.
+        let mut s = Settings::default();
+        s.set_theme("nord");
+        s.set_hotkey("Cmd+K");
+        let named_text = s.to_toml();
+        assert!(
+            named_text.contains("theme = \"nord\""),
+            "named must be written: {named_text}"
+        );
+
+        s.set_theme(DEFAULT_THEME);
+        let default_text = s.to_toml();
+        assert!(
+            !default_text.contains("theme ="),
+            "default must be omitted on next write: {default_text}",
+        );
+    }
+
+    #[test]
+    fn set_theme_trims_and_blank_resets_to_default() {
+        let mut s = Settings::default();
+        s.set_theme("  tokyo-night  ");
+        assert_eq!(s.theme(), "tokyo-night", "surrounding whitespace trimmed");
+
+        s.set_theme("   ");
+        assert_eq!(s.theme(), DEFAULT_THEME, "blank resets to the builtin");
+    }
+
+    #[test]
+    fn theme_defaults_when_absent() {
+        // No `[global]` at all, and a `[global]` without `theme`, both fall
+        // back to the builtin rather than an empty string the loader would
+        // choke on.
+        let s = Settings::from_toml("").expect("empty parses");
+        assert_eq!(s.theme(), DEFAULT_THEME);
+
+        let s = Settings::from_toml("[global]\n").expect("parse");
+        assert_eq!(s.theme(), DEFAULT_THEME);
     }
 
     #[test]

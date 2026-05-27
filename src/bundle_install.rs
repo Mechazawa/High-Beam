@@ -1,13 +1,15 @@
-//! First-launch install of default plugins shipped inside the macOS .app bundle.
+//! First-launch install of default plugins and themes shipped inside the
+//! packaged app.
 //!
 //! When the daemon starts from a packaged `HighBeam.app`, the bundled
-//! defaults live in `Contents/Resources/plugins/` — a read-only location the
-//! user shouldn't edit. The user-editable copy lives in the platform plugin
-//! directory ([`crate::plugins::loader`]'s default search target). The very
-//! first time we boot we copy the bundled defaults into the user dir;
-//! thereafter the user's copy wins and `cargo packager` updates never stomp
-//! on it. Running unbundled (`cargo run`) hits the "no bundled dir" branch
-//! and quietly does nothing.
+//! defaults live in `Contents/Resources/<plugins|themes>/` — a read-only
+//! location the user shouldn't edit. The user-editable copies live in the
+//! platform plugin / themes directories. Plugins seed once (only into an
+//! empty/absent dir, so the user's copy always wins thereafter); themes seed
+//! per-file (any shipped theme not already present is copied, but an existing
+//! file — possibly user-edited — is never overwritten). Running unbundled
+//! (`cargo run`, `cargo install`) hits the "no bundled dir" branch and quietly
+//! does nothing.
 
 use std::fs;
 use std::io;
@@ -75,24 +77,69 @@ pub fn install_default_plugins_if_needed() {
     }
 }
 
+/// Seed the shipped default themes into the user's themes dir, copying any
+/// `.toml` not already present. Unlike plugins this runs per-file every
+/// launch (add-missing-only): new builtin themes from an app update appear
+/// without clearing the folder, but an existing file — which the user may
+/// have edited — is never overwritten. Errors are logged and swallowed.
+pub fn install_default_themes_if_needed() {
+    let Some(user_dir) = crate::paths::themes_dir() else {
+        tracing::debug!("bundle-install: no platform themes dir; skipping");
+
+        return;
+    };
+
+    let Some(bundled) = bundled_resource_dir("themes") else {
+        tracing::debug!("bundle-install: no bundled themes; running unbundled");
+
+        return;
+    };
+
+    if let Err(err) = fs::create_dir_all(&user_dir) {
+        tracing::warn!(themes_dir = %user_dir.display(), %err, "bundle-install: failed to create user themes dir");
+
+        return;
+    }
+
+    match copy_missing_files(&bundled, &user_dir, "toml") {
+        Ok(0) => tracing::debug!(themes_dir = %user_dir.display(), "bundle-install: no new themes to seed"),
+        Ok(copied) => tracing::info!(
+            themes_dir = %user_dir.display(),
+            source = %bundled.display(),
+            copied,
+            "bundle-install: seeded default themes",
+        ),
+        Err(err) => tracing::warn!(
+            source = %bundled.display(),
+            target = %user_dir.display(),
+            %err,
+            "bundle-install: theme seed failed",
+        ),
+    }
+}
+
 /// Resolve the bundled plugin dir relative to the running executable.
+/// Thin wrapper over [`bundled_resource_dir`] — see its docs for the layout.
+fn bundled_plugins_dir() -> Option<PathBuf> {
+    bundled_resource_dir("plugins")
+}
+
+/// Resolve a bundled resource subdirectory (`plugins`, `themes`, …) relative
+/// to the running executable.
 ///
 /// In a `.app` bundle the binary sits at `HighBeam.app/Contents/MacOS/high-beam`,
-/// so the resources directory is two parents up + `Resources/plugins`. When
-/// the binary lives anywhere else (`target/release/high-beam`, `cargo run`,
-/// `cargo install`'d into `~/.cargo/bin`), the computed path won't exist and
-/// we return `None`.
-fn bundled_plugins_dir() -> Option<PathBuf> {
+/// so the resources directory is two parents up + `Resources/<subdir>`. On
+/// Linux the binary lives at `<prefix>/bin/highbeam` and resources at
+/// `<prefix>/share/highbeam/<subdir>` (works for /usr, /usr/local, ~/.local,
+/// and any tarball-relocated PREFIX). When the binary lives anywhere else
+/// (`target/release/high-beam`, `cargo run`, `cargo install`'d into
+/// `~/.cargo/bin`), the computed path won't exist and we return `None`.
+fn bundled_resource_dir(subdir: &str) -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
-    // macOS `.app`: exe at Contents/MacOS/high-beam, plugins at
-    // Contents/Resources/plugins.
-    // Linux: exe at <prefix>/bin/highbeam, plugins at
-    // <prefix>/share/highbeam/plugins (works for /usr, /usr/local, ~/.local,
-    // and any tarball-relocated PREFIX).
     #[cfg(target_os = "macos")]
-    let candidate = exe.parent()?.parent()?.join("Resources").join("plugins");
+    let candidate = exe.parent()?.parent()?.join("Resources").join(subdir);
     #[cfg(not(target_os = "macos"))]
-    let candidate = exe.parent()?.parent()?.join("share").join("highbeam").join("plugins");
+    let candidate = exe.parent()?.parent()?.join("share").join("highbeam").join(subdir);
 
     candidate.is_dir().then_some(candidate)
 }
@@ -133,6 +180,30 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
     }
 
     Ok(())
+}
+
+/// Copy every file directly under `src` with the given extension into `dst`,
+/// skipping any whose name already exists there. Returns how many files were
+/// copied. Non-recursive — the themes dir is flat. The skip-existing rule is
+/// what makes theme seeding safe to run on every launch.
+fn copy_missing_files(src: &Path, dst: &Path, extension: &str) -> io::Result<usize> {
+    let copied = fs::read_dir(src)?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file() && path.extension().and_then(|e| e.to_str()) == Some(extension))
+        .filter_map(|from| {
+            let to = dst.join(from.file_name()?);
+
+            if to.exists() {
+                return None;
+            }
+
+            Some(fs::copy(&from, &to).map(|_| ()))
+        })
+        .collect::<io::Result<Vec<()>>>()?
+        .len();
+
+    Ok(copied)
 }
 
 #[cfg(test)]
@@ -185,6 +256,35 @@ mod tests {
 
         assert_eq!(fs::read(dst.join("new.txt")).unwrap(), b"new");
         assert_eq!(fs::read(dst.join("preexisting.txt")).unwrap(), b"keep");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn copy_missing_files_skips_existing_and_filters_extension() {
+        // Theme seeding must add new shipped themes without clobbering a
+        // file the user already edited, and ignore non-theme files.
+        let root = fresh_tmp("copy-missing");
+        let src = root.join("src");
+        let dst = root.join("dst");
+        fs::create_dir_all(&src).unwrap();
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(src.join("new.toml"), b"new").unwrap();
+        fs::write(src.join("edited.toml"), b"shipped").unwrap();
+        fs::write(src.join("README.md"), b"ignore me").unwrap();
+        // Pre-existing, user-edited copy that must survive untouched.
+        fs::write(dst.join("edited.toml"), b"user edit").unwrap();
+
+        let copied = copy_missing_files(&src, &dst, "toml").expect("copy");
+
+        assert_eq!(copied, 1, "only the missing .toml is copied");
+        assert_eq!(fs::read(dst.join("new.toml")).unwrap(), b"new");
+        assert_eq!(
+            fs::read(dst.join("edited.toml")).unwrap(),
+            b"user edit",
+            "existing file untouched"
+        );
+        assert!(!dst.join("README.md").exists(), "non-toml ignored");
 
         let _ = fs::remove_dir_all(&root);
     }
