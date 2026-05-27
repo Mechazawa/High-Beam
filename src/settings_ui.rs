@@ -14,15 +14,15 @@ use std::thread;
 use serde_json::Value as JsonValue;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
-use crate::theme::Theme;
-
 use crate::QueryWindow;
 use crate::daemon::HotkeyRegistration;
 use crate::hotkey::{MOD_ALT, MOD_CONTROL, MOD_META, MOD_SHIFT, format_hotkey_spec, slint_flag_for_modifier};
 use crate::logging::LogErr;
 use crate::plugins::manifest::{Manifest, OptionDef, OptionKind};
-use crate::settings::{Settings, WindowPosition};
+use crate::settings::{DEFAULT_THEME, Settings, WindowPosition};
+use crate::theme::{Theme, ThemeMode, available_theme_names};
 use crate::ui::{PluginOption, PluginSlot};
+use crate::{os_appearance, window};
 
 /// Display metadata for a plugin, extracted from its manifest and handed to
 /// the settings view so the right pane can show a header.
@@ -282,12 +282,8 @@ impl SettingsController {
     /// A stem named `default` is dropped — [`crate::theme::Theme::load_named`]
     /// maps that name to the builtin, so such a file is unreachable anyway.
     fn refresh_theme_choices(window: &QueryWindow, selected: &str) {
-        let names: Vec<String> = std::iter::once(crate::settings::DEFAULT_THEME.to_owned())
-            .chain(
-                crate::theme::available_theme_names()
-                    .into_iter()
-                    .filter(|name| name != crate::settings::DEFAULT_THEME),
-            )
+        let names: Vec<String> = std::iter::once(DEFAULT_THEME.to_owned())
+            .chain(available_theme_names().into_iter().filter(|name| name != DEFAULT_THEME))
             .collect();
         let index = names.iter().position(|name| name == selected).unwrap_or(0);
         let model: Vec<SharedString> = names.into_iter().map(SharedString::from).collect();
@@ -377,9 +373,9 @@ impl SettingsController {
     /// # Panics
     ///
     /// Panics if the theme lock is poisoned. See [`Self::swap_active_theme`].
-    fn apply_active_theme(window: &QueryWindow, theme: &Arc<RwLock<Theme>>, mode: crate::theme::ThemeMode) {
+    fn apply_active_theme(window: &QueryWindow, theme: &Arc<RwLock<Theme>>, mode: ThemeMode) {
         let guard = theme.read().expect("theme lock");
-        crate::window::apply_theme(window, guard.variant_for(mode, crate::os_appearance::current()));
+        window::apply_theme(window, guard.variant_for(mode, os_appearance::current()));
     }
 
     fn set_theme_mode(&self, value: &str) {
@@ -507,7 +503,7 @@ impl SettingsController {
     /// Panics if the settings mutex is poisoned. See
     /// [`Self::launcher_position`] for the rationale.
     #[must_use]
-    pub fn theme_mode(&self) -> crate::theme::ThemeMode {
+    pub fn theme_mode(&self) -> ThemeMode {
         self.inner.settings.lock().expect("settings lock").theme_mode()
     }
 
@@ -803,8 +799,7 @@ fn next_choice(current: &str, choices: &[String]) -> String {
 /// [`crate::theme::ThemeMode::as_str`] returns the lowercase on-disk
 /// spelling; this helper provides the display variant the user reads in
 /// the selector.
-fn theme_mode_label(mode: crate::theme::ThemeMode) -> &'static str {
-    use crate::theme::ThemeMode;
+fn theme_mode_label(mode: ThemeMode) -> &'static str {
     match mode {
         ThemeMode::Auto => "Auto",
         ThemeMode::Dark => "Dark",

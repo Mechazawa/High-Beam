@@ -15,6 +15,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::logging::LogErr;
+
 /// Install bundled default plugins into the user's plugin directory if the
 /// directory is empty or absent. Errors are logged and swallowed — a failed
 /// install must not prevent the daemon from booting.
@@ -186,25 +188,36 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
 /// skipping any whose name already exists there. Returns how many files were
 /// copied. Non-recursive — the themes dir is flat. The skip-existing rule is
 /// what makes theme seeding safe to run on every launch.
+///
+/// A per-file copy failure is logged and skipped so one unwritable file can't
+/// abort the rest of the seed; only failing to read `src` returns `Err`.
 fn copy_missing_files(src: &Path, dst: &Path, extension: &str) -> io::Result<usize> {
-    fs::read_dir(src)?
+    let copied = fs::read_dir(src)?
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| path.is_file() && path.extension().and_then(|e| e.to_str()) == Some(extension))
-        .try_fold(0_usize, |copied, from| {
+        .fold(0_usize, |copied, from| {
             let Some(name) = from.file_name() else {
-                return Ok(copied);
+                return copied;
             };
             let to = dst.join(name);
 
             if to.exists() {
-                return Ok(copied);
+                return copied;
             }
 
-            fs::copy(&from, &to)?;
+            // Log-and-skip so one unwritable file can't abort the rest. The
+            // paths go in the context since `io::Error` alone won't name them.
+            let context = format!(
+                "bundle-install: theme copy {} -> {} failed; skipping",
+                from.display(),
+                to.display()
+            );
 
-            Ok(copied + 1)
-        })
+            fs::copy(&from, &to).log_warn(&context).map_or(copied, |_| copied + 1)
+        });
+
+    Ok(copied)
 }
 
 #[cfg(test)]
