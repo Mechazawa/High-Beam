@@ -3,6 +3,8 @@
 #
 # To customise: copy this file to the platform config path and edit. High
 # Beam reads the theme once at startup — restart the app after editing.
+# `theme_mode = "auto"` (the default) repaints live when the OS appearance
+# flips; `"dark"` / `"light"` pin to one variant.
 #
 #   macOS:  ~/Library/Application Support/high-beam/theme.toml
 #   Linux:  $XDG_CONFIG_HOME/high-beam/theme.toml
@@ -15,13 +17,21 @@
 #   "#rgb"        — short form, alpha = ff
 #   "#rrggbb"     — alpha = ff
 #   "#rrggbbaa"   — explicit alpha
+#
+# Dark / light overrides
+# ----------------------
+# Each `[colors]`, `[font]`, `[window]` table may carry `.dark` / `.light`
+# sub-tables that override the base for the matching system appearance.
+# Anything a sub-table doesn't set inherits from the base above it. TOML
+# requires base fields to come *before* the sub-table — same shape as
+# below.
 
 [colors]
 background = "#ffffffea"   # panel fill (translucent white)
 foreground = "#1d1d1f"     # input + row title text
 muted      = "#86868b"     # placeholder + subtitle + empty-icon outline
-highlight  = "#0a84ff"     # reserved for future use
-selection  = "#0a84ff33"   # highlighted row background wash
+highlight  = "#007aff"     # macOS system blue (NSColor.systemBlue)
+selection  = "#007aff33"   # highlighted row background wash
 border     = "#00000010"   # panel outline + row separator
 # Tone colours used by plugin views — `Text({tone: 'error'})`, the
 # danger button background, the error-frame banner. Defaults mirror
@@ -29,6 +39,13 @@ border     = "#00000010"   # panel outline + row separator
 error      = "#d70015"
 success    = "#0c8430"
 warning    = "#b75f00"
+
+# Dark-mode palette. Tracks macOS Spotlight in dark mode: deep-charcoal
+# translucent panel, light text, same system blue accent.
+[colors.dark]
+background = "#1d1d1fd0"   # deeper opacity than light to read against any wallpaper
+foreground = "#f5f5f7"     # light grey text on dark panel
+border     = "#ffffff10"   # faint white separator instead of faint black
 
 [font]
 # Empty family lets the platform pick its default system font, which is

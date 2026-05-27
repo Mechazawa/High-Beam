@@ -125,9 +125,9 @@ the same payload:
 ```
 
 The bundled plugin set matches the macOS `.app`'s
-`[package.metadata.packager].resources` list — the 16 "real" plugins,
-with the dev fixtures (`echo`, `echo-ts`, `slow-echo`, `frecency-demo`)
-excluded by name in the tarball recipe.
+`[package.metadata.packager].resources` list — the real plugins, with the
+dev fixtures (`echo`, `echo-ts`, `slow-echo`, `frecency-demo`) excluded by
+name in the tarball recipe.
 
 ### First-launch install on Linux
 

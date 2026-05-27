@@ -1,21 +1,9 @@
 import { copy } from "highbeam:actions";
 
-// Hand-rolled units table. Each unit declares the category it belongs to plus
-// a linear conversion to that category's base unit: `base = value * scale + offset`.
-// Only temperature uses a non-zero offset; everything else is a pure ratio.
-//
-// Base units per category:
-//   length      -> meter
-//   mass        -> gram
-//   temperature -> kelvin
-//   volume      -> liter
-//   time        -> second
-//   data        -> byte
-//   area        -> square meter
-//
-// Lookup keys are case-sensitive on purpose so we can distinguish `K` (kelvin)
-// from `k`-prefixes and `KB` (1000) from `kB`. Aliases below add common
-// case-insensitive forms where ambiguity is impossible.
+// Units table: each entry is a linear conversion to its category's base
+// unit, `base = value * scale + offset` (only temperature has an offset).
+// Keys are case-sensitive on purpose — to keep `K` (kelvin) distinct from
+// `k`-prefixes and `KB` (1000) from `kB`.
 
 const UNITS = {
     // length (base: meter)

@@ -63,6 +63,10 @@ export component QueryWindow inherits Window {
     in-out property <bool> showing-global: true;
     in-out property <string> hotkey-value: "Shift+Space";
     in-out property <string> alt-action-modifier: "Alt";
+    // Title-cased label ("Auto" / "Dark" / "Light") for display in the
+    // settings pane. Rust pushes the canonical value whenever the user
+    // cycles it.
+    in-out property <string> theme-mode: "Auto";
     // Resolved Slint-side flag name corresponding to the configured alt
     // modifier, accounting for macOS's Cmd↔Ctrl flag swap. Rust pushes
     // it via `set-alt-action-modifier-flag` whenever the setting changes.
@@ -114,8 +118,6 @@ export component QueryWindow inherits Window {
     in-out property <color> background-color: #ffffffea;
     in-out property <color> foreground-color: #1d1d1f;
     in-out property <color> muted-color: #86868b;
-    // `highlight` is part of the documented token surface but not yet bound in
-    // markup — kept so user themes can set it without parse errors.
     in-out property <color> highlight-color: #0a84ff;
     in-out property <color> selection-color: #0a84ff33;
     in-out property <color> border-color: #00000010;
@@ -212,7 +214,8 @@ export component QueryWindow inherits Window {
     // `select-global` flips the rail selection to the global entry.
     callback capture-hotkey(bool, bool, bool, bool, string) -> bool;
     callback reset-hotkey-to-default();
-    callback cycle-alt-action-modifier();
+    callback set-alt-action-modifier(string);
+    callback set-theme-mode(string);
     callback select-global();
     // Whether the hotkey field is currently listening for a key combo —
     // drives the prompt text + highlighted border in the global pane.
@@ -434,6 +437,7 @@ export component QueryWindow inherits Window {
             hotkey-value <=> root.hotkey-value;
             capturing-hotkey <=> root.capturing-hotkey;
             alt-action-modifier <=> root.alt-action-modifier;
+            theme-mode <=> root.theme-mode;
 
             foreground-color: root.foreground-color;
             muted-color: root.muted-color;
@@ -453,7 +457,8 @@ export component QueryWindow inherits Window {
             cycle-option-enum(plugin, key) => { root.cycle-option-enum(plugin, key); }
             capture-hotkey(meta, ctrl, shift, alt, text) => { return root.capture-hotkey(meta, ctrl, shift, alt, text); }
             reset-hotkey-to-default => { root.reset-hotkey-to-default(); }
-            cycle-alt-action-modifier => { root.cycle-alt-action-modifier(); }
+            set-alt-action-modifier(value) => { root.set-alt-action-modifier(value); }
+            set-theme-mode(value) => { root.set-theme-mode(value); }
             select-global => { root.select-global(); }
             recenter-window => { root.recenter-window(); }
             open-config-dir => { root.open-config-dir(); }

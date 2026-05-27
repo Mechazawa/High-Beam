@@ -203,9 +203,8 @@ function formatAmount(value, precision) {
     if (!Number.isFinite(value)) return null;
     const fixed = value.toFixed(precision);
     if (precision === 0) return fixed;
-    // Trim *only* trailing zeros that don't reduce precision below the cap.
-    // We deliberately keep all `precision` digits — users asked for 2 dp,
-    // they get 2 dp even if the result is round.
+    // Keep all `precision` digits even when the result is round — users who
+    // asked for 2 dp get 2 dp.
     return fixed;
 }
 

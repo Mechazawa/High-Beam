@@ -59,4 +59,4 @@ module map.
 
 ## License
 
-MIT.
+GPL-3.0-or-later. See [LICENSE](LICENSE). Uses [Slint](https://slint.dev) under its GPLv3 option.

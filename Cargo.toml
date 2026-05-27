@@ -1,34 +1,22 @@
 [package]
 name = "high-beam"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2024"
-license = "MIT"
+license = "GPL-3.0-or-later"
 build = "build.rs"
 description = "Native Rust keyboard launcher (Spotlight / Alfred / Raycast / Ulauncher class)."
 authors = ["Bas Bieling"]
 homepage = "https://github.com/Mechazawa/high-beam"
 
-# `cargo packager` (the Tauri team's bundler) reads this table to produce
-# `target/release/HighBeam.app` + `target/release/HighBeam_<ver>_*.dmg`.
-# Install once with `cargo install cargo-packager --locked`, then
-# `just bundle` produces both artifacts.
+# Read by `cargo packager` (via `just bundle`) to produce the .app/.dmg.
 [package.metadata.packager]
 product-name = "HighBeam"
 identifier = "at.ioexception.highbeam"
-# `binaries` tells the packager which build outputs to bundle; the path is
-# relative to `out-dir` and resolved against the cargo target dir at runtime.
 binaries = [{ path = "high-beam", main = true }]
 icons = ["bundle/icon.icns", "bundle/icon.png"]
-# The plugins land in `Contents/Resources/plugins/<name>/...` at bundle
-# time; `src/daemon.rs::install_default_plugins_if_needed` copies them to
-# the user's plugin dir on first launch. Dev-only fixtures
-# (`echo`, `echo-ts`, `slow-echo`, `frecency-demo`) deliberately stay out
-# of the shipped bundle.
-# When `src` resolves to a single file, cargo-packager uses `target`
-# verbatim as the destination filename inside Contents/Resources — so each
-# entry spells out its full target path. Dev-only files (package.json,
-# vitest configs, node_modules, *.test.*, lockfiles) stay out of the
-# bundle by simply not being listed.
+# Each entry spells out its full target path; dev-only plugins/fixtures are
+# excluded by omission. The daemon seeds these into the user plugin dir on
+# first launch (src/daemon.rs).
 resources = [
     { src = "plugins/app-launcher/manifest.json",      target = "plugins/app-launcher/manifest.json" },
     { src = "plugins/app-launcher/plugin.js",          target = "plugins/app-launcher/plugin.js" },
@@ -74,19 +62,16 @@ resources = [
     { src = "plugins/emoji-picker/emoji-data.json",    target = "plugins/emoji-picker/emoji-data.json" },
     { src = "plugins/obsidian/manifest.json",          target = "plugins/obsidian/manifest.json" },
     { src = "plugins/obsidian/plugin.js",              target = "plugins/obsidian/plugin.js" },
-    { src = "themes/yosemite-spotlight.toml",                   target = "themes/yosemite-spotlight.toml" },
+    { src = "themes/yosemite-spotlight.toml",          target = "themes/yosemite-spotlight.toml" },
+    { src = "themes/macos-tahoe.toml",                 target = "themes/macos-tahoe.toml" },
+    { src = "themes/frosty-glass.toml",                target = "themes/frosty-glass.toml" },
+    { src = "themes/dracula.toml",                     target = "themes/dracula.toml" },
+    { src = "themes/nord.toml",                        target = "themes/nord.toml" },
+    { src = "themes/solarized.toml",                   target = "themes/solarized.toml" },
+    { src = "themes/tokyo-night.toml",                 target = "themes/tokyo-night.toml" },
 ]
-# `app`+`dmg` are macOS; `deb`/`pacman` are Linux. cargo-packager only
-# emits the format(s) valid for the current host OS — running on macOS
-# produces .app + .dmg, running on Linux produces .deb + the pacman
-# (.tar.gz + PKGBUILD) pair. The Justfile recipes drive per-format
-# builds explicitly via `--formats <name>` so a missing tool on the
-# host (dpkg-deb, makepkg, etc.) only fails that one recipe.
-#
-# .rpm is NOT in this list: cargo-packager 0.11.x doesn't ship an rpm
-# backend. We document the rpm path via `cargo-generate-rpm` in
-# docs/distribution.md; the `bundle-rpm` Justfile recipe defers to
-# that.
+# cargo-packager emits only the formats valid for the host OS. .rpm is
+# absent (no backend in 0.11.x) — handled separately via cargo-generate-rpm.
 formats = ["app", "dmg", "deb", "pacman"]
 
 [package.metadata.packager.linux]
@@ -137,17 +122,9 @@ window-size = { width = 660, height = 400 }
 app-position = { x = 180, y = 170 }
 application-folder-position = { x = 480, y = 170 }
 
-# .rpm packaging via cargo-generate-rpm. cargo-packager 0.11 has no rpm
-# backend, so we drive it separately. The `bundle-rpm` Justfile recipe
-# stages files into `target/rpm-stage/` mirroring the on-disk install
-# layout used by the .deb / tarball, then `cargo generate-rpm` reads this
-# table to produce the package. Fields not listed here (Name, Version,
-# Summary, License, URL) are inherited from [package].
-#
-# `auto-req = "no"` because we list the runtime deps explicitly under
-# `[…requires]` below — the auto-discoverer over-collects every libc and
-# linker SONAME ELF reference, and Fedora/openSUSE name those differently
-# enough that the auto list often won't resolve cleanly.
+# `just bundle-rpm` stages files then runs `cargo generate-rpm` off this
+# table. `auto-req = "no"`: the auto-discoverer over-collects SONAMEs that
+# Fedora/openSUSE name differently, so we list runtime deps explicitly below.
 [package.metadata.generate-rpm]
 auto-req = "no"
 assets = [
@@ -165,20 +142,11 @@ openssl-libs = "*"
 fontconfig = "*"
 libxkbcommon = "*"
 
-# Release-profile knobs for the bundled binary. The launcher is mostly idle
-# between keystrokes, so single-digit-ms wins from cross-crate optimisation
-# add up over a session of hundreds of queries.
-#
-# * `lto = "fat"` + `codegen-units = 1` — give LLVM the whole program for
-#   inlining; pays ~3–5 min compile time per release for ~10–15% smaller
-#   binary + measurable hot-path speedup.
-# * `strip = true` — strip debug symbols from the shipped binary. Halves
-#   the .app payload; symbols stay in `target/release/deps/*.dSYM` so
-#   stack traces from a crash report can still be resolved locally.
-# * `panic` is deliberately left at the default `unwind` — a panicking
-#   plugin task (icon extractor, archive extractor, etc.) must surface as
-#   a `JoinError` the dispatcher can recover from, not take the daemon
-#   down. `panic = "abort"` would silently regress that.
+# lto/codegen-units: smaller + faster binary at the cost of release compile
+# time. strip: the shipped binary is stripped, but symbols stay in
+# target/release/deps/*.dSYM so crash reports still resolve locally. panic is
+# deliberately left at `unwind` — a panicking plugin task must surface as a
+# recoverable JoinError, not abort the daemon.
 [profile.release]
 lto = "fat"
 codegen-units = 1
@@ -233,6 +201,12 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 
 # `parse` for theme.toml reads; `display` adds write-back for settings.toml.
 toml = { version = "0.8", default-features = false, features = ["parse", "display"] }
+
+# System dark/light appearance detection for the theme auto-switch.
+# Default feature `async-io` doesn't require an active runtime — `detect()`
+# is callable from any thread without setup. v2.0 dropped the upstream
+# `subscribe()` helper, so `src/dark_mode.rs` rolls its own 2 s poller.
+dark-light = "2"
 
 # `chrono` is already in the transitive tree via slint; clock + std is all
 # the plugin.log writer needs.

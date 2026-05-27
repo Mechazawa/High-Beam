@@ -1,17 +1,8 @@
-# vitest for every default plugin that ships a package.json + test script.
-# Matrix-per-plugin so a single failing plugin doesn't mask others, and
-# runs go parallel.
-#
-# Plugin list is hardcoded — if a new plugin lands under `plugins/` with
-# its own package.json, append it to the matrix below. `frecency-demo`
-# and `slow-echo` are intentionally absent: they have no package.json
-# (pure JS demos, no JS-side tests).
+# Per-plugin vitest matrix (one failure doesn't mask the rest). Add a plugin
+# to the matrix below when it gains a package.json with tests.
 name: Plugins
 
-# Path-filtered: plugin tests only run when something they actually
-# exercise has changed. `sdk/**` covers the highbeam SDK that every
-# plugin imports from, and the workflow file itself is included so
-# CI changes still trigger a self-test.
+# Path-filtered: sdk/** is included because every plugin imports it.
 on:
   push:
     branches: [master]
@@ -33,7 +24,7 @@ concurrency:
 jobs:
   vitest:
     name: vitest (${{ matrix.plugin }})
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 10
 
     strategy:
@@ -54,7 +45,7 @@ jobs:
           - xkcd
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup Node
         uses: actions/setup-node@v4

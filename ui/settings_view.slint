@@ -9,7 +9,7 @@
 // functions, which are forwarded through the `focus-rail` and
 // `sync-rail` public functions below.
 
-import { ScrollView } from "std-widgets.slint";
+import { ScrollView, ComboBox } from "std-widgets.slint";
 import { PluginSlot, PluginOption } from "types.slint";
 
 export component SettingsView {
@@ -26,6 +26,10 @@ export component SettingsView {
     in-out property <string> hotkey-value: "Shift+Space";
     in-out property <bool> capturing-hotkey: false;
     in-out property <string> alt-action-modifier: "Alt";
+    // Title-cased label ("Auto" / "Dark" / "Light") for display. The
+    // controller normalises whatever the user wrote on disk, so this
+    // property always carries one of those three exact strings.
+    in-out property <string> theme-mode: "Auto";
 
     // Theme tokens
     in property <color> foreground-color;
@@ -51,7 +55,8 @@ export component SettingsView {
     callback recenter-window();
     callback open-config-dir();
     callback sync-rail-selection();
-    callback cycle-alt-action-modifier();
+    callback set-alt-action-modifier(string);
+    callback set-theme-mode(string);
 
     // Called by QueryWindow.show-settings() to give the rail immediate focus.
     public function focus-rail() {
@@ -394,28 +399,63 @@ export component SettingsView {
                                 color: root.foreground-color;
                                 font-size: root.font-size-title;
                             }
-                            TouchArea {
-                                width: 220px;
-                                height: 28px;
-                                clicked => {
-                                    root.cycle-alt-action-modifier();
-                                }
-                                Rectangle {
-                                    background: root.muted-color.with-alpha(0.08);
-                                    border-radius: 4px;
-                                    border-width: 1px;
-                                    border-color: root.border-color;
-                                    Text {
-                                        x: 8px;
-                                        text: root.alt-action-modifier + "  (click to cycle: Alt / Shift / Cmd / Ctrl)";
-                                        color: root.foreground-color;
-                                        font-size: root.font-size-subtitle;
-                                        vertical-alignment: center;
+                            HorizontalLayout {
+                                alignment: start;
+                                ComboBox {
+                                    width: 160px;
+                                    model: ["Alt", "Shift", "Cmd", "Ctrl"];
+                                    // Two-way: a plain `:` binding gets
+                                    // severed on the first user pick.
+                                    current-value <=> root.alt-action-modifier;
+                                    // ComboBoxBase keeps current-index
+                                    // independent of current-value, so
+                                    // derive it from the saved string.
+                                    current-index: root.alt-action-modifier == "Shift" ? 1
+                                        : root.alt-action-modifier == "Cmd" ? 2
+                                        : root.alt-action-modifier == "Ctrl" ? 3
+                                        : 0;
+                                    selected(value) => {
+                                        root.set-alt-action-modifier(value);
                                     }
                                 }
                             }
                             Text {
                                 text: "Hold this key while pressing Enter or clicking a result to run its alternate action (when the plugin supplies one).";
+                                color: root.muted-color;
+                                font-size: root.font-size-subtitle;
+                                wrap: word-wrap;
+                            }
+                        }
+
+                        // Theme mode group.
+                        VerticalLayout {
+                            spacing: 4px;
+                            Text {
+                                text: "Theme mode";
+                                color: root.foreground-color;
+                                font-size: root.font-size-title;
+                            }
+                            HorizontalLayout {
+                                alignment: start;
+                                ComboBox {
+                                    width: 160px;
+                                    model: ["Auto", "Dark", "Light"];
+                                    // Two-way: a plain `:` binding gets
+                                    // severed on the first user pick.
+                                    current-value <=> root.theme-mode;
+                                    // ComboBoxBase keeps current-index
+                                    // independent of current-value, so
+                                    // derive it from the saved string.
+                                    current-index: root.theme-mode == "Dark" ? 1
+                                        : root.theme-mode == "Light" ? 2
+                                        : 0;
+                                    selected(value) => {
+                                        root.set-theme-mode(value);
+                                    }
+                                }
+                            }
+                            Text {
+                                text: "Auto follows the OS appearance and repaints live when it flips. Dark and Light pin the launcher to one variant regardless of the system.";
                                 color: root.muted-color;
                                 font-size: root.font-size-subtitle;
                                 wrap: word-wrap;

@@ -9,6 +9,7 @@ pub mod frecency;
 pub mod hotkey;
 pub mod ipc;
 pub mod logging;
+pub mod os_appearance;
 pub mod paths;
 pub mod plugins;
 pub mod query_history;

@@ -6,7 +6,6 @@
 
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::thread;
 use std::time::Instant;
 
 use base64::Engine;
@@ -18,7 +17,7 @@ use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
 use crate::QueryWindow;
 use crate::settings::WindowPosition;
 use crate::settings_ui::SettingsController;
-use crate::theme::Theme;
+use crate::theme::ThemeVariant;
 
 /// Process-wide single-shot flag. When true, every dismiss path also calls
 /// `slint::quit_event_loop` so the launcher process exits on first dismiss
@@ -189,9 +188,12 @@ pub(crate) fn configure(window: &QueryWindow, settings: SettingsController) {
     // activation logic below.
 }
 
-/// Push theme tokens into the window's `in-out` properties. Theme reload
-/// is restart-only.
-pub(crate) fn apply_theme(window: &QueryWindow, theme: &Theme) {
+/// Push theme tokens into the window's `in-out` properties. Re-callable
+/// — the dark-mode watcher set up in [`crate::daemon::run`] bounces back
+/// here through the Slint event loop when the OS appearance flips, so
+/// every call must overwrite the full property surface rather than
+/// patching individual fields.
+pub(crate) fn apply_theme(window: &QueryWindow, theme: &ThemeVariant) {
     window.set_background_color(theme.colors.background);
     window.set_foreground_color(theme.colors.foreground);
     window.set_muted_color(theme.colors.muted);
@@ -210,18 +212,10 @@ pub(crate) fn apply_theme(window: &QueryWindow, theme: &Theme) {
 }
 
 /// Show the window, position it (saved or centered), and focus the input.
-/// Idempotent — calling while already visible re-applies position and
-/// re-focuses ("focuses it if already open").
-///
-/// Focus-grab is platform-specific:
-/// * macOS uses `NSApp.activate(ignoringOtherApps:)` +
-///   `makeKeyAndOrderFront`; no token plumbing.
-/// * Wayland uses `xdg_activation_v1.activate(token, surface)` — the
-///   `activation_token` is forwarded from the invoking process (terminal
-///   keybind, IPC `--open`, etc.). Without it the compositor will not
-///   raise our surface above whatever is currently focused, and on
-///   GNOME-Mutter the launcher silently opens behind the active window.
-/// * X11 / other paths ignore the token; winit handles focus there.
+/// Idempotent. Focus-grab is platform-specific; on Wayland it needs
+/// `activation_token` (forwarded from the invoking process) or the
+/// compositor won't raise the surface — GNOME-Mutter opens it behind the
+/// active window. macOS uses `NSApp.activate`; X11 lets winit handle it.
 pub(crate) fn show(window: &QueryWindow, settings: &SettingsController, activation_token: Option<&str>) {
     // On Linux the previous dismiss may have left us in the `is-hidden`
     // collapsed-1×1 state instead of going through Slint's hide (which is
@@ -252,20 +246,15 @@ pub(crate) fn show(window: &QueryWindow, settings: &SettingsController, activati
     window.invoke_focus_input();
 }
 
-/// Hide the window. Clears the input text so the next open starts fresh —
-/// every close path (Esc, blur, programmatic) funnels through here.
-/// Does *not* persist position; use [`hide_and_persist_position`] for the
-/// user-driven close paths.
+/// Hide the window and clear the input so the next open starts fresh. Does
+/// *not* persist position — use [`hide_and_persist_position`] for that.
 ///
-/// On Linux this DELIBERATELY does NOT call `Window::hide()`. Slint 1.16's
-/// Wayland hide path destroys the underlying winit window via `suspend()`,
-/// and when the destroy fails (because Slint's renderer holds extra
-/// `Arc<winit::Window>` refs we can't drop from app code) the state still
-/// flips to "None" — so the *next* `show()` won't re-attach the surface
-/// and the launcher silently never opens again. Instead we set an
-/// `is-hidden` flag in the .slint file that collapses the visible content
-/// to 1×1 transparent, keeping Slint's `shown` state intact so subsequent
-/// activations work.
+/// On Linux this DELIBERATELY avoids `Window::hide()`: Slint 1.16's Wayland
+/// hide destroys the winit window and, when the destroy fails (renderer
+/// holds extra `Arc<winit::Window>` refs), leaves state in "None" so the
+/// next `show()` never re-attaches — the launcher silently dies. Instead we
+/// flip an `is-hidden` flag that collapses content to 1×1, keeping Slint's
+/// `shown` state intact.
 pub(crate) fn hide(window: &QueryWindow) {
     window.invoke_clear_input();
     #[cfg(target_os = "linux")]
@@ -281,10 +270,8 @@ pub(crate) fn hide(window: &QueryWindow) {
     quit_if_once();
 }
 
-/// Snapshot the current window position, hand it to a background thread
-/// for fire-and-forget persistence, then hide. The disk write must not
-/// block the UI thread — same pattern the frecency picks use — so the
-/// hide is observably instant regardless of disk latency.
+/// Persist the current window position, then hide. The position write
+/// is queued onto the settings writer thread so the hide stays snappy.
 pub(crate) fn hide_and_persist_position(window: &QueryWindow, settings: &SettingsController) {
     // Drain any pushed plugin views first so their `unmounted` hooks
     // run while the QuickJS contexts are still alive. The bound
@@ -297,39 +284,31 @@ pub(crate) fn hide_and_persist_position(window: &QueryWindow, settings: &Setting
     window.invoke_persist_dismiss(window.get_query_text());
 
     if let Some(pos) = capture_outer_position(window) {
-        if ONCE_MODE.load(Ordering::Relaxed) {
-            // In single-shot we're about to `quit_event_loop` and exit
-            // the process — spawning a fire-and-forget thread races the
-            // process death, so do the disk write inline. The user already
-            // committed (Esc/Enter); the extra few ms is invisible.
-            settings.set_launcher_position(pos);
-        } else {
-            let settings = settings.clone();
-
-            if let Err(err) = thread::Builder::new()
-                .name("highbeam-settings-position".into())
-                .spawn(move || {
-                    settings.set_launcher_position(pos);
-                })
-            {
-                tracing::warn!(%err, "settings: position-persist thread spawn failed");
-            }
-        }
+        settings.set_launcher_position(pos);
     }
 
     hide(window);
 }
 
-/// Apply the persisted launcher position, falling back to the centered
-/// default when no position is saved or the saved one is no longer on any
-/// connected display. The off-screen check matters when the user unplugs
-/// the monitor the window was last positioned on — without it, the next
-/// show would put the window in the void.
+/// Apply the persisted launcher position, recentering when nothing is
+/// saved or the saved value is no longer on any connected display.
+///
+/// On cold start the winit window doesn't exist yet (Slint creates it on
+/// the next event-loop tick), so we seed `WindowAttributes::position` via
+/// `slint::Window::set_position` and let the off-screen check re-run on
+/// the following show. `has_winit_window()` distinguishes that case from
+/// "winit alive but `available_monitors()` is empty" so the latter still
+/// recenters instead of trusting a possibly-off-screen value.
 fn apply_saved_or_centered_position(window: &QueryWindow, settings: &SettingsController) {
     let Some(saved) = settings.launcher_position() else {
         center_on_focused_display(window);
         return;
     };
+
+    if !window.window().has_winit_window() {
+        set_outer_position(window, saved);
+        return;
+    }
 
     let rects = monitor_rects(window);
 
@@ -358,15 +337,11 @@ fn capture_outer_position(window: &QueryWindow) -> Option<WindowPosition> {
         .flatten()
 }
 
-/// Push the window's outer position via winit directly — `slint::Window::
-/// set_position` writes the inner/content position which on macOS differs
-/// from the outer `NSWindow` frame by the title bar height. We use the outer
-/// rect so a restored position lines up byte-identical with where the user
-/// dropped it.
+/// Push the window's outer position. Resolves to
+/// `winit::Window::set_outer_position` when the winit window is live, or
+/// seeds `WindowAttributes::position` for the cold-start path.
 fn set_outer_position(window: &QueryWindow, pos: WindowPosition) {
-    let _ = window.window().with_winit_window(|w: &winit::window::Window| {
-        w.set_outer_position(winit::dpi::PhysicalPosition::new(pos.x, pos.y));
-    });
+    window.window().set_position(slint::PhysicalPosition::new(pos.x, pos.y));
 }
 
 /// Kick off a native OS-driven window drag. winit's `drag_window()` blocks
@@ -714,9 +689,8 @@ mod tests {
 
     #[test]
     fn position_visible_requires_at_least_one_monitor() {
-        // No monitors known to winit (headless tests, backend not
-        // initialised) means we can't validate; the safe default is "treat
-        // as off-screen" so the host falls back to the centered path.
+        // Empty rects = winit alive but no monitors connected; the host
+        // falls through to recenter rather than trusting the saved value.
         let pos = WindowPosition { x: 100, y: 100 };
         assert!(!position_visible_on_any_monitor(pos, &[]));
     }
