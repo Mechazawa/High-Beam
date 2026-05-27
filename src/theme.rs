@@ -1,4 +1,12 @@
-//! User-editable theme loaded from `theme.toml` in the platform config dir.
+//! User-editable themes loaded by name from the platform themes dir.
+//!
+//! The user picks a theme by file stem in settings
+//! ([`crate::settings::Settings::theme`]); [`Theme::load_named`] resolves it
+//! to `<themes_dir>/<stem>.toml`. The reserved name
+//! [`crate::settings::DEFAULT_THEME`] (and any missing/malformed file) falls
+//! back to the in-Rust bundled yosemite-spotlight default, so a stale name
+//! never blocks startup. [`available_theme_names`] enumerates the dir for the
+//! settings dropdown.
 //!
 //! Each theme describes two appearances in one file. Top-level sections
 //! (`[colors]`, `[font]`, `[window]`) hold the base values; nested
@@ -8,15 +16,13 @@
 //! file still parses and looks identical in both modes.
 //!
 //! The user's [`crate::settings::Settings::theme_mode`] decides which
-//! variant `apply_theme` paints. Reload is restart-only; in `Auto` mode a
-//! background watcher (see [`crate::os_appearance`]) repaints on system
-//! flips without a restart.
+//! variant `apply_theme` paints. The settings UI swaps the active theme and
+//! re-applies live (no restart); in `Auto` mode a background watcher (see
+//! [`crate::os_appearance`]) repaints on system flips.
 //!
-//! Token surface mirrors `QueryWindow`'s `in-out` properties. Missing or
-//! malformed file falls back to the bundled yosemite-spotlight default.
+//! Token surface mirrors `QueryWindow`'s `in-out` properties.
 
 use std::fs;
-use std::path::PathBuf;
 
 use serde::Deserialize;
 use slint::Color;
@@ -168,21 +174,30 @@ impl Default for Window {
 }
 
 impl Theme {
-    /// Load the user's `theme.toml` from the platform config path. Missing
-    /// file → silent default; malformed → warning + default. A typo in the
-    /// theme must not prevent the daemon from starting.
+    /// Load the theme the user selected by `name`. The reserved
+    /// [`crate::settings::DEFAULT_THEME`] resolves to the in-Rust builtin; any
+    /// other name reads `<themes_dir>/<name>.toml`. Missing file → silent
+    /// default; unresolvable dir / malformed file → warning + default. A
+    /// stale name must not prevent the daemon from starting.
     #[must_use]
-    pub fn load_or_default() -> Self {
-        let Some(path) = default_theme_path() else {
-            tracing::warn!("theme: could not resolve config dir; using default");
+    pub fn load_named(name: &str) -> Self {
+        if name == crate::settings::DEFAULT_THEME {
+            return Self::default_bundled();
+        }
+
+        let Some(path) = paths::themes_dir().map(|dir| dir.join(format!("{name}.toml"))) else {
+            tracing::warn!(theme = name, "theme: could not resolve themes dir; using default");
+
             return Self::default_bundled();
         };
 
         match fs::read_to_string(&path) {
             Ok(text) => Self::from_toml_or_default(&text, &path),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Self::default_bundled(),
+            // Not-found (stale selection) and any other read error both fall
+            // back to the builtin — no behavioural split, so one arm.
             Err(err) => {
-                tracing::warn!(path = %path.display(), %err, "theme: could not read; using default");
+                tracing::warn!(theme = name, path = %path.display(), %err, "theme: could not read; using default");
+
                 Self::default_bundled()
             }
         }
@@ -287,10 +302,28 @@ impl Theme {
     }
 }
 
-/// Path the daemon reads on startup. `None` when the project dir can't be
-/// resolved (no `$HOME` etc.).
-fn default_theme_path() -> Option<PathBuf> {
-    paths::config_dir().ok().map(|dir| dir.join("theme.toml"))
+/// Theme file stems available under the themes dir, sorted. The settings
+/// dropdown prepends [`crate::settings::DEFAULT_THEME`] to this; an
+/// unresolvable or empty dir yields an empty list (default still selectable).
+#[must_use]
+pub fn available_theme_names() -> Vec<String> {
+    let Some(dir) = paths::themes_dir() else {
+        return Vec::new();
+    };
+
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+
+    let mut names: Vec<String> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("toml"))
+        .filter_map(|path| path.file_stem().and_then(|s| s.to_str()).map(str::to_owned))
+        .collect();
+    names.sort_unstable();
+
+    names
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -690,6 +723,23 @@ mod tests {
             theme.variant_for(ThemeMode::Light, Appearance::Unspecified),
             &theme.light
         );
+    }
+
+    #[test]
+    fn load_named_default_returns_bundled() {
+        // The reserved name never touches disk — it's the in-Rust builtin.
+        assert_eq!(
+            Theme::load_named(crate::settings::DEFAULT_THEME),
+            Theme::default_bundled()
+        );
+    }
+
+    #[test]
+    fn load_named_missing_file_falls_back_to_default() {
+        // A name that resolves to a file the themes dir doesn't contain must
+        // degrade to the builtin rather than panic or block startup.
+        let theme = Theme::load_named("definitely-not-a-real-theme-xyz-9999");
+        assert_eq!(theme, Theme::default_bundled());
     }
 
     #[test]

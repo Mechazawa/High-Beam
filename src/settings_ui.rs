@@ -8,7 +8,7 @@
 //! state is independent of the query/results state.
 
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::sync::{Arc, Mutex, OnceLock, RwLock, Weak};
 use std::thread;
 
 use serde_json::Value as JsonValue;
@@ -19,8 +19,10 @@ use crate::daemon::HotkeyRegistration;
 use crate::hotkey::{MOD_ALT, MOD_CONTROL, MOD_META, MOD_SHIFT, format_hotkey_spec, slint_flag_for_modifier};
 use crate::logging::LogErr;
 use crate::plugins::manifest::{Manifest, OptionDef, OptionKind};
-use crate::settings::{Settings, WindowPosition};
+use crate::settings::{DEFAULT_THEME, Settings, WindowPosition};
+use crate::theme::{Theme, ThemeMode, available_theme_names};
 use crate::ui::{PluginOption, PluginSlot};
+use crate::{os_appearance, window};
 
 /// Display metadata for a plugin, extracted from its manifest and handed to
 /// the settings view so the right pane can show a header.
@@ -103,12 +105,14 @@ impl SettingsController {
     }
 
     /// Wire every settings callback on the given window. Idempotent; call
-    /// once per window. `theme` lets the theme-mode handler re-apply the
-    /// variant on pick, without waiting for the next OS-appearance flip.
-    pub fn wire(&self, window: &QueryWindow, theme: Arc<crate::theme::Theme>) {
+    /// once per window. `theme` is the live active theme shared with the
+    /// daemon's appearance watcher; the selector / reload swap it in place so
+    /// picks apply without a restart.
+    pub fn wire(&self, window: &QueryWindow, theme: Arc<RwLock<Theme>>) {
         // Populate before the user first opens settings.
         self.refresh_slots(window);
         self.refresh_global(window);
+        self.refresh_themes(window);
 
         let ctrl = self.clone();
         let weak = window.as_weak();
@@ -118,6 +122,8 @@ impl SettingsController {
                 ctrl.refresh_slots(&w);
                 ctrl.refresh_options(&w);
                 ctrl.refresh_global(&w);
+                // Rescan so files added/removed since last open show up.
+                ctrl.refresh_themes(&w);
             }
         });
 
@@ -231,7 +237,7 @@ impl SettingsController {
             }
         });
 
-        self.wire_theme_mode_select(window, theme);
+        self.wire_theme_controls(window, theme);
 
         let weak = window.as_weak();
         window.on_select_global(move || {
@@ -245,13 +251,45 @@ impl SettingsController {
     }
 
     fn refresh_global(&self, window: &QueryWindow) {
-        let settings = self.inner.settings.lock().expect("settings lock");
-        window.set_hotkey_value(SharedString::from(settings.global().hotkey.as_str()));
-        window.set_alt_action_modifier(SharedString::from(settings.alt_action_modifier()));
-        window.set_alt_action_modifier_flag(SharedString::from(slint_flag_for_modifier(
-            settings.alt_action_modifier(),
-        )));
-        window.set_theme_mode(SharedString::from(theme_mode_label(settings.theme_mode())));
+        // Theme dropdown is refreshed separately (`refresh_themes`) to keep its
+        // disk scan off every global mutation.
+        let (hotkey, alt_mod, theme_mode) = {
+            let settings = self.inner.settings.lock().expect("settings lock");
+            (
+                settings.global().hotkey.clone(),
+                settings.alt_action_modifier().to_owned(),
+                settings.theme_mode(),
+            )
+        };
+
+        window.set_hotkey_value(SharedString::from(hotkey.as_str()));
+        window.set_alt_action_modifier(SharedString::from(alt_mod.as_str()));
+        window.set_alt_action_modifier_flag(SharedString::from(slint_flag_for_modifier(&alt_mod)));
+        window.set_theme_mode(SharedString::from(theme_mode_label(theme_mode)));
+    }
+
+    /// Reads the selection, then scans the themes dir outside the lock. Split
+    /// from [`Self::refresh_global`] to keep the disk scan off unrelated
+    /// global mutations.
+    fn refresh_themes(&self, window: &QueryWindow) {
+        let selected = self.theme();
+
+        Self::refresh_theme_choices(window, &selected);
+    }
+
+    /// Model is the reserved `default` plus the themes-dir stems; the index
+    /// points at `selected`, falling back to `default` when its file is gone.
+    /// A stem named `default` is dropped — [`crate::theme::Theme::load_named`]
+    /// maps that name to the builtin, so such a file is unreachable anyway.
+    fn refresh_theme_choices(window: &QueryWindow, selected: &str) {
+        let names: Vec<String> = std::iter::once(DEFAULT_THEME.to_owned())
+            .chain(available_theme_names().into_iter().filter(|name| name != DEFAULT_THEME))
+            .collect();
+        let index = names.iter().position(|name| name == selected).unwrap_or(0);
+        let model: Vec<SharedString> = names.into_iter().map(SharedString::from).collect();
+
+        window.set_theme_names(ModelRc::new(VecModel::from(model)));
+        window.set_theme_index(i32::try_from(index).unwrap_or(0));
     }
 
     fn set_hotkey(&self, value: &str) {
@@ -272,23 +310,72 @@ impl SettingsController {
         self.queue_persist();
     }
 
-    /// Hook the theme-mode dropdown into `window`. Split from [`Self::wire`]
-    /// to keep it under the line cap.
-    fn wire_theme_mode_select(&self, window: &QueryWindow, theme: Arc<crate::theme::Theme>) {
+    /// Theme-mode, theme selector, and reload. All re-apply immediately rather
+    /// than waiting for the next OS-appearance poll tick.
+    fn wire_theme_controls(&self, window: &QueryWindow, theme: Arc<RwLock<Theme>>) {
         let ctrl = self.clone();
         let weak = window.as_weak();
+        let theme_for_mode = Arc::clone(&theme);
+
         window.on_set_theme_mode(move |value| {
             ctrl.set_theme_mode(value.as_str());
 
             if let Some(w) = weak.upgrade() {
                 ctrl.refresh_global(&w);
-                // Re-apply now rather than waiting for the next poll tick.
-                crate::window::apply_theme(
-                    &w,
-                    theme.variant_for(ctrl.theme_mode(), crate::os_appearance::current()),
-                );
+                Self::apply_active_theme(&w, &theme_for_mode, ctrl.theme_mode());
             }
         });
+
+        let ctrl = self.clone();
+        let weak = window.as_weak();
+        let theme_for_select = Arc::clone(&theme);
+
+        window.on_set_theme(move |value| {
+            ctrl.set_theme(value.as_str());
+            ctrl.swap_active_theme(&theme_for_select);
+
+            if let Some(w) = weak.upgrade() {
+                ctrl.refresh_themes(&w);
+                Self::apply_active_theme(&w, &theme_for_select, ctrl.theme_mode());
+            }
+        });
+
+        let ctrl = self.clone();
+        let weak = window.as_weak();
+
+        window.on_reload_theme(move || {
+            // No settings write — only picks up on-disk edits to the selection.
+            ctrl.swap_active_theme(&theme);
+
+            if let Some(w) = weak.upgrade() {
+                Self::apply_active_theme(&w, &theme, ctrl.theme_mode());
+            }
+        });
+    }
+
+    /// Replace the shared active theme with the user's current selection,
+    /// re-read from disk. Used by both the selector (after the settings write)
+    /// and the reload button.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the theme lock is poisoned — a previous panic while holding
+    /// it corrupted the shared state and continuing risks painting garbage.
+    fn swap_active_theme(&self, theme: &Arc<RwLock<Theme>>) {
+        let loaded = Theme::load_named(&self.theme());
+        *theme.write().expect("theme lock") = loaded;
+    }
+
+    /// Paint the active theme's variant for `mode` against the current system
+    /// appearance. Reads the shared theme under a read lock; the borrow can't
+    /// escape the guard, so the apply happens inside the locked scope.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the theme lock is poisoned. See [`Self::swap_active_theme`].
+    fn apply_active_theme(window: &QueryWindow, theme: &Arc<RwLock<Theme>>, mode: ThemeMode) {
+        let guard = theme.read().expect("theme lock");
+        window::apply_theme(window, guard.variant_for(mode, os_appearance::current()));
     }
 
     fn set_theme_mode(&self, value: &str) {
@@ -298,6 +385,26 @@ impl SettingsController {
         }
 
         self.queue_persist();
+    }
+
+    fn set_theme(&self, value: &str) {
+        {
+            let mut settings = self.inner.settings.lock().expect("settings lock");
+            settings.set_theme(value);
+        }
+
+        self.queue_persist();
+    }
+
+    /// The user's currently selected theme name (file stem or the reserved
+    /// default). Read when swapping / reloading the active theme.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the settings mutex is poisoned. See
+    /// [`Self::launcher_position`] for the rationale.
+    fn theme(&self) -> String {
+        self.inner.settings.lock().expect("settings lock").theme().to_owned()
     }
 
     /// Last saved launcher window origin, or `None` if the user has never
@@ -396,7 +503,7 @@ impl SettingsController {
     /// Panics if the settings mutex is poisoned. See
     /// [`Self::launcher_position`] for the rationale.
     #[must_use]
-    pub fn theme_mode(&self) -> crate::theme::ThemeMode {
+    pub fn theme_mode(&self) -> ThemeMode {
         self.inner.settings.lock().expect("settings lock").theme_mode()
     }
 
@@ -688,12 +795,11 @@ fn next_choice(current: &str, choices: &[String]) -> String {
     choices.get(next).cloned().unwrap_or_else(|| current.to_owned())
 }
 
-/// Title-cased label for the theme-mode pill in the settings UI.
+/// Title-cased label for the theme-mode dropdown in the settings UI.
 /// [`crate::theme::ThemeMode::as_str`] returns the lowercase on-disk
 /// spelling; this helper provides the display variant the user reads in
-/// the click-to-cycle row.
-fn theme_mode_label(mode: crate::theme::ThemeMode) -> &'static str {
-    use crate::theme::ThemeMode;
+/// the selector.
+fn theme_mode_label(mode: ThemeMode) -> &'static str {
     match mode {
         ThemeMode::Auto => "Auto",
         ThemeMode::Dark => "Dark",

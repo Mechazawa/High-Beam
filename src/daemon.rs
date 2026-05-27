@@ -5,7 +5,7 @@
 use std::error::Error;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::thread;
 
 use slint::ComponentHandle;
@@ -50,6 +50,12 @@ pub struct Options {
 /// Returns an error if the Slint backend fails to initialize, the window
 /// fails to construct, the unix socket can't be bound (e.g. another daemon
 /// is already running), or the event loop reports a runtime error.
+///
+/// # Panics
+///
+/// Panics if the active-theme `RwLock` is poisoned — a previous panic while
+/// holding it corrupted the shared theme and painting from it would risk
+/// rendering garbage.
 // reason: `Options` is a config struct created by the caller and consumed
 // here; by-value is more ergonomic than forcing the caller to keep it alive.
 #[allow(clippy::needless_pass_by_value)]
@@ -65,6 +71,9 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
     if options.plugins_dir.is_none() {
         bundle_install::install_default_plugins_if_needed();
     }
+
+    // Independent of the plugins-dir override — themes live in the config dir.
+    bundle_install::install_default_themes_if_needed();
 
     // Pin the winit backend explicitly — we rely on it for monitor enumeration
     // and focus events; a default-backend swap would otherwise fail opaquely.
@@ -84,12 +93,16 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
     // we register with the OS.
     let hotkey_spec = settings_for_ui.global().hotkey.clone();
 
-    // Arc so the watcher thread can hold a clone for the daemon's lifetime.
-    let theme = Arc::new(Theme::load_or_default());
-    window::apply_theme(
-        &window,
-        theme.variant_for(settings_for_ui.theme_mode(), os_appearance::current()),
-    );
+    // Swapped on pick/reload, read on every repaint — hence `RwLock`, shared
+    // with the appearance watcher via `Arc`.
+    let theme = Arc::new(RwLock::new(Theme::load_named(settings_for_ui.theme())));
+    {
+        let theme = theme.read().expect("theme lock");
+        window::apply_theme(
+            &window,
+            theme.variant_for(settings_for_ui.theme_mode(), os_appearance::current()),
+        );
+    }
 
     let settings_controller = SettingsController::new(manifests, settings_for_ui);
 
@@ -105,6 +118,7 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
             let mode = controller.theme_mode();
             slint::invoke_from_event_loop(move || {
                 if let Some(w) = weak.upgrade() {
+                    let theme = theme.read().expect("theme lock");
                     window::apply_theme(&w, theme.variant_for(mode, appearance));
                 }
             })

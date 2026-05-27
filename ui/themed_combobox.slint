@@ -1,0 +1,111 @@
+// Token-styled dropdown — the std-widgets `ComboBox` ignores our theme colors.
+//
+// Index-driven and one-way: we never self-assign `current-index`, so the
+// caller's binding stays intact and re-evaluates after it persists the pick.
+// Display updates need no two-way plumbing.
+
+export component ThemedComboBox {
+    in property <[string]> model;
+    in property <int> current-index: 0;
+
+    // Theme tokens — mirror the names used across the settings view.
+    in property <color> foreground-color;
+    in property <color> background-color;
+    in property <color> muted-color;
+    in property <color> border-color;
+    in property <color> selection-color;
+    in property <color> highlight-color;
+    in property <length> font-size: 14px;
+
+    callback selected(string);
+
+    // Guarded lookup so an empty model or stale index can't index out of
+    // range — Slint clamps nothing for us.
+    property <bool> index-valid: root.current-index >= 0 && root.current-index < root.model.length;
+    property <string> current-text: root.index-valid ? root.model[root.current-index] : "";
+
+    height: 28px;
+    min-width: 160px;
+
+    field := Rectangle {
+        background: root.muted-color.with-alpha(0.08);
+        border-radius: 4px;
+        border-width: 1px;
+        border-color: touch.has-hover ? root.highlight-color : root.border-color;
+
+        HorizontalLayout {
+            padding-left: 8px;
+            padding-right: 8px;
+            spacing: 6px;
+
+            Text {
+                text: root.current-text;
+                color: root.foreground-color;
+                font-size: root.font-size;
+                vertical-alignment: center;
+                horizontal-alignment: left;
+                overflow: elide;
+            }
+
+            Text {
+                text: "▾";
+                color: root.muted-color;
+                font-size: root.font-size;
+                vertical-alignment: center;
+                horizontal-alignment: right;
+                width: 12px;
+            }
+        }
+
+        touch := TouchArea {
+            clicked => {
+                popup.show();
+            }
+        }
+    }
+
+    popup := PopupWindow {
+        x: 0;
+        y: root.height + 2px;
+        width: root.width;
+        // Any click — on a row or outside — dismisses the list.
+        close-policy: close-on-click;
+
+        Rectangle {
+            background: root.background-color;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: root.border-color;
+
+            VerticalLayout {
+                padding: 2px;
+
+                for item[i] in root.model: Rectangle {
+                    height: 26px;
+                    background: i == root.current-index ? root.selection-color : transparent;
+                    border-radius: 3px;
+
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+
+                        Text {
+                            text: item;
+                            color: root.foreground-color;
+                            font-size: root.font-size;
+                            vertical-alignment: center;
+                            horizontal-alignment: left;
+                            overflow: elide;
+                        }
+                    }
+
+                    row-touch := TouchArea {
+                        clicked => {
+                            root.selected(item);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

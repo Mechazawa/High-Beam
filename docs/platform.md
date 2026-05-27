@@ -85,7 +85,8 @@ detects it (connect fails) and replaces it.
 
 | Purpose             | macOS                                                   | Linux                                              |
 |---------------------|---------------------------------------------------------|----------------------------------------------------|
-| Config (`theme.toml`) | `~/Library/Application Support/high-beam/`            | `$XDG_CONFIG_HOME/high-beam/`                      |
+| Config (`settings.toml`) | `~/Library/Application Support/high-beam/`         | `$XDG_CONFIG_HOME/high-beam/`                      |
+| Themes              | `~/Library/Application Support/high-beam/themes/`       | `$XDG_CONFIG_HOME/high-beam/themes/`               |
 | Plugins             | `~/Library/Application Support/high-beam/plugins/`      | `$XDG_DATA_HOME/high-beam/plugins/`                |
 | Plugin cache        | `~/Library/Caches/high-beam/plugins/<name>/`            | `$XDG_CACHE_HOME/high-beam/plugins/<name>/`        |
 | Frecency DB         | `~/Library/Application Support/high-beam/frecency.sqlite` | `$XDG_DATA_HOME/high-beam/frecency.sqlite`       |

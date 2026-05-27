@@ -55,6 +55,9 @@ export component QueryWindow inherits Window {
     // settings pane. Rust pushes the canonical value whenever the user
     // cycles it.
     in-out property <string> theme-mode: "Auto";
+    // Reserved "default" + themes-dir stems; rebuilt by Rust on settings open.
+    in-out property <[string]> theme-names: ["default"];
+    in-out property <int> theme-index: 0;
     // Resolved Slint-side flag name corresponding to the configured alt
     // modifier, accounting for macOS's Cmd↔Ctrl flag swap. Rust pushes
     // it via `set-alt-action-modifier-flag` whenever the setting changes.
@@ -102,7 +105,7 @@ export component QueryWindow inherits Window {
     callback confirm-cancel();
 
     // Theme tokens. Defaults reproduce the bundled yosemite-spotlight theme so
-    // a missing theme.toml is byte-identical to the pre-theming build.
+    // the builtin `default` theme is byte-identical to the pre-theming build.
     in-out property <color> background-color: #ffffffea;
     in-out property <color> foreground-color: #1d1d1f;
     in-out property <color> muted-color: #86868b;
@@ -175,6 +178,8 @@ export component QueryWindow inherits Window {
     callback reset-hotkey-to-default();
     callback set-alt-action-modifier(string);
     callback set-theme-mode(string);
+    callback set-theme(string);
+    callback reload-theme();
     callback select-global();
     // Whether the hotkey field is currently listening for a key combo —
     // drives the prompt text + highlighted border in the global pane.
@@ -189,7 +194,7 @@ export component QueryWindow inherits Window {
     callback recenter-window();
     // Settings → Global → "Open config directory" — opens the platform
     // config dir in Finder / xdg-open. The directory holds settings.toml,
-    // theme.toml, and the per-plugin user-edited files.
+    // the themes/ folder, and the per-plugin user-edited files.
     callback open-config-dir();
 
     // Focus is managed explicitly via `focus-input()` which is invoked from
@@ -371,7 +376,10 @@ export component QueryWindow inherits Window {
             capturing-hotkey <=> root.capturing-hotkey;
             alt-action-modifier <=> root.alt-action-modifier;
             theme-mode <=> root.theme-mode;
+            theme-names: root.theme-names;
+            theme-index: root.theme-index;
 
+            background-color: root.background-color;
             foreground-color: root.foreground-color;
             muted-color: root.muted-color;
             highlight-color: root.highlight-color;
@@ -392,6 +400,8 @@ export component QueryWindow inherits Window {
             reset-hotkey-to-default => { root.reset-hotkey-to-default(); }
             set-alt-action-modifier(value) => { root.set-alt-action-modifier(value); }
             set-theme-mode(value) => { root.set-theme-mode(value); }
+            set-theme(value) => { root.set-theme(value); }
+            reload-theme => { root.reload-theme(); }
             select-global => { root.select-global(); }
             recenter-window => { root.recenter-window(); }
             open-config-dir => { root.open-config-dir(); }
