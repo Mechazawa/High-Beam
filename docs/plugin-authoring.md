@@ -260,10 +260,9 @@ the launcher result list.
 - If the archive does not bundle a `manifest.json`, the URL-fetched one
   is written into the destination dir with `manifestUrl` backfilled to
   the install URL.
-- Pre-existing directories at `<user-plugins-dir>/<name>/` are renamed
-  to `<name>.backup.<unix_ms>/` rather than overwritten. For v1 this
-  backup is also your rollback mechanism — restore manually if a bad
-  update lands.
+- Pre-existing directories at `<user-plugins-dir>/<name>/` are removed
+  before the new version is moved into place. There is no on-disk
+  backup — reinstall from the manifest URL to roll back.
 
 ### Versioning
 

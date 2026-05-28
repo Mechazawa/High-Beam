@@ -10,7 +10,7 @@
 //!   5. If the archive bundles its own manifest.json, cross-check name +
 //!      version against the URL-fetched manifest.
 //!   6. Move the extracted directory into place under the user plugin
-//!      directory, backing up any pre-existing entry.
+//!      directory, replacing any pre-existing entry.
 //!
 //! Everything here is engine-agnostic — the actual reload/registry swap
 //! lives in `crate::app` because it owns the runtime thread and the
@@ -423,10 +423,8 @@ pub fn find_payload_root(extracted_dir: &Path) -> PathBuf {
     extracted_dir.to_path_buf()
 }
 
-/// Move `payload_root` into `<plugins_dir>/<name>/`, backing up any
-/// pre-existing directory at the destination to
-/// `<name>.backup.<unix-millis>` so the user can manually roll back a bad
-/// install.
+/// Move `payload_root` into `<plugins_dir>/<name>/`, removing any
+/// pre-existing directory at the destination.
 ///
 /// # Errors
 ///
@@ -437,12 +435,7 @@ pub fn move_into_plugins_dir(payload_root: &Path, plugins_dir: &Path, name: &str
     let destination = plugins_dir.join(name);
 
     if destination.exists() {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|e| InstallError::Io(e.to_string()))?
-            .as_millis();
-        let backup = plugins_dir.join(format!("{name}.backup.{now}"));
-        std::fs::rename(&destination, &backup).map_err(|e| InstallError::Io(e.to_string()))?;
+        std::fs::remove_dir_all(&destination).map_err(|e| InstallError::Io(e.to_string()))?;
     }
 
     // `rename` works for cross-directory moves within one filesystem; for
@@ -822,8 +815,8 @@ mod tests {
     }
 
     #[test]
-    fn move_into_plugins_dir_backs_up_existing() {
-        let root = fresh_tmp("move-backup");
+    fn move_into_plugins_dir_replaces_existing() {
+        let root = fresh_tmp("move-replace");
         let plugins_dir = root.join("plugins");
         let payload = root.join("payload");
         std::fs::create_dir_all(&plugins_dir).unwrap();
@@ -836,15 +829,15 @@ mod tests {
         let dst = move_into_plugins_dir(&payload, &plugins_dir, "plug").expect("move");
         assert_eq!(dst, plugins_dir.join("plug"));
         assert!(dst.join("manifest.json").exists(), "new payload landed");
+        assert!(!dst.join("old.txt").exists(), "old contents replaced, not merged");
 
-        // A backup directory exists alongside the new install.
-        let backups: Vec<_> = std::fs::read_dir(&plugins_dir)
+        // No leftover sibling directories — the previous version is gone, not backed up.
+        let siblings: Vec<_> = std::fs::read_dir(&plugins_dir)
             .unwrap()
             .filter_map(Result::ok)
-            .filter(|e| e.file_name().to_string_lossy().starts_with("plug.backup."))
+            .map(|e| e.file_name().to_string_lossy().into_owned())
             .collect();
-        assert_eq!(backups.len(), 1, "exactly one backup expected");
-        assert!(backups[0].path().join("old.txt").exists());
+        assert_eq!(siblings, vec!["plug".to_owned()]);
 
         let _ = std::fs::remove_dir_all(&root);
     }
