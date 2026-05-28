@@ -47,9 +47,9 @@ stateful screens: [docs/views.md](docs/views.md).
 
 ## Theming
 
-`theme.toml` in the config dir overrides the bundled
-yosemite-spotlight default. Token reference:
-[docs/theming.md](docs/theming.md).
+Drop a `<name>.toml` in the `themes/` folder in the config dir and pick
+it in Settings → Global → Theme; `default` is the bundled
+yosemite-spotlight. Token reference: [docs/theming.md](docs/theming.md).
 
 ## Internals
 

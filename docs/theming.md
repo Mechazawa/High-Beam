@@ -1,18 +1,28 @@
 # Theming
 
-High Beam reads a single `theme.toml` from the platform config dir at
-startup. Edit it and restart the daemon to apply changes.
+High Beam reads themes from a `themes/` folder in the platform config
+dir. Each `<name>.toml` in that folder is a selectable theme.
 
-- macOS: `~/Library/Application Support/high-beam/theme.toml`
-- Linux: `$XDG_CONFIG_HOME/high-beam/theme.toml` (default
-  `~/.config/high-beam/theme.toml`)
+- macOS: `~/Library/Application Support/high-beam/themes/`
+- Linux: `$XDG_CONFIG_HOME/high-beam/themes/` (default
+  `~/.config/high-beam/themes/`)
 
-A missing file silently falls back to the bundled default. A malformed
-file logs a warning and still falls back, so a typo can't prevent the
-daemon from starting.
+On first launch from a packaged build, the shipped themes are seeded
+into this folder (new shipped themes from later updates are added too,
+but a file you've edited is never overwritten).
 
-The bundled default lives at `themes/yosemite-spotlight.toml`; copy it
-as a starting point.
+Pick the active theme in Settings → Global → Theme. The dropdown lists
+`default` (the builtin yosemite-spotlight, used when no file is selected)
+plus every `<name>.toml` in the folder. After editing a theme file, hit
+**Reload theme** next to the dropdown to re-read and apply it without a
+restart. The list itself refreshes whenever you open Settings, so a file
+you just dropped in (or removed) shows up on the next open.
+
+A missing or malformed file silently falls back to the builtin, so a
+typo or a stale selection can't prevent the daemon from starting.
+
+To author a new theme, copy any seeded file (e.g.
+`themes/yosemite-spotlight.toml`) and edit it.
 
 ## Token reference
 
@@ -55,8 +65,8 @@ warning and the default value is used for that field.
 ### Fonts
 
 `family` accepts a CSS-style fallback list. An empty string lets Slint's
-backend pick the OS default — that's how a missing `theme.toml` matches the
-pre-theming build visually.
+backend pick the OS default — that's how the builtin `default` theme matches
+the pre-theming build visually.
 
 The `size_*` fields are pixels.
 

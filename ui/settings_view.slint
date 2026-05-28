@@ -9,7 +9,8 @@
 // functions, which are forwarded through the `focus-rail` and
 // `sync-rail` public functions below.
 
-import { ScrollView, ComboBox } from "std-widgets.slint";
+import { ScrollView } from "std-widgets.slint";
+import { ThemedComboBox } from "themed_combobox.slint";
 import { PluginSlot, PluginOption } from "types.slint";
 
 export component SettingsView {
@@ -30,8 +31,13 @@ export component SettingsView {
     // controller normalises whatever the user wrote on disk, so this
     // property always carries one of those three exact strings.
     in-out property <string> theme-mode: "Auto";
+    // Reserved "default" + themes-dir stems, and the active index — both from
+    // the controller on each settings open.
+    in property <[string]> theme-names: ["default"];
+    in property <int> theme-index: 0;
 
     // Theme tokens
+    in property <color> background-color;
     in property <color> foreground-color;
     in property <color> muted-color;
     in property <color> highlight-color;
@@ -57,6 +63,8 @@ export component SettingsView {
     callback sync-rail-selection();
     callback set-alt-action-modifier(string);
     callback set-theme-mode(string);
+    callback set-theme(string);
+    callback reload-theme();
 
     // Called by QueryWindow.show-settings() to give the rail immediate focus.
     public function focus-rail() {
@@ -401,19 +409,21 @@ export component SettingsView {
                             }
                             HorizontalLayout {
                                 alignment: start;
-                                ComboBox {
+                                ThemedComboBox {
                                     width: 160px;
                                     model: ["Alt", "Shift", "Cmd", "Ctrl"];
-                                    // Two-way: a plain `:` binding gets
-                                    // severed on the first user pick.
-                                    current-value <=> root.alt-action-modifier;
-                                    // ComboBoxBase keeps current-index
-                                    // independent of current-value, so
-                                    // derive it from the saved string.
+                                    // Derived from the string the controller refreshes on pick.
                                     current-index: root.alt-action-modifier == "Shift" ? 1
                                         : root.alt-action-modifier == "Cmd" ? 2
                                         : root.alt-action-modifier == "Ctrl" ? 3
                                         : 0;
+                                    foreground-color: root.foreground-color;
+                                    background-color: root.background-color;
+                                    muted-color: root.muted-color;
+                                    border-color: root.border-color;
+                                    selection-color: root.selection-color;
+                                    highlight-color: root.highlight-color;
+                                    font-size: root.font-size-title;
                                     selected(value) => {
                                         root.set-alt-action-modifier(value);
                                     }
@@ -421,6 +431,62 @@ export component SettingsView {
                             }
                             Text {
                                 text: "Hold this key while pressing Enter or clicking a result to run its alternate action (when the plugin supplies one).";
+                                color: root.muted-color;
+                                font-size: root.font-size-subtitle;
+                                wrap: word-wrap;
+                            }
+                        }
+
+                        // Theme group: which theme + a manual reload.
+                        VerticalLayout {
+                            spacing: 4px;
+                            Text {
+                                text: "Theme";
+                                color: root.foreground-color;
+                                font-size: root.font-size-title;
+                            }
+                            HorizontalLayout {
+                                alignment: start;
+                                spacing: 8px;
+                                ThemedComboBox {
+                                    width: 200px;
+                                    model: root.theme-names;
+                                    current-index: root.theme-index;
+                                    foreground-color: root.foreground-color;
+                                    background-color: root.background-color;
+                                    muted-color: root.muted-color;
+                                    border-color: root.border-color;
+                                    selection-color: root.selection-color;
+                                    highlight-color: root.highlight-color;
+                                    font-size: root.font-size-title;
+                                    selected(value) => {
+                                        root.set-theme(value);
+                                    }
+                                }
+                                // Picks up on-disk edits without re-selecting.
+                                reload-touch := TouchArea {
+                                    width: 110px;
+                                    height: 28px;
+                                    clicked => {
+                                        root.reload-theme();
+                                    }
+                                    Rectangle {
+                                        background: root.selection-color;
+                                        border-radius: 4px;
+                                        border-width: 1px;
+                                        border-color: reload-touch.has-hover ? root.highlight-color : root.border-color;
+                                        Text {
+                                            text: "Reload theme";
+                                            color: root.foreground-color;
+                                            font-size: root.font-size-subtitle;
+                                            vertical-alignment: center;
+                                            horizontal-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+                            Text {
+                                text: "Themes live as .toml files in the themes/ folder of the config dir. \"default\" is the builtin. The list refreshes when you open Settings; Reload re-applies on-disk edits to the selected theme.";
                                 color: root.muted-color;
                                 font-size: root.font-size-subtitle;
                                 wrap: word-wrap;
@@ -437,18 +503,20 @@ export component SettingsView {
                             }
                             HorizontalLayout {
                                 alignment: start;
-                                ComboBox {
+                                ThemedComboBox {
                                     width: 160px;
                                     model: ["Auto", "Dark", "Light"];
-                                    // Two-way: a plain `:` binding gets
-                                    // severed on the first user pick.
-                                    current-value <=> root.theme-mode;
-                                    // ComboBoxBase keeps current-index
-                                    // independent of current-value, so
-                                    // derive it from the saved string.
+                                    // Derived from the string the controller refreshes on pick.
                                     current-index: root.theme-mode == "Dark" ? 1
                                         : root.theme-mode == "Light" ? 2
                                         : 0;
+                                    foreground-color: root.foreground-color;
+                                    background-color: root.background-color;
+                                    muted-color: root.muted-color;
+                                    border-color: root.border-color;
+                                    selection-color: root.selection-color;
+                                    highlight-color: root.highlight-color;
+                                    font-size: root.font-size-title;
                                     selected(value) => {
                                         root.set-theme-mode(value);
                                     }
@@ -489,7 +557,7 @@ export component SettingsView {
                                 }
                             }
                             Text {
-                                text: "Opens the platform config dir in Finder. Holds settings.toml, theme.toml, and per-plugin overrides.";
+                                text: "Opens the platform config dir in Finder. Holds settings.toml, the themes/ folder, and per-plugin overrides.";
                                 color: root.muted-color;
                                 font-size: root.font-size-subtitle;
                                 wrap: word-wrap;
