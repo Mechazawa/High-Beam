@@ -1,7 +1,7 @@
 {
   "name": "app-launcher",
   "displayName": "App Launcher",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Find and open installed applications",
   "debounceMs": 100,
   "timeoutMs": 800,

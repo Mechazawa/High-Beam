@@ -16,18 +16,29 @@ function dirEntry(path, name) {
     return { name, path, isFile: false, isDir: true };
 }
 
+function fileEntry(path, name) {
+    return { name, path, isFile: true, isDir: false };
+}
+
 const MAC_FIXTURES = {
     '/Applications': [
         dirEntry('/Applications/Safari.app', 'Safari.app'),
         dirEntry('/Applications/Calculator.app', 'Calculator.app'),
-        dirEntry('/Applications/README.txt', 'README.txt'),
+        fileEntry('/Applications/README.txt', 'README.txt'),
     ],
     '/System/Applications': [
         dirEntry('/System/Applications/Terminal.app', 'Terminal.app'),
+        dirEntry('/System/Applications/Utilities', 'Utilities'),
+    ],
+    '/System/Applications/Utilities': [
+        dirEntry(
+            '/System/Applications/Utilities/Activity Monitor.app',
+            'Activity Monitor.app',
+        ),
     ],
     '/System/Library/CoreServices': [
         dirEntry('/System/Library/CoreServices/Finder.app', 'Finder.app'),
-        dirEntry(
+        fileEntry(
             '/System/Library/CoreServices/SystemUIServer',
             'SystemUIServer',
         ),
@@ -147,6 +158,17 @@ describe('app-launcher macOS', () => {
         );
         // README.txt would match "readme" if not filtered.
         expect(results).toEqual([]);
+    });
+
+    test('descends into subdirs like /System/Applications/Utilities', async () => {
+        const { plugin } = await loadPlugin();
+        const results = await collect(
+            plugin.query('activity', { aborted: false }),
+        );
+        expect(results.length).toBeGreaterThan(0);
+        expect(results[0].key).toBe(
+            '/System/Applications/Utilities/Activity Monitor.app',
+        );
     });
 });
 
