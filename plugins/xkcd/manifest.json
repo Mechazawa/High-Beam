@@ -1,7 +1,7 @@
 {
   "name": "xkcd",
   "displayName": "xkcd",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Find xkcd comics — `xkcd <num>`, `xkcd latest`, `xkcd random`, `xkcd <text>` (title search). The full title index rebuilds automatically on install / update.",
   "debounceMs": 200,
   "timeoutMs": 120000,
