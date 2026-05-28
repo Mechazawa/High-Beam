@@ -23,6 +23,7 @@ use crate::ui::{ResultRow, ViewBlock};
 use crate::views::{PushError, ViewFrame, ViewStack};
 use crate::window;
 
+use super::host_view::{self as host_view_mod, HostView};
 use super::{ConfirmState, HostMessage};
 
 /// Aggregate of plugin-result + confirm + history state threaded into
@@ -36,6 +37,7 @@ pub(super) struct WindowCallbackCtx {
     pub history_db: Option<QueryHistoryDb>,
     pub history_state: Arc<Mutex<QueryHistoryState>>,
     pub view_stack: Arc<Mutex<ViewStack>>,
+    pub host_view: HostView,
 }
 
 // Window callback wiring is a flat sequence of per-callback blocks;
@@ -56,6 +58,7 @@ pub(super) fn wire_window_callbacks(
         history_db,
         history_state,
         view_stack,
+        host_view,
     } = ctx;
 
     let latest_id_for_main = Arc::clone(latest_id);
@@ -90,6 +93,7 @@ pub(super) fn wire_window_callbacks(
     let history_state_for_invoke = Arc::clone(&history_state);
     let settings_for_invoke = settings.clone();
     let view_stack_for_invoke = Arc::clone(&view_stack);
+    let host_view_for_invoke = Arc::clone(&host_view);
 
     window.on_invoke_selected(move |meta, control, shift, alt| {
         let mods = (u8::from(meta) * crate::hotkey::MOD_META)
@@ -107,6 +111,7 @@ pub(super) fn wire_window_callbacks(
             history_db_for_invoke.as_ref(),
             &history_state_for_invoke,
             &view_stack_for_invoke,
+            &host_view_for_invoke,
             alt_held,
         );
     });
@@ -117,12 +122,15 @@ pub(super) fn wire_window_callbacks(
     // hiding the launcher. The frame's close_signal fires (so the
     // plugin's JS unmounted runs); when the last frame leaves the
     // stack pop_view_frame switches the window back to VIEW-QUERY.
+    // A live host view (e.g. update progress) takes precedence and
+    // closes before the JS stack is touched.
     let weak_for_pop = window.as_weak();
     let view_stack_for_pop = Arc::clone(&view_stack);
+    let host_view_for_pop = Arc::clone(&host_view);
     let tx_for_pop = tx.clone();
 
     window.on_pop_view(move || {
-        pop_view_frame(&view_stack_for_pop, &tx_for_pop, &weak_for_pop);
+        pop_view_frame(&host_view_for_pop, &view_stack_for_pop, &tx_for_pop, &weak_for_pop);
     });
 
     // Fires just before the launcher hides for any reason (Esc on
@@ -130,11 +138,17 @@ pub(super) fn wire_window_callbacks(
     // stack so every per-view spawn_view task gets its unmounted
     // hook called before its QuickJS context is torn down.
     let view_stack_for_clear = Arc::clone(&view_stack);
+    let host_view_for_clear = Arc::clone(&host_view);
     let tx_for_clear = tx.clone();
     let weak_for_clear = window.as_weak();
 
     window.on_clear_view_stack(move || {
-        clear_view_stack_for_hide(&view_stack_for_clear, &tx_for_clear, &weak_for_clear);
+        clear_view_stack_for_hide(
+            &host_view_for_clear,
+            &view_stack_for_clear,
+            &tx_for_clear,
+            &weak_for_clear,
+        );
     });
 
     // Block-level events from inside a pushed view (button click,
@@ -179,18 +193,30 @@ pub(super) fn wire_window_callbacks(
 
     // Install — confirmed.
     let confirm_state_install = Arc::clone(&confirm_state);
+    let host_view_for_confirm_install = Arc::clone(&host_view);
     let weak_confirm_install = window.as_weak();
 
     window.on_confirm_install(move || {
-        send_confirm_decision(&confirm_state_install, true, &weak_confirm_install);
+        send_confirm_decision(
+            &confirm_state_install,
+            &host_view_for_confirm_install,
+            true,
+            &weak_confirm_install,
+        );
     });
 
     // Install — cancelled.
     let confirm_state_cancel = confirm_state;
+    let host_view_for_confirm_cancel = Arc::clone(&host_view);
     let weak_confirm_cancel = window.as_weak();
 
     window.on_confirm_cancel(move || {
-        send_confirm_decision(&confirm_state_cancel, false, &weak_confirm_cancel);
+        send_confirm_decision(
+            &confirm_state_cancel,
+            &host_view_for_confirm_cancel,
+            false,
+            &weak_confirm_cancel,
+        );
     });
 }
 
@@ -276,8 +302,9 @@ fn apply_history_text(window: &QueryWindow, text: &str) {
 }
 
 /// Pull the pending oneshot sender out of `confirm_state` and send `decision`.
-/// Then restore the launcher view so the UI isn't left on the confirm screen.
-fn send_confirm_decision(state: &ConfirmState, decision: bool, weak: &slint::Weak<QueryWindow>) {
+/// Then restore the originating view (launcher by default, host view when
+/// one is live — e.g. during the `update` flow's per-plugin cap prompts).
+fn send_confirm_decision(state: &ConfirmState, host_view: &HostView, decision: bool, weak: &slint::Weak<QueryWindow>) {
     let maybe_tx = match state.lock() {
         Ok(mut guard) => guard.take().map(|p| p.tx),
         Err(err) => {
@@ -290,9 +317,13 @@ fn send_confirm_decision(state: &ConfirmState, decision: bool, weak: &slint::Wea
         tx.send(decision)
             .log_debug("confirm: pending receiver gone before decision");
     }
+    let host_view_active = host_view.lock().is_ok_and(|g| g.is_some());
+    let host_view = Arc::clone(host_view);
     let weak = weak.clone();
     slint::invoke_from_event_loop(move || {
-        if let Some(w) = weak.upgrade() {
+        if host_view_active {
+            host_view_mod::paint(&host_view, &weak);
+        } else if let Some(w) = weak.upgrade() {
             w.invoke_show_query();
         }
     })
@@ -311,6 +342,7 @@ fn invoke_selected(
     history_db: Option<&QueryHistoryDb>,
     history_state: &Arc<Mutex<QueryHistoryState>>,
     view_stack: &Arc<Mutex<ViewStack>>,
+    host_view: &HostView,
     alt_held: bool,
 ) {
     let Some(w) = weak.upgrade() else { return };
@@ -390,7 +422,10 @@ fn invoke_selected(
                     push_view_frame(view_stack, host_tx, &plugin_name, handle, props, reset);
                 }
                 actions::ActionOutcome::CloseView => {
-                    pop_view_frame(view_stack, host_tx, weak);
+                    pop_view_frame(host_view, view_stack, host_tx, weak);
+                }
+                actions::ActionOutcome::ShowUpdateView => {
+                    open_update_view(host_view, host_tx, &w);
                 }
             }
         }
@@ -401,15 +436,47 @@ fn invoke_selected(
     }
 }
 
+/// Seed the host view slot with a fresh [`UpdateViewState`], paint the
+/// initial "Checking…" frame, and post `HostMessage::UpdateAll` so the
+/// runtime thread starts walking plugins. Replaces any existing host
+/// view (firing its cancel token first) so two rapid Enters don't
+/// stack updates.
+fn open_update_view(host_view: &HostView, host_tx: &mpsc::UnboundedSender<HostMessage>, window: &QueryWindow) {
+    {
+        let Ok(mut guard) = host_view.lock() else {
+            tracing::error!("update: host_view lock poisoned on open");
+            return;
+        };
+        if let Some(prev) = guard.take() {
+            prev.cancel_token().cancel();
+        }
+        *guard = Some(host_view_mod::HostViewState::Update(
+            host_view_mod::UpdateViewState::new(),
+        ));
+    }
+    // Initial paint so the user sees the view immediately even before the
+    // runtime thread fetches the plugin list.
+    let weak = window.as_weak();
+    host_view_mod::paint(host_view, &weak);
+
+    if host_tx.send(HostMessage::UpdateAll).is_err() {
+        tracing::error!("update: runtime thread exited; UpdateAll dropped");
+    }
+}
+
 /// Drain every frame off the view stack, sending
 /// [`HostMessage::ViewClose`] for each so the per-view `spawn_view`
 /// tasks run `unmounted` + tear down their JS state. Switches the
-/// window back to `VIEW-QUERY` once the stack is empty. Idempotent.
+/// window back to `VIEW-QUERY` once the stack is empty. Also clears
+/// any live host view (firing its cancel token). Idempotent.
 fn clear_view_stack_for_hide(
+    host_view: &HostView,
     view_stack: &Arc<Mutex<ViewStack>>,
     host_tx: &mpsc::UnboundedSender<HostMessage>,
     weak: &slint::Weak<QueryWindow>,
 ) {
+    let host_view_was_live = take_host_view(host_view);
+
     let popped: Vec<ViewFrame> = {
         let Ok(mut stack) = view_stack.lock() else {
             tracing::error!("views: stack lock poisoned; clear dropped");
@@ -418,7 +485,7 @@ fn clear_view_stack_for_hide(
         stack.clear()
     };
 
-    if popped.is_empty() {
+    if popped.is_empty() && !host_view_was_live {
         return;
     }
     for frame in &popped {
@@ -432,11 +499,31 @@ fn clear_view_stack_for_hide(
             tracing::error!("views: runtime thread exited; view close dropped during clear");
         }
     }
-    tracing::info!(count = popped.len(), "views: stack drained on launcher hide",);
+    tracing::info!(
+        count = popped.len(),
+        host_view_was_live,
+        "views: stack drained on launcher hide",
+    );
 
     if let Some(window) = weak.upgrade() {
         sync_view_blocks_model(&window, Vec::new());
         window.invoke_show_query();
+    }
+}
+
+/// Take the host view slot's contents, firing its cancel token. Returns
+/// `true` when a view was actually live, so callers know whether to
+/// switch the window back to VIEW-QUERY.
+fn take_host_view(host_view: &HostView) -> bool {
+    let Ok(mut guard) = host_view.lock() else {
+        tracing::error!("host_view: lock poisoned; take skipped");
+        return false;
+    };
+    if let Some(state) = guard.take() {
+        state.cancel_token().cancel();
+        true
+    } else {
+        false
     }
 }
 
@@ -847,12 +934,15 @@ fn handle_view_dispatch(
             push_view_frame(view_stack, host_tx, plugin, handle, props, reset);
         }
         actions::ActionOutcome::CloseView => {
-            pop_view_frame(view_stack, host_tx, weak);
+            // A JS view dispatching closeView can only target itself —
+            // host views aren't reachable from JS, so skip the host-view
+            // precedence check the Esc-keypath does.
+            pop_js_view_frame(view_stack, host_tx, weak);
         }
         actions::ActionOutcome::OpenSettingsView => {
             tracing::warn!(%plugin, "views: dispatch of openSettings ignored — would tear down the view");
         }
-        actions::ActionOutcome::HostTask(_) => {
+        actions::ActionOutcome::HostTask(_) | actions::ActionOutcome::ShowUpdateView => {
             tracing::warn!(%plugin, "views: dispatch of host task ignored");
         }
     }
@@ -978,7 +1068,31 @@ fn push_view_frame(
 /// back to the launcher view. A no-op on an empty stack (and not an
 /// error — a stale `closeView` after the user already Esc'd out is a
 /// benign race).
+///
+/// A live host view takes precedence: closing it fires its cancel token
+/// (aborting whatever Rust task drives it) and routes back to the
+/// launcher without touching the JS stack.
 fn pop_view_frame(
+    host_view: &HostView,
+    view_stack: &Arc<Mutex<ViewStack>>,
+    host_tx: &mpsc::UnboundedSender<HostMessage>,
+    weak: &slint::Weak<QueryWindow>,
+) {
+    if take_host_view(host_view) {
+        if let Some(window) = weak.upgrade() {
+            sync_view_blocks_model(&window, Vec::new());
+            window.invoke_show_query();
+        }
+        return;
+    }
+    pop_js_view_frame(view_stack, host_tx, weak);
+}
+
+/// JS-stack pop only — host views are out of scope. Used by
+/// `handle_view_dispatch` since a JS view can't legitimately close a
+/// host view, and by the host-aware [`pop_view_frame`] after it has
+/// verified there's no host view to take.
+fn pop_js_view_frame(
     view_stack: &Arc<Mutex<ViewStack>>,
     host_tx: &mpsc::UnboundedSender<HostMessage>,
     weak: &slint::Weak<QueryWindow>,
