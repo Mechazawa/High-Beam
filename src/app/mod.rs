@@ -287,7 +287,7 @@ fn spawn_runtime_thread(
                                 &view_stack,
                                 &weak,
                                 "update view",
-                                ShowQueryAfter::No,
+                                false,
                             );
                             // Bump the query id for the same stale-yield
                             // reason as HostMessage::Task — even though the
@@ -386,7 +386,7 @@ fn tear_down_views(
 ) {
     let host_view_was_live = if let Ok(mut guard) = host_view.lock() {
         if let Some(state) = guard.take() {
-            state.cancel_token().cancel();
+            state.cancel.cancel();
             true
         } else {
             false
@@ -400,28 +400,15 @@ fn tear_down_views(
         view_stack,
         weak,
         reason,
-        ShowQueryAfter::Yes {
-            include_when_stack_empty: host_view_was_live,
-        },
+        host_view_was_live,
     );
 }
 
-/// What to do with `current-view` once JS-stack teardown finishes.
-#[derive(Clone, Copy)]
-enum ShowQueryAfter {
-    /// Switch the window to VIEW-QUERY. If the JS stack was empty,
-    /// `include_when_stack_empty` decides whether to still send the
-    /// show-query (true when a host view was live and just got closed).
-    Yes { include_when_stack_empty: bool },
-    /// Don't touch `current-view` — the caller (typically the update
-    /// flow) wants the host view it seeded to stay visible.
-    No,
-}
-
 /// JS-stack teardown — fires close signals, drains the stack, optionally
-/// flips the window back to VIEW-QUERY. The update flow uses this with
-/// `route_back_to_query = false` so the host view it just seeded keeps
-/// VIEW-VIEWS on screen.
+/// flips the window back to VIEW-QUERY. The update flow passes
+/// `route_back_when_idle = false` so the host view it just seeded keeps
+/// VIEW-VIEWS on screen; the install/reload flow passes `true` to bring
+/// the launcher back into view when a host view was just closed.
 fn tear_down_js_views(
     view_close_signals: &mut std::collections::HashMap<(String, u64), CancellationToken>,
     view_event_senders: &mut std::collections::HashMap<
@@ -431,7 +418,7 @@ fn tear_down_js_views(
     view_stack: &Arc<Mutex<ViewStack>>,
     weak: &slint::Weak<QueryWindow>,
     reason: &'static str,
-    show_query_after: ShowQueryAfter,
+    route_back_when_idle: bool,
 ) {
     for ((plugin, handle), signal) in view_close_signals.drain() {
         tracing::info!(%plugin, handle, %reason, "views: tearing down");
@@ -440,12 +427,7 @@ fn tear_down_js_views(
     view_event_senders.clear();
 
     let stack_was_non_empty = !view_stack.lock().map_or(true, |s| s.depth() == 0);
-    let route_back = match show_query_after {
-        ShowQueryAfter::Yes {
-            include_when_stack_empty,
-        } => stack_was_non_empty || include_when_stack_empty,
-        ShowQueryAfter::No => false,
-    };
+    let route_back = stack_was_non_empty || route_back_when_idle;
 
     if !stack_was_non_empty && !route_back {
         return;

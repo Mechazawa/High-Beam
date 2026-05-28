@@ -7,19 +7,14 @@
 //! same Slint surface but originate in Rust, where there's no plugin
 //! context to drive a render loop. This module owns those flows.
 //!
-//! Shape: `HostView` holds a single optional state value. While `Some`,
+//! Shape: [`HostView`] holds a single optional state value. While `Some`,
 //! the host view is "live" — it owns `current-view = VIEW-VIEWS` and any
 //! Esc / hide event closes it (firing its `cancel` token so the Rust task
 //! producing updates bails) instead of falling through to the JS plugin
 //! view stack.
-//!
-//! Today the only flavour is [`UpdateViewState`] (multi-plugin update
-//! progress). The enum-of-state shape leaves room for future host-driven
-//! views without re-plumbing the slot.
 
 use std::sync::{Arc, Mutex};
 
-use slint::{ModelRc, VecModel};
 use tokio_util::sync::CancellationToken;
 
 use crate::QueryWindow;
@@ -27,27 +22,11 @@ use crate::logging::LogErr;
 use crate::ui::ViewBlock;
 
 /// Shared slot. `None` when no host view is live.
-pub(super) type HostView = Arc<Mutex<Option<HostViewState>>>;
+pub(super) type HostView = Arc<Mutex<Option<UpdateViewState>>>;
 
 /// Build a fresh empty slot for `AppState::start`.
 pub(super) fn new_slot() -> HostView {
     Arc::new(Mutex::new(None))
-}
-
-/// Variants of host-driven view. Only one is live at a time — the
-/// `HostView` slot stores `Option<HostViewState>`.
-pub(super) enum HostViewState {
-    Update(UpdateViewState),
-}
-
-impl HostViewState {
-    /// Cancellation token to fire when the view closes. Propagates to the
-    /// Rust task producing state mutations so it can bail early.
-    pub(super) fn cancel_token(&self) -> CancellationToken {
-        match self {
-            HostViewState::Update(s) => s.cancel.clone(),
-        }
-    }
 }
 
 /// Per-plugin update progress, painted as a single view-frame.
@@ -116,9 +95,7 @@ pub(super) fn paint(slot: &HostView, weak: &slint::Weak<QueryWindow>) {
     };
     let Some(state) = guard.as_ref() else { return };
 
-    match state {
-        HostViewState::Update(s) => paint_update(&window, s),
-    }
+    paint_update(&window, state);
 }
 
 /// Schedule a `paint` on the Slint event loop. Safe to call from the
@@ -205,7 +182,10 @@ fn paint_update(window: &QueryWindow, state: &UpdateViewState) {
 
     window.set_view_frame_title("Update plugins".into());
     window.set_view_has_title(true);
-    window.set_view_blocks(ModelRc::new(VecModel::from(blocks)));
+    // Reuse the same persistent VecModel JS view paints use — keeps the
+    // Slint child elements alive across status mutations instead of
+    // rebuilding every block on every paint.
+    super::callbacks::sync_view_blocks_model(window, blocks);
     window.invoke_show_view_frame();
 }
 
@@ -236,42 +216,18 @@ fn text_block(kind: &'static str, text: &str, tone: &str, size: &str) -> ViewBlo
         has_text: !text.is_empty(),
         tone: tone.into(),
         size: size.into(),
-        label: String::new().into(),
-        has_label: false,
-        value: String::new().into(),
-        has_value: false,
-        id: String::new().into(),
-        on_click_id: 0,
-        on_change_id: 0,
-        on_submit_id: 0,
-        has_on_click: false,
-        has_on_change: false,
-        has_on_submit: false,
         progress_value: -1.0,
-        has_progress_value: false,
+        ..ViewBlock::default()
     }
 }
 
 fn spinner_block(label: &str) -> ViewBlock {
     ViewBlock {
         kind: "spinner".into(),
-        text: String::new().into(),
-        has_text: false,
-        tone: String::new().into(),
-        size: String::new().into(),
         label: label.into(),
         has_label: !label.is_empty(),
-        value: String::new().into(),
-        has_value: false,
-        id: String::new().into(),
-        on_click_id: 0,
-        on_change_id: 0,
-        on_submit_id: 0,
-        has_on_click: false,
-        has_on_change: false,
-        has_on_submit: false,
         progress_value: -1.0,
-        has_progress_value: false,
+        ..ViewBlock::default()
     }
 }
 
@@ -280,23 +236,9 @@ fn progress_block(value: f64) -> ViewBlock {
     let has_value = value >= 0.0;
     ViewBlock {
         kind: "progress".into(),
-        text: String::new().into(),
-        has_text: false,
-        tone: String::new().into(),
-        size: String::new().into(),
-        label: String::new().into(),
-        has_label: false,
-        value: String::new().into(),
-        has_value: false,
-        id: String::new().into(),
-        on_click_id: 0,
-        on_change_id: 0,
-        on_submit_id: 0,
-        has_on_click: false,
-        has_on_change: false,
-        has_on_submit: false,
         progress_value: if has_value { value.clamp(0.0, 1.0) as f32 } else { -1.0 },
         has_progress_value: has_value,
+        ..ViewBlock::default()
     }
 }
 

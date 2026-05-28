@@ -32,7 +32,7 @@ use crate::settings_ui::SettingsController;
 use crate::ui::ConfirmCapRow;
 
 use super::ConfirmState;
-use super::host_view::{self, EntryStatus, HostView, HostViewState, UpdateEntry, UpdateSummary};
+use super::host_view::{self, EntryStatus, HostView, UpdateEntry, UpdateSummary};
 
 /// Stable-key stream of progress rows shared with the launcher's result
 /// list. Re-emitting a key replaces the previous row in place, so the
@@ -561,7 +561,7 @@ pub(super) async fn run_update_view(
 ) {
     let plugins = registry.snapshot().await;
     let cancel = match host_view.lock() {
-        Ok(g) => g.as_ref().map(host_view::HostViewState::cancel_token),
+        Ok(g) => g.as_ref().map(|s| s.cancel.clone()),
         Err(err) => {
             tracing::error!(%err, "update: host_view lock poisoned at start");
             return;
@@ -575,6 +575,19 @@ pub(super) async fn run_update_view(
     seed_update_entries(&host_view, &weak, &plugins);
 
     let mut tally = UpdateTally::default();
+    // install_pipeline writes progress rows through ProgressEmitter; we
+    // wire a silent one so those writes don't clobber the real launcher
+    // result list (which becomes visible again the moment the user Escs
+    // out of the update view). `query_id = 0` against a pre-bumped
+    // latest_id of 1 makes every emit() short-circuit on the stale-check
+    // at the top of `ProgressEmitter::emit`. Hoisting it out of the loop
+    // avoids 16+ pointless allocations per update run.
+    let silent_progress = ProgressEmitter::new(
+        0,
+        weak.clone(),
+        Arc::new(Mutex::new(Vec::new())),
+        Arc::new(AtomicU64::new(1)),
+    );
 
     for plugin in plugins {
         if cancel.is_cancelled() {
@@ -588,6 +601,7 @@ pub(super) async fn run_update_view(
             registry,
             &confirm_state,
             settings,
+            &silent_progress,
             &mut tally,
         )
         .await;
@@ -652,6 +666,7 @@ async fn process_one_update(
     registry: &PluginRegistry,
     confirm_state: &ConfirmState,
     settings: &SettingsController,
+    silent_progress: &ProgressEmitter,
     tally: &mut UpdateTally,
 ) {
     let name = plugin.manifest.name.clone();
@@ -696,25 +711,12 @@ async fn process_one_update(
     let needs_prompt = crate::confirm::update_needs_prompt(&remote.capabilities, &installed_caps);
     let caps_arg: Option<&[String]> = needs_prompt.then_some(&installed_caps);
 
-    // install_pipeline writes progress rows through ProgressEmitter; we
-    // wire a silent one here so those writes don't clobber the real
-    // launcher result list (which becomes visible again the moment the
-    // user Escs out of the update view). Setting `query_id = 0` against
-    // a latest_id pre-bumped to 1 makes every emit() short-circuit on
-    // the stale-check at the top of ProgressEmitter::emit.
-    let row_progress = ProgressEmitter::new(
-        0,
-        weak.clone(),
-        Arc::new(Mutex::new(Vec::new())),
-        Arc::new(AtomicU64::new(1)),
-    );
-
     let result = install_pipeline(
         &manifest_url,
         &format!("update-{name}"),
         caps_arg,
         registry,
-        &row_progress,
+        silent_progress,
         confirm_state,
         weak,
         settings,
@@ -757,7 +759,7 @@ where
             tracing::error!("update: host_view lock poisoned during update");
             return;
         };
-        let Some(HostViewState::Update(state)) = guard.as_mut() else {
+        let Some(state) = guard.as_mut() else {
             return;
         };
         mutate(state);

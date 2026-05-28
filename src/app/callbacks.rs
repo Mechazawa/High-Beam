@@ -448,11 +448,9 @@ fn open_update_view(host_view: &HostView, host_tx: &mpsc::UnboundedSender<HostMe
             return;
         };
         if let Some(prev) = guard.take() {
-            prev.cancel_token().cancel();
+            prev.cancel.cancel();
         }
-        *guard = Some(host_view_mod::HostViewState::Update(
-            host_view_mod::UpdateViewState::new(),
-        ));
+        *guard = Some(host_view_mod::UpdateViewState::new());
     }
     // Initial paint so the user sees the view immediately even before the
     // runtime thread fetches the plugin list.
@@ -520,7 +518,7 @@ fn take_host_view(host_view: &HostView) -> bool {
         return false;
     };
     if let Some(state) = guard.take() {
-        state.cancel_token().cancel();
+        state.cancel.cancel();
         true
     } else {
         false
@@ -742,7 +740,7 @@ fn paint_view_tree(plugin: &str, handle: u64, tree_json: &str, weak: &slint::Wea
 /// instances survive across re-renders. Replacing the whole
 /// `ModelRc` (the previous behaviour) rebuilt every child, which
 /// stole focus from an Input mid-typing on every keystroke.
-fn sync_view_blocks_model(window: &QueryWindow, blocks: Vec<ViewBlock>) {
+pub(super) fn sync_view_blocks_model(window: &QueryWindow, blocks: Vec<ViewBlock>) {
     // One persistent model per Slint thread (which is also the only
     // thread that calls this).
     thread_local! {
