@@ -13,10 +13,11 @@
 // (row height, icon size, input padding) remain inline — theming layout is
 // out of scope for v1.
 
-import { ResultRow, PluginSlot, PluginOption, ConfirmCapRow } from "types.slint";
+import { ResultRow, PluginSlot, PluginOption, ConfirmCapRow, ViewBlock } from "types.slint";
 import { LauncherView } from "launcher_view.slint";
 import { SettingsView } from "settings_view.slint";
 import { ConfirmView } from "confirm_view.slint";
+import { ViewFrameView } from "view_frame.slint";
 
 export component QueryWindow inherits Window {
     title: "High Beam";
@@ -31,11 +32,22 @@ export component QueryWindow inherits Window {
     in-out property <int> selected-index: 0;
     in-out property <int> max-rows: 9;
 
-    // View state. 0 = launcher (query), 1 = settings, 2 = install confirm.
+    // View state. 0 = launcher (query), 1 = settings, 2 = install confirm,
+    // 3 = plugin view frame (top of the view stack).
     property <int> VIEW-QUERY: 0;
     property <int> VIEW-SETTINGS: 1;
     property <int> VIEW-CONFIRM: 2;
+    property <int> VIEW-VIEWS: 3;
     in-out property <int> current-view: 0;
+
+    // Plugin view-frame state (rendered when `current-view == VIEW-VIEWS`).
+    // The tree the plugin returned from `render()` is flattened on the
+    // Rust side into an ordered list of blocks the Slint renderer
+    // iterates. `frame-title` corresponds to the optional `title` field
+    // on the rendered ViewNode.
+    in-out property <[ViewBlock]> view-blocks: [];
+    in-out property <string> view-frame-title: "";
+    in-out property <bool> view-has-title: false;
 
     // Settings view state.
     in-out property <[PluginSlot]> plugin-slots: [];
@@ -112,6 +124,13 @@ export component QueryWindow inherits Window {
     in-out property <color> highlight-color: #0a84ff;
     in-out property <color> selection-color: #0a84ff33;
     in-out property <color> border-color: #00000010;
+    // Tone colours for plugin-view block rendering. Same Rust ->
+    // Slint flow as the other tokens; defaults reproduce the macOS
+    // system palette so a theme that doesn't override them paints
+    // reasonable error/success/warning text + buttons.
+    in-out property <color> error-color: #d70015;
+    in-out property <color> success-color: #0c8430;
+    in-out property <color> warning-color: #b75f00;
     in-out property <string> font-family: "";
     in-out property <length> font-size-query: 32px;
     in-out property <length> font-size-title: 14px;
@@ -133,6 +152,28 @@ export component QueryWindow inherits Window {
 
     callback query-edited(string);
     callback escape-pressed();
+    // Fires from ViewFrameView when the user presses Esc inside a
+    // pushed plugin view. The Rust side pops the top frame from the
+    // view stack (which fires the JS unmounted via the close-signal
+    // and returns the window to VIEW-QUERY when the stack drains).
+    callback pop-view();
+    // Fires from window.rs just before the launcher hides (Esc on
+    // root, focus loss, action-induced). The Rust side drains the
+    // view stack, sending HostMessage::ViewClose for each frame so
+    // every per-view spawn_view task runs unmounted before its
+    // QuickJS context is torn down. Idempotent on an empty stack.
+    callback clear-view-stack();
+    // Fires when the user clicks a Button (or activates a Row) in a
+    // pushed view. Carries the callback id the SDK substituted into
+    // the rendered tree; Rust resolves it back to the originating
+    // plugin/view and posts a HostMessage::ViewEvent.
+    callback view-block-clicked(int);
+    // Fires on every keystroke inside a view's Input/TextArea with an
+    // onChange handler. (callback_id, new-text).
+    callback view-block-changed(int, string);
+    // Fires when the user presses Enter inside an Input with an
+    // onSubmit handler. (callback_id, current-text).
+    callback view-block-submitted(int, string);
     // Fires from Rust just before the window hides — Esc, focus loss,
     // action-induced hide all go through it. Carries the current input text
     // so app.rs can decide whether to persist it to query history.
@@ -239,6 +280,12 @@ export component QueryWindow inherits Window {
         root.current-view = root.VIEW-QUERY;
         launcher.focus-input();
     }
+    // Switch to the plugin view-frame. Rust calls this after a
+    // ViewInit's first render arrives so the user sees the frame in
+    // place of the result list.
+    public function show-view-frame() {
+        root.current-view = root.VIEW-VIEWS;
+    }
 
     // Switch to the install-confirmation view. Rust populates the
     // `confirm-*` properties before calling this.
@@ -270,6 +317,30 @@ export component QueryWindow inherits Window {
     // Settings view geometry: wider + taller than the launcher so the plugin
     // list and option inputs both have breathing room.
     property <length> settings-height: 480px;
+    // Plugin view-frame geometry: same vertical budget as settings so a
+    // typical view (a few headings + buttons + an input) doesn't have
+    // to scroll. Views that produce more content than fits in this
+    // window still scroll via the inner ScrollView.
+    property <length> view-frame-height: 480px;
+
+    // Window height per current-view. Pulled into a pure function so
+    // the property binding stays a single name rather than a
+    // four-way ternary.
+    pure function window-height-for-view() -> length {
+        if (root.current-view == root.VIEW-SETTINGS) {
+            return settings-height;
+        }
+
+        if (root.current-view == root.VIEW-CONFIRM) {
+            return settings-height;
+        }
+
+        if (root.current-view == root.VIEW-VIEWS) {
+            return view-frame-height;
+        }
+
+        return input-height + (results.length > 0 ? rows-height + 1px : 0);
+    }
 
     // Size is *not* collapsed when `is-hidden` is true — shrinking to 1×1
     // sends `xdg_toplevel.set_max_size(1,1)` which fails Wayland's min/max
@@ -279,11 +350,7 @@ export component QueryWindow inherits Window {
     // visual result (the window background is `transparent` already, so
     // an invisible inner Rectangle paints nothing).
     width: root.window-width;
-    height: root.current-view == root.VIEW-SETTINGS
-        ? settings-height
-        : root.current-view == root.VIEW-CONFIRM
-            ? settings-height
-            : input-height + (results.length > 0 ? rows-height + 1px : 0);
+    height: root.window-height-for-view();
 
     // Translucent rounded panel sits inside a transparent window so the corner
     // radius reads cleanly on the desktop. `visible: !is-hidden` paired with
@@ -406,6 +473,35 @@ export component QueryWindow inherits Window {
             recenter-window => { root.recenter-window(); }
             open-config-dir => { root.open-config-dir(); }
             sync-rail-selection => { root.sync-rail-selection(); }
+        }
+
+        // ---- Plugin view frame ----
+        // Stage 4c: flat block renderer (Heading, Text, Spinner,
+        // ProgressBar). Interactive blocks (Button, Input, etc.) render
+        // as placeholder labels until a later stage adds them.
+        view-frame := ViewFrameView {
+            visible: root.current-view == root.VIEW-VIEWS;
+            width: parent.width;
+            height: parent.height;
+
+            frame-title <=> root.view-frame-title;
+            has-title <=> root.view-has-title;
+            blocks <=> root.view-blocks;
+
+            foreground-color: root.foreground-color;
+            muted-color: root.muted-color;
+            border-color: root.border-color;
+            highlight-color: root.highlight-color;
+            error-color: root.error-color;
+            success-color: root.success-color;
+            warning-color: root.warning-color;
+            font-size-title: root.font-size-title;
+            font-size-subtitle: root.font-size-subtitle;
+
+            pop-view => { root.pop-view(); }
+            block-clicked(id) => { root.view-block-clicked(id); }
+            block-changed(id, text) => { root.view-block-changed(id, text); }
+            block-submitted(id, text) => { root.view-block-submitted(id, text); }
         }
 
         // ---- Install-confirmation view ----

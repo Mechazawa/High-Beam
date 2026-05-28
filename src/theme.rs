@@ -102,6 +102,12 @@ pub struct Colors {
     pub highlight: Color,
     pub selection: Color,
     pub border: Color,
+    /// Tone colours for the plugin-view block set. Used by `Text`'s
+    /// `tone` prop and the matching button tones; default values
+    /// reproduce the standard macOS error/success/warning hues.
+    pub error: Color,
+    pub success: Color,
+    pub warning: Color,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -131,6 +137,9 @@ impl Default for Colors {
             highlight: parse("#007aff"),
             selection: parse("#007aff33"),
             border: parse("#00000010"),
+            error: parse("#d70015"),
+            success: parse("#0c8430"),
+            warning: parse("#b75f00"),
         }
     }
 }
@@ -148,6 +157,11 @@ impl Colors {
             highlight: parse("#007aff"),
             selection: parse("#007aff33"),
             border: parse("#ffffff10"),
+            // Tones mirror the light palette — like muted/highlight/selection
+            // above, only background/foreground/border shift for dark mode.
+            error: parse("#d70015"),
+            success: parse("#0c8430"),
+            warning: parse("#b75f00"),
         }
     }
 }
@@ -352,6 +366,9 @@ struct RawColorsOverride {
     highlight: Option<String>,
     selection: Option<String>,
     border: Option<String>,
+    error: Option<String>,
+    success: Option<String>,
+    warning: Option<String>,
 }
 
 impl RawColorsOverride {
@@ -382,6 +399,9 @@ impl RawColorsOverride {
                 &format!("{prefix}.selection"),
             )?,
             border: parse_optional(self.border.as_deref(), base.border, &format!("{prefix}.border"))?,
+            error: parse_optional(self.error.as_deref(), base.error, &format!("{prefix}.error"))?,
+            success: parse_optional(self.success.as_deref(), base.success, &format!("{prefix}.success"))?,
+            warning: parse_optional(self.warning.as_deref(), base.warning, &format!("{prefix}.warning"))?,
         })
     }
 }

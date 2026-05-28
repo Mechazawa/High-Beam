@@ -1,12 +1,21 @@
-// xkcd lookup via `xkcd <arg>`: `latest`, `random`, a number, or text
-// (fuzzy title search against a cached index). The index lives in fs.cache;
-// `onEnable` rebuilds the full archive, otherwise the first text search
-// bootstraps the latest 500 and later loads refresh incrementally.
+// xkcd comic lookup. Triggered by `xkcd <arg>`:
+//   - `xkcd latest`     → newest comic
+//   - `xkcd random`     → uniformly random comic from 1..latest
+//   - `xkcd init`       → push a view that rebuilds the full title
+//                          index, showing a live progress bar
+//   - `xkcd <number>`   → that comic by number (404 → no results)
+//   - `xkcd <text>`     → fuzzy title search against a cached index
+//
+// The title index is cached to `fs.cache` as `xkcd-index.json`. The
+// `onEnable` hook rebuilds the full archive on install / update; in the
+// meantime the first text search bootstraps the latest 500 comics (~10s)
+// and subsequent loads refresh incrementally.
 
-import { openUrl } from "highbeam:actions";
+import { openUrl, showView } from "highbeam:actions";
 import { get } from "highbeam:http";
 import { readCache, writeCache } from "highbeam:fs";
 import { fuzzy } from "highbeam:match";
+import { Heading, Text, ProgressBar, Spinner } from "highbeam:view";
 
 const TRIGGER = /^xkcd(?:\s+(.+))?$/i;
 const LATEST_URL = "https://xkcd.com/info.0.json";
@@ -93,10 +102,13 @@ function indexIsFresh(index) {
 //   - incremental (cache exists): fetch only comics newer than the
 //                                 highest `num` already cached — usually
 //                                 zero to a handful per day
-//   - full        (`xkcd index`): fetch every comic from #1 to latest,
+//   - full        (`xkcd init`):  fetch every comic from #1 to latest,
 //                                 ignoring the existing cache
+// `onProgress(completed, total)` is called after each comic fetch — the
+// init view binds it to a reactive counter so the user sees the bar
+// fill in real time.
 // Returns the index object that was persisted.
-async function buildIndex(signal, { full = false } = {}) {
+async function buildIndex(signal, { full = false, onProgress } = {}) {
     const latest = await fetchLatest(signal);
     const max = latest.num;
     const existing = full ? null : await readCachedIndex();
@@ -147,11 +159,17 @@ async function buildIndex(signal, { full = false } = {}) {
     const skip = new Set([latest.num, ...existingMap.keys()]);
 
     let cursor = 0;
+    let completed = 0;
+    const total = nums.length;
     async function worker() {
         while (cursor < nums.length) {
             const i = cursor++;
             const n = nums[i];
-            if (skip.has(n)) continue;
+            if (skip.has(n)) {
+                completed++;
+                if (onProgress) onProgress(completed, total);
+                continue;
+            }
             if (signal?.aborted) return;
             try {
                 const comic = await fetchComic(n, signal);
@@ -166,6 +184,8 @@ async function buildIndex(signal, { full = false } = {}) {
                 // Single-comic fetch failures don't block index building —
                 // we just drop the entry and continue.
             }
+            completed++;
+            if (onProgress) onProgress(completed, total);
         }
     }
 
@@ -192,6 +212,77 @@ async function getIndex(signal) {
     return buildIndex(signal);
 }
 
+// Live progress view pushed by `xkcd init`. mounted() kicks off a full
+// rebuild and ticks `completed` / `total` on each comic fetch; render()
+// turns that into a determinate progress bar. Esc cancels via the
+// host's mounted-signal — buildIndex propagates `signal.aborted` into
+// every in-flight fetch.
+const InitIndexView = {
+    setup: () => ({
+        completed: 0,
+        total: 0,
+        done: false,
+        err: null,
+        message: "Starting…",
+    }),
+
+    async mounted({ signal }) {
+        try {
+            await buildIndex(signal, {
+                full: true,
+                onProgress: (done, total) => {
+                    this.completed = done;
+                    this.total = total;
+                    this.message = `Fetched ${done} / ${total}`;
+                },
+            });
+            if (signal.aborted) return;
+            this.done = true;
+            this.message = `Index rebuilt — ${this.completed} comics cached.`;
+        } catch (e) {
+            if (e.name !== "AbortError") this.err = e;
+        }
+    },
+
+    render() {
+        if (this.err) {
+            return {
+                title: "xkcd init",
+                body: [
+                    Heading({ text: "Rebuild failed" }),
+                    Text({ text: String(this.err), tone: "error" }),
+                ],
+            };
+        }
+        const progressValue =
+            this.total > 0 ? this.completed / this.total : undefined;
+        const body = [
+            Heading({ text: "Rebuilding xkcd title index" }),
+            this.total === 0
+                ? Spinner({ label: this.message })
+                : ProgressBar({ value: progressValue, label: this.message }),
+        ];
+        if (this.done) {
+            body.push(
+                Text({
+                    text: "All done — Esc to close.",
+                    tone: "success",
+                    size: "sm",
+                }),
+            );
+        } else {
+            body.push(
+                Text({
+                    text: "Aborts cleanly on Esc.",
+                    tone: "muted",
+                    size: "sm",
+                }),
+            );
+        }
+        return { title: "xkcd init", body };
+    },
+};
+
 export async function* query(input, signal) {
     const match = TRIGGER.exec(input);
     if (!match) return;
@@ -210,6 +301,21 @@ export async function* query(input, signal) {
         const n = 1 + Math.floor(Math.random() * latest.num);
         const comic = n === latest.num ? latest : await fetchComic(n, signal);
         if (comic) yield resultFor(comic);
+        return;
+    }
+
+    if (/^init$/i.test(arg)) {
+        // Pinned + max weight so the exact input "xkcd init" lands at
+        // the top regardless of frecency or what other plugins
+        // happen to match the same string.
+        yield {
+            key: "xkcd-init",
+            title: "xkcd: rebuild title index",
+            subtitle: "Fetches every comic from #1 to latest — watch progress live",
+            weight: 100,
+            pinned: true,
+            action: showView(InitIndexView),
+        };
         return;
     }
 

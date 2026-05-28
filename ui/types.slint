@@ -37,6 +37,48 @@ export struct ConfirmCapRow {
     is-new: bool,
 }
 
+// One block in a flattened view tree. The Rust side walks the
+// rendered ViewNode and emits one entry per leaf block (Stack
+// containers contribute their children inline for v0). `kind` is
+// one of:
+//   "heading" | "text" | "spinner" | "progress" | "button" | "input"
+// Anything outside that set renders as a muted "[kind]" placeholder.
+export struct ViewBlock {
+    kind: string,
+    // Heading / Text payload — also doubles as the Button label.
+    text: string,
+    // Text tone OR button tone:
+    //   text:    "" | "muted" | "error" | "success" | "warning"
+    //   button:  "" | "default" | "primary" | "danger"
+    tone: string,
+    // Text size: "" | "sm" | "md" | "lg" | "xl".
+    size: string,
+    // Progress bar: 0..1; indeterminate sentinel < 0.
+    progress-value: float,
+    // Spinner / ProgressBar label OR Input placeholder.
+    label: string,
+    // Input controlled value (and current text seed).
+    value: string,
+    // Stable id on interactive blocks. "" when the block doesn't
+    // accept user input.
+    id: string,
+    // Callback ids substituted in by the SDK render walker. 0 means
+    // "no handler" — Slint branches on the field's truthiness via
+    // the `has-*` flags below to keep semantics explicit.
+    on-click-id: int,
+    on-change-id: int,
+    on-submit-id: int,
+    // Has-flags so Slint can branch without ambiguous empty-string
+    // comparisons.
+    has-text: bool,
+    has-label: bool,
+    has-value: bool,
+    has-progress-value: bool,
+    has-on-click: bool,
+    has-on-change: bool,
+    has-on-submit: bool,
+}
+
 // One option input in the settings detail pane. Option `kind` is one of:
 //   "string" | "bool" | "int" | "enum"
 // `value-*` columns are all populated; the matching one for `kind` is the

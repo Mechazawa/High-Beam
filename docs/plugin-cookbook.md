@@ -624,3 +624,145 @@ Diagnosis:
   `debounceMs` first (avoid the work entirely), then `timeoutMs` (give it
   longer when it does run), and only finally `memoryMb` (which is rarely
   the actual problem).
+
+## Open a plugin view from a result row
+
+Push a dynamic, stateful screen onto the launcher stack instead of running a
+one-shot action on Enter. Useful when one Enter would have to fan into "open
+this, abort that, see status" — see [views.md](./views.md) for the full
+contract.
+
+```js
+import { showView } from 'highbeam:actions';
+import { Heading, Text, Spinner } from 'highbeam:view';
+
+const Detail = {
+    setup: (props) => ({ id: props.id, data: null }),
+    async mounted({ signal }) {
+        this.data = await fetchDetail(this.id, signal);
+    },
+    render() {
+        if (!this.data) return { body: [Spinner({ label: 'Loading…' })] };
+        return { title: this.data.name, body: [
+            Heading({ text: this.data.title }),
+            Text({ text: this.data.summary }),
+        ]};
+    },
+};
+
+export async function* query(input, _signal) {
+    if (input !== 'detail') return;
+    yield {
+        key: 'open-detail',
+        title: 'Open detail view',
+        action: showView(Detail, { id: 42 }),
+    };
+}
+```
+
+The view's `setup` runs once on push; `mounted` runs after the first paint
+so the user sees the spinner before any work starts. State mutation inside
+methods (`this.data = …`) re-renders automatically.
+
+## Cancel stale in-flight requests when re-fetching
+
+Inside a view's methods, multiple async fetches can interleave. The
+naive write — assigning to `this.data` once each fetch resolves — lets a
+slow earlier call clobber a fast later one. Hold an `AbortController` per
+fetch key and abort the previous before starting a new one:
+
+```js
+methods: {
+    async load() {
+        this.loadCtrl?.abort();
+        this.loadCtrl = new AbortController();
+        this.loading = true;
+        try {
+            this.data = await http.getJson(this.url, { signal: this.loadCtrl.signal });
+        } catch (err) {
+            if (err.name !== 'AbortError') this.err = err;
+        }
+        this.loading = false;
+    },
+},
+```
+
+The host's `signal` (from `mounted({ signal })`) is also fine to pass —
+it aborts on view close. The per-fetch controller is what handles "user
+clicked Refresh while a load is mid-flight."
+
+## Pass a callback from a parent view to a child view
+
+`showView(view, props)` walks `props` and substitutes any function values
+with callback ids the same way `on*` handlers work. The child invokes
+`props.onPick(value)` and the closure fires inside the parent's reactive
+proxy — `this` is the parent's state.
+
+```js
+const Parent = {
+    setup: () => ({ picked: null }),
+    methods: {
+        pickColor() {
+            showView(ColorPicker, {
+                initial: this.picked,
+                onPick: (color) => { this.picked = color; },
+            });
+        },
+    },
+    render() {
+        return { body: [
+            Text({ text: this.picked ? `Picked: ${this.picked}` : 'Nothing picked' }),
+            Button({ label: 'Pick a colour', onClick: 'pickColor' }),
+        ]};
+    },
+};
+
+const ColorPicker = {
+    setup: (props) => ({ value: props.initial }),
+    methods: {
+        confirm() {
+            // `props.onPick` is reconstituted as a callable on the
+            // child side — calling it fires the parent's closure.
+            this.props.onPick(this.value);
+            return closeView;
+        },
+    },
+    // …
+};
+```
+
+No first-class modal-return plumbing — Stage v1 leaves it to the closure
+pattern. The pattern survives parent-popped: if the parent's frame closed
+before the child returns, the parent's `this` mutations are silently
+dropped (logged once at INFO in `plugin.log`).
+
+## Show a remote image inside a view
+
+`Image({ src })` accepts a `data:` URI only — the same rule as
+`Result.icon`. Plugins fetch via `highbeam:http` and base64-encode the
+body themselves. Watch the size: a 5 MB JPEG base64-encodes to ~7 MB of
+JS string, which blows the default 32 MB `memoryMb` cap.
+
+```js
+import { http } from 'highbeam:http';
+import { Heading, Image, Spinner } from 'highbeam:view';
+
+const Photo = {
+    setup: (props) => ({ src: null, title: props.title }),
+    async mounted({ signal }) {
+        const bytes = await http.getBytes(this.props.src, { signal });
+        this.src = `data:image/jpeg;base64,${bytes.base64}`;
+    },
+    render() {
+        if (!this.src) return { body: [Spinner({ label: 'Loading image…' })] };
+        return { title: this.title, body: [
+            Heading({ text: this.title }),
+            Image({ src: this.src, fit: 'contain' }),
+        ]};
+    },
+};
+```
+
+If your images run large, bump `memoryMb` in `manifest.json` (`64` or
+`128`) and consider caching the encoded blob via `fs.writeCache` so
+re-opens skip the download.

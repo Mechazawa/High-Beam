@@ -17,3 +17,4 @@ pub mod platform;
 pub mod settings;
 pub mod system;
 pub mod timers;
+pub mod view;

@@ -36,6 +36,7 @@ use crate::plugins::result::RankedResult;
 use crate::plugins::runtime::LoadedPlugin;
 use crate::query_history::{QueryHistoryDb, QueryHistoryState};
 use crate::settings_ui::SettingsController;
+use crate::views::ViewStack;
 
 use callbacks::WindowCallbackCtx;
 
@@ -50,9 +51,37 @@ pub struct PluginHost {
 pub(super) type ConfirmState = Arc<Mutex<Option<PendingConfirmation>>>;
 
 pub(super) enum HostMessage {
-    Query { id: u64, input: String },
+    Query {
+        id: u64,
+        input: String,
+    },
     Task(actions::HostTask),
     Shutdown,
+    /// Drive a freshly-pushed view frame through its `setup → first render
+    /// → mounted` sequence. Sent by `callbacks::push_view_frame`. The
+    /// rendered tree comes back via the JS runtime's `__highbeam_paint_tree`
+    /// bridge — painted into the launcher window from there.
+    ViewInit {
+        plugin: String,
+        handle: u64,
+        props: serde_json::Value,
+    },
+    /// User interaction with a rendered block fired a callback. Routed
+    /// to the per-view spawn task (via `view_event_senders`) which calls
+    /// `invoke_event` inside its `async_with!`.
+    ViewEvent {
+        plugin: String,
+        handle: u64,
+        callback_id: u64,
+        value: serde_json::Value,
+    },
+    /// Tear down a view frame on the JS side. Sent by
+    /// `callbacks::pop_view_frame` and by the
+    /// `__highbeam_close_view_request` bridge when `render → null`.
+    ViewClose {
+        plugin: String,
+        handle: u64,
+    },
 }
 
 /// Spin up the plugin runtime, wire callbacks to the given window, and
@@ -85,6 +114,8 @@ pub fn start(
         .unwrap_or_default();
     let history_state = Arc::new(Mutex::new(QueryHistoryState::new(initial_entries)));
 
+    let view_stack = Arc::new(Mutex::new(ViewStack::new()));
+
     spawn_runtime_thread(
         rx,
         plugins_override,
@@ -94,6 +125,8 @@ pub fn start(
         frecency_db.clone(),
         Arc::clone(&confirm_state),
         settings.clone(),
+        Arc::clone(&view_stack),
+        tx.clone(),
     )?;
 
     callbacks::wire_window_callbacks(
@@ -107,13 +140,16 @@ pub fn start(
             confirm_state,
             history_db,
             history_state,
+            view_stack,
         },
     );
 
     Ok(PluginHost { query_tx: tx })
 }
 
-#[allow(clippy::too_many_arguments)]
+// The runtime thread loop is a single coherent state machine — splitting
+// it into per-variant helpers would only add artificial seams.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn spawn_runtime_thread(
     mut rx: mpsc::UnboundedReceiver<HostMessage>,
     plugins_override: Option<PathBuf>,
@@ -123,6 +159,8 @@ fn spawn_runtime_thread(
     frecency_db: Option<FrecencyDb>,
     confirm_state: ConfirmState,
     settings: SettingsController,
+    view_stack: Arc<Mutex<ViewStack>>,
+    host_tx: mpsc::UnboundedSender<HostMessage>,
 ) -> Result<(), Box<dyn Error>> {
     thread::Builder::new()
         .name("highbeam-plugin-runtime".into())
@@ -153,6 +191,21 @@ fn spawn_runtime_thread(
                 let plugins: Vec<Arc<LoadedPlugin>> = outcomes.into_iter().map(|o| o.plugin).collect();
                 let registry = PluginRegistry::new(opts, plugins);
                 let mut current_cancel: Option<CancellationToken> = None;
+                // Per-view close signals — keyed on (plugin, handle) so a
+                // ViewClose message can wake the matching `spawn_view`
+                // task without us having to keep a handle on each task.
+                let mut view_close_signals: std::collections::HashMap<
+                    (String, u64),
+                    tokio_util::sync::CancellationToken,
+                > = std::collections::HashMap::new();
+                // Per-view event senders. The receiver lives in the
+                // spawn_view task's select! loop so events arrive
+                // serialised through the same async_with! that owns the
+                // plugin's QuickJS context.
+                let mut view_event_senders: std::collections::HashMap<
+                    (String, u64),
+                    mpsc::UnboundedSender<crate::plugins::runtime::ViewEventEnvelope>,
+                > = std::collections::HashMap::new();
 
                 while let Some(msg) = rx.recv().await {
                     match msg {
@@ -181,6 +234,36 @@ fn spawn_runtime_thread(
                             if let Some(prev) = current_cancel.take() {
                                 prev.cancel();
                             }
+                            // Any host task (reload / install / update)
+                            // can swap the QuickJS context a view is
+                            // attached to. Tear down every open frame
+                            // first so plugins get a clean `unmounted`
+                            // call before their old context dies.
+                            for ((plugin, handle), signal) in view_close_signals.drain() {
+                                tracing::info!(
+                                    %plugin,
+                                    handle,
+                                    reason = "host task",
+                                    "views: tearing down",
+                                );
+                                signal.cancel();
+                            }
+                            view_event_senders.clear();
+
+                            if !view_stack.lock().map_or(true, |s| s.depth() == 0) {
+                                let view_stack_for_clear = Arc::clone(&view_stack);
+                                let weak_for_clear = weak.clone();
+                                slint::invoke_from_event_loop(move || {
+                                    if let Ok(mut stack) = view_stack_for_clear.lock() {
+                                        stack.clear();
+                                    }
+
+                                    if let Some(w) = weak_for_clear.upgrade() {
+                                        w.invoke_show_query();
+                                    }
+                                })
+                                .log_debug("views: host-task stack clear");
+                            }
                             // Bump the query id so any stale yield from the
                             // last keystroke can't paint over the progress
                             // rows the task is about to push.
@@ -200,6 +283,56 @@ fn spawn_runtime_thread(
                                 &settings,
                             )
                             .await;
+                        }
+                        HostMessage::ViewInit { plugin, handle, props } => {
+                            let plugins = registry.snapshot().await;
+
+                            if let Some(p) = plugins.iter().find(|p| p.manifest.name == plugin) {
+                                let bridge = callbacks::build_view_bridge(
+                                    &plugin,
+                                    Arc::clone(&view_stack),
+                                    host_tx.clone(),
+                                    &weak,
+                                );
+                                let (event_tx, event_rx) = mpsc::unbounded_channel();
+                                view_close_signals.insert((plugin.clone(), handle), bridge.close_signal.clone());
+                                view_event_senders.insert((plugin.clone(), handle), event_tx);
+                                p.spawn_view(handle, &props, bridge, event_rx);
+                            } else {
+                                tracing::warn!(%plugin, handle, "views: init for unknown plugin");
+                            }
+                        }
+                        HostMessage::ViewEvent {
+                            plugin,
+                            handle,
+                            callback_id,
+                            value,
+                        } => {
+                            if let Some(tx) = view_event_senders.get(&(plugin.clone(), handle)) {
+                                if tx
+                                    .send(crate::plugins::runtime::ViewEventEnvelope { callback_id, value })
+                                    .is_err()
+                                {
+                                    tracing::debug!(%plugin, handle, callback_id, "views: event channel closed");
+                                }
+                            } else {
+                                tracing::debug!(%plugin, handle, callback_id, "views: event for unknown view");
+                            }
+                        }
+                        HostMessage::ViewClose { plugin, handle } => {
+                            // Fire the bridge's close_signal — the per-view
+                            // tokio task awaits it, runs `unmounted` inside
+                            // its own async_with!, and exits. Drop the
+                            // event sender so future events for this
+                            // handle log + bail instead of queueing into a
+                            // closed task.
+                            view_event_senders.remove(&(plugin.clone(), handle));
+
+                            if let Some(signal) = view_close_signals.remove(&(plugin.clone(), handle)) {
+                                signal.cancel();
+                            } else {
+                                tracing::debug!(%plugin, handle, "views: close for unknown handle");
+                            }
                         }
                         HostMessage::Shutdown => {
                             if let Some(prev) = current_cancel.take() {

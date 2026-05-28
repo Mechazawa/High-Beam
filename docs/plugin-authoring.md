@@ -12,6 +12,7 @@ sibling docs:
 | [plugin-tutorial.md](./plugin-tutorial.md)     | Build your first plugin start to finish, with vitest          |
 | [sdk-reference.md](./sdk-reference.md)         | Look up signatures, capabilities, behaviour of `highbeam:*`   |
 | [plugin-cookbook.md](./plugin-cookbook.md)     | Find a copy-pasteable recipe for a specific pattern           |
+| [views.md](./views.md)                         | Return a dynamic, stateful screen instead of a flat result    |
 
 For the host's internals — query dispatch, threading, cancellation — see
 [internals.md](./internals.md).

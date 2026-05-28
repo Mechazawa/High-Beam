@@ -45,6 +45,7 @@ use crate::sdk::platform::PlatformModule;
 use crate::sdk::settings::{self, SettingsModule};
 use crate::sdk::system;
 use crate::sdk::timers;
+use crate::sdk::view::ViewModule;
 
 /// JS-side normalizer: turns whatever `query()` returns into a real async
 /// iterator. Re-eval cost per query is negligible.
@@ -60,6 +61,7 @@ const SYSTEM_MODULE: &str = "highbeam:system";
 const MATCH_MODULE: &str = "highbeam:match";
 const PLATFORM_MODULE: &str = "highbeam:platform";
 const SETTINGS_MODULE: &str = "highbeam:settings";
+const VIEW_MODULE: &str = "highbeam:view";
 /// Slot on `globalThis` for the plugin's `query` export. We can't carry a
 /// `Module<'js>` across iterator `.await` points, and
 /// `Persistent<Function<'static>>` holds a raw `!Send` pointer that can't
@@ -115,6 +117,13 @@ impl LifecycleReason {
             Self::Reload => "reload",
         }
     }
+}
+
+/// One `view_event(callback_id, value)` envelope sent from the host's
+/// per-view event channel into the [`LoadedPlugin::spawn_view`] task.
+pub struct ViewEventEnvelope {
+    pub callback_id: u64,
+    pub value: JsonValue,
 }
 
 /// A loaded, evaluated plugin ready to handle queries.
@@ -398,6 +407,90 @@ impl LoadedPlugin {
         });
 
         rx
+    }
+
+    /// Spawn a long-running task that owns the plugin's `QuickJS` context
+    /// for the view frame's lifetime. The task:
+    ///
+    ///   1. Installs the JS runtime + bridge globals.
+    ///   2. Calls `init(handle, props)` — setup → first render → mounted.
+    ///   3. Loops on `select!` between the host's close signal and the
+    ///      per-view event channel, keeping `async_with!` alive so
+    ///      pending `QuickJS` jobs (microtask flushes, `setTimeout`
+    ///      continuations, etc.) actually run.
+    ///   4. Calls `close(handle)` — runs `unmounted`, fires the abort
+    ///      signal, clears the per-handle instance.
+    ///
+    /// Returns immediately after the task is spawned; the host doesn't
+    /// wait for the view's lifecycle to complete.
+    pub fn spawn_view(
+        &self,
+        handle: u64,
+        props: &JsonValue,
+        bridge: Arc<crate::sdk::view::RuntimeBridge>,
+        mut event_rx: mpsc::UnboundedReceiver<ViewEventEnvelope>,
+    ) {
+        let plugin_name = self.manifest.name.clone();
+        let props_json = props.to_string();
+        let context = self.context.clone();
+        let close_signal = bridge.close_signal.clone();
+
+        tokio::spawn(async move {
+            async_with!(context => |ctx| {
+                if let Err(err) = crate::sdk::view::install_runtime(&ctx, Arc::clone(&bridge)).catch(&ctx) {
+                    tracing::error!(plugin = %plugin_name, handle, %err, "views: install runtime failed");
+                    // Ask the host to pop the frame + drop the
+                    // close-signal entry; otherwise view_close_signals
+                    // would keep a stale token until session end.
+                    (bridge.close_request)(handle);
+                    return;
+                }
+
+                if let Err(err) = crate::sdk::view::invoke_init(&ctx, handle, &props_json).catch(&ctx) {
+                    tracing::error!(plugin = %plugin_name, handle, %err, "views: init failed");
+                    (bridge.close_request)(handle);
+                    return;
+                }
+
+                // Drive events + close in the same async_with! the
+                // init ran in. The runtime polls pending JS jobs while
+                // we're parked in select!, so `mounted`'s `setTimeout`
+                // continuations and downstream re-renders fire even
+                // when no user input has arrived.
+                loop {
+                    tokio::select! {
+                        biased;
+                        () = close_signal.cancelled() => break,
+                        maybe_ev = event_rx.recv() => {
+                            let Some(ev) = maybe_ev else {
+                                // Sender dropped — host has finished
+                                // tearing down this view's bookkeeping;
+                                // fall back to waiting on close_signal.
+                                close_signal.cancelled().await;
+                                break;
+                            };
+                            let value_json = ev.value.to_string();
+                            if let Err(err) = crate::sdk::view::invoke_event(
+                                &ctx, handle, ev.callback_id, &value_json,
+                            ).catch(&ctx) {
+                                tracing::error!(
+                                    plugin = %plugin_name,
+                                    handle,
+                                    callback_id = ev.callback_id,
+                                    %err,
+                                    "views: event failed",
+                                );
+                            }
+                        }
+                    }
+                }
+
+                if let Err(err) = crate::sdk::view::invoke_close(&ctx, handle).catch(&ctx) {
+                    tracing::error!(plugin = %plugin_name, handle, %err, "views: close failed");
+                }
+            })
+            .await;
+        });
     }
 
     /// Whether this plugin exported the requested hook. Callers can skip
@@ -870,6 +963,7 @@ impl Loader for HighbeamLoader {
             MATCH_MODULE => Module::declare_def::<MatchModule, _>(ctx.clone(), name),
             PLATFORM_MODULE => Module::declare_def::<PlatformModule, _>(ctx.clone(), name),
             SETTINGS_MODULE => Module::declare_def::<SettingsModule, _>(ctx.clone(), name),
+            VIEW_MODULE => Module::declare_def::<ViewModule, _>(ctx.clone(), name),
             other => Err(JsError::new_loading_message(
                 name,
                 format!("`{other}` is registered in the capability table but not in the loader"),

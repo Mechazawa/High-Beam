@@ -1,0 +1,11 @@
+{
+    "name": "view-demo",
+    "displayName": "View Demo",
+    "version": "0.1.0",
+    "description": "Demonstrates the dynamic plugin-view system (Heading, Text, Spinner, ProgressBar). Type 'view demo' to open.",
+    "entry": "plugin.js",
+    "timeoutMs": 500,
+    "memoryMb": 32,
+    "capabilities": ["actions"],
+    "defaultEnabled": true
+}

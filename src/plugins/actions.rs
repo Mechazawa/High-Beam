@@ -18,12 +18,21 @@ use crate::plugins::result::Action;
 /// rather than dismissing. `HostTask` is the install/update/reload path —
 /// the action couldn't be executed inline because it needs the tokio
 /// runtime; the caller forwards the task to the runtime thread instead.
+/// `ShowView` / `CloseView` route into the view-stack the caller owns —
+/// the action layer is pure; stack mutation happens in `app::callbacks`
+/// where the picked row's plugin name is in scope.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ActionOutcome {
     HideWindow,
     KeepOpen,
     OpenSettingsView,
     HostTask(HostTask),
+    ShowView {
+        handle: u64,
+        props: serde_json::Value,
+        reset: bool,
+    },
+    CloseView,
 }
 
 /// Host-side maintenance tasks the runtime thread executes off the back of
@@ -78,6 +87,12 @@ pub fn execute(action: &Action) -> Result<ActionOutcome, Box<dyn Error>> {
         // the launcher closes after Enter, even on a `Noop` row like the
         // version readout, because the user explicitly chose to act.
         Action::Noop => Ok(ActionOutcome::HideWindow),
+        Action::ShowView { handle, props, reset } => Ok(ActionOutcome::ShowView {
+            handle: *handle,
+            props: props.clone(),
+            reset: *reset,
+        }),
+        Action::CloseView => Ok(ActionOutcome::CloseView),
     }
 }
 
@@ -156,5 +171,29 @@ mod tests {
     fn update_action_yields_host_task() {
         let outcome = execute(&Action::UpdatePlugins).expect("execute");
         assert_eq!(outcome, ActionOutcome::HostTask(HostTask::UpdateAll));
+    }
+
+    #[test]
+    fn show_view_action_yields_show_view_outcome() {
+        let outcome = execute(&Action::ShowView {
+            handle: 7,
+            props: serde_json::json!({ "id": 1 }),
+            reset: true,
+        })
+        .expect("execute");
+        assert_eq!(
+            outcome,
+            ActionOutcome::ShowView {
+                handle: 7,
+                props: serde_json::json!({ "id": 1 }),
+                reset: true,
+            }
+        );
+    }
+
+    #[test]
+    fn close_view_action_yields_close_view_outcome() {
+        let outcome = execute(&Action::CloseView).expect("execute");
+        assert_eq!(outcome, ActionOutcome::CloseView);
     }
 }

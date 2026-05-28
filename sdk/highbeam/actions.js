@@ -16,3 +16,14 @@ export function exec(cmd, args) {
 export function reveal(path) {
     return { kind: 'reveal', path };
 }
+
+export function showView(view, props, opts) {
+    return {
+        kind: 'showView',
+        view,
+        props: props ?? {},
+        reset: opts?.reset ?? false,
+    };
+}
+
+export const closeView = Object.freeze({ kind: 'closeView' });

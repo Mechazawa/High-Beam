@@ -33,6 +33,12 @@ muted      = "#86868b"     # placeholder + subtitle + empty-icon outline
 highlight  = "#007aff"     # macOS system blue (NSColor.systemBlue)
 selection  = "#007aff33"   # highlighted row background wash
 border     = "#00000010"   # panel outline + row separator
+# Tone colours used by plugin views — `Text({tone: 'error'})`, the
+# danger button background, the error-frame banner. Defaults mirror
+# the macOS system palette.
+error      = "#d70015"
+success    = "#0c8430"
+warning    = "#b75f00"
 
 # Dark-mode palette. Tracks macOS Spotlight in dark mode: deep-charcoal
 # translucent panel, light text, same system blue accent.

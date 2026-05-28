@@ -93,7 +93,12 @@ pub(crate) const MODULES: &[ModuleCap] = &[
     },
 ];
 
-const UNCAPPED_MODULES: &[&str] = &["highbeam:match", "highbeam:platform", "highbeam:settings"];
+const UNCAPPED_MODULES: &[&str] = &[
+    "highbeam:match",
+    "highbeam:platform",
+    "highbeam:settings",
+    "highbeam:view",
+];
 
 #[must_use]
 pub(crate) fn for_module(specifier: &str) -> Option<&'static ModuleCap> {

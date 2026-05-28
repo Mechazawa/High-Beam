@@ -18,6 +18,7 @@ pub mod settings;
 pub mod settings_ui;
 pub mod theme;
 pub mod ui;
+pub mod views;
 pub mod window;
 #[cfg(target_os = "linux")]
 pub mod window_wayland;

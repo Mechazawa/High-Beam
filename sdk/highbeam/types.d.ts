@@ -1,5 +1,5 @@
 // Shared types referenced from multiple `highbeam:*` modules. Each module
-// re-exports the types it needs — this is the single source of truth.
+// re-exports the bits it needs — this is the single source of truth.
 
 /**
  * One result row a plugin yields from `query()`.
@@ -40,7 +40,141 @@ export type Action =
     | { kind: 'openUrl'; url: string }
     | { kind: 'copy'; text: string }
     | { kind: 'exec'; cmd: string; args: readonly string[] }
-    | { kind: 'reveal'; path: string };
+    | { kind: 'reveal'; path: string }
+    | { kind: 'showView'; view: ViewDef; props: object; reset: boolean }
+    | { kind: 'closeView' };
+
+/**
+ * A view definition — passed to `showView()` from `highbeam:actions`.
+ *
+ * `setup(props)` returns the working object (data and methods mixed
+ * freely; both go through the same reactive proxy). `render()` produces
+ * the on-screen tree; returning `null` closes the view. `mounted` runs
+ * after the first paint; `unmounted` on close. See `docs/views.md`.
+ */
+export interface ViewDef<P = object> {
+    setup: (props: P) => Record<string, unknown>;
+    mounted?: (ctx: { signal: AbortSignal }) => void | Promise<void>;
+    unmounted?: () => void;
+    render: () => ViewNode | null;
+}
+
+/** Top-level shape `render()` returns. `null` from `render()` closes the view. */
+export interface ViewNode {
+    /** Optional title shown above the body. */
+    title?: string;
+    /** Body contents, top-to-bottom. */
+    body: Block[];
+}
+
+/** Layout / content primitive a view renders. Tagged-union by `kind`. */
+export type Block =
+    | StackBlock
+    | DividerBlock
+    | HeadingBlock
+    | TextBlock
+    | SpinnerBlock
+    | ProgressBlock
+    | ButtonBlock
+    | InputBlock
+    | TextAreaBlock
+    | ImageBlock
+    | RowBlock;
+
+export type Align = 'start' | 'center' | 'end';
+export type Tone = 'default' | 'muted' | 'error' | 'success' | 'warning';
+export type Gap = 'xs' | 'sm' | 'md' | 'lg';
+export type TextSize = 'sm' | 'md' | 'lg' | 'xl';
+export type ButtonTone = 'default' | 'primary' | 'danger';
+export type ImageFit = 'contain' | 'cover';
+
+/** Either a closure (event → re-render) or a bare `Action` (host runs it). */
+export type Handler = ((value?: string) => unknown) | Action;
+
+export interface StackBlock {
+    kind: 'stack';
+    direction?: 'v' | 'h';
+    gap?: Gap;
+    align?: Align;
+    children: Block[];
+}
+
+export interface DividerBlock {
+    kind: 'divider';
+}
+
+export interface HeadingBlock {
+    kind: 'heading';
+    text: string;
+    align?: Align;
+}
+
+export interface TextBlock {
+    kind: 'text';
+    text: string;
+    size?: TextSize;
+    align?: Align;
+    tone?: Tone;
+}
+
+export interface SpinnerBlock {
+    kind: 'spinner';
+    label?: string;
+}
+
+export interface ProgressBlock {
+    kind: 'progress';
+    /** In `[0, 1]`. Omit for indeterminate ("working, no fixed total"). */
+    value?: number;
+    label?: string;
+}
+
+export interface ButtonBlock {
+    kind: 'button';
+    label: string;
+    id?: string;
+    tabIndex?: number;
+    tone?: ButtonTone;
+    onClick?: Handler;
+}
+
+export interface InputBlock {
+    kind: 'input';
+    id: string;
+    tabIndex?: number;
+    value?: string;
+    placeholder?: string;
+    onChange?: Handler;
+    onSubmit?: Handler;
+}
+
+export interface TextAreaBlock {
+    kind: 'textarea';
+    id: string;
+    tabIndex?: number;
+    rows?: number;
+    value?: string;
+    placeholder?: string;
+    onChange?: Handler;
+}
+
+export interface ImageBlock {
+    kind: 'image';
+    /** `data:image/...;base64,...` URI. Remote URLs are post-v1. */
+    src: string;
+    fit?: ImageFit;
+    alt?: string;
+}
+
+export interface RowBlock {
+    kind: 'row';
+    title: string;
+    subtitle?: string;
+    /** `data:image/...;base64,...` URI. */
+    icon?: string;
+    tabIndex?: number;
+    onClick?: Handler;
+}
 
 /**
  * Standard Web `AbortSignal` shape. The host hands one to your `query()`
