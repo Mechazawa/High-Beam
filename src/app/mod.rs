@@ -384,16 +384,8 @@ fn tear_down_views(
     weak: &slint::Weak<QueryWindow>,
     reason: &'static str,
 ) {
-    let host_view_was_live = if let Ok(mut guard) = host_view.lock() {
-        if let Some(state) = guard.take() {
-            state.cancel.cancel();
-            true
-        } else {
-            false
-        }
-    } else {
-        false
-    };
+    let host_view_was_live = host_view::take_and_cancel(host_view);
+
     tear_down_js_views(
         view_close_signals,
         view_event_senders,

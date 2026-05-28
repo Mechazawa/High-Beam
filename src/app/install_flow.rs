@@ -637,22 +637,22 @@ fn seed_update_entries(
     weak: &slint::Weak<QueryWindow>,
     plugins: &[Arc<crate::plugins::runtime::LoadedPlugin>],
 ) {
-    update_view_state(host_view, weak, |s| {
-        for p in plugins {
-            let status = if p.manifest.manifest_url.is_none() {
+    let entries: Vec<UpdateEntry> = plugins
+        .iter()
+        .map(|p| UpdateEntry {
+            name: p.manifest.name.clone(),
+            local_version: p.manifest.version.clone().unwrap_or_default(),
+            status: if p.manifest.manifest_url.is_none() {
                 EntryStatus::Skipped {
                     reason: "no manifestUrl".to_owned(),
                 }
             } else {
                 EntryStatus::Queued
-            };
-            s.entries.push(UpdateEntry {
-                name: p.manifest.name.clone(),
-                local_version: p.manifest.version.clone().unwrap_or_default(),
-                status,
-            });
-        }
-    });
+            },
+        })
+        .collect();
+
+    update_view_state(host_view, weak, |s| s.entries = entries);
 }
 
 /// Run one plugin's update sub-flow: fetch manifest, version-compare,
@@ -772,11 +772,11 @@ where
 /// per-plugin loop, but bail safely rather than corrupting state).
 fn set_entry_status(host_view: &HostView, weak: &slint::Weak<QueryWindow>, name: &str, status: EntryStatus) {
     update_view_state(host_view, weak, |s| {
-        if let Some(idx) = s.position(name) {
-            s.entries[idx].status = status;
-        } else {
+        let Some(idx) = s.position(name) else {
             tracing::debug!(%name, "update: entry not found for status update");
-        }
+            return;
+        };
+        s.entries[idx].status = status;
     });
 }
 

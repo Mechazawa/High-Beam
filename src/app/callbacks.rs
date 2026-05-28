@@ -473,7 +473,7 @@ fn clear_view_stack_for_hide(
     host_tx: &mpsc::UnboundedSender<HostMessage>,
     weak: &slint::Weak<QueryWindow>,
 ) {
-    let host_view_was_live = take_host_view(host_view);
+    let host_view_was_live = host_view_mod::take_and_cancel(host_view);
 
     let popped: Vec<ViewFrame> = {
         let Ok(mut stack) = view_stack.lock() else {
@@ -506,22 +506,6 @@ fn clear_view_stack_for_hide(
     if let Some(window) = weak.upgrade() {
         sync_view_blocks_model(&window, Vec::new());
         window.invoke_show_query();
-    }
-}
-
-/// Take the host view slot's contents, firing its cancel token. Returns
-/// `true` when a view was actually live, so callers know whether to
-/// switch the window back to VIEW-QUERY.
-fn take_host_view(host_view: &HostView) -> bool {
-    let Ok(mut guard) = host_view.lock() else {
-        tracing::error!("host_view: lock poisoned; take skipped");
-        return false;
-    };
-    if let Some(state) = guard.take() {
-        state.cancel.cancel();
-        true
-    } else {
-        false
     }
 }
 
@@ -1076,7 +1060,7 @@ fn pop_view_frame(
     host_tx: &mpsc::UnboundedSender<HostMessage>,
     weak: &slint::Weak<QueryWindow>,
 ) {
-    if take_host_view(host_view) {
+    if host_view_mod::take_and_cancel(host_view) {
         if let Some(window) = weak.upgrade() {
             sync_view_blocks_model(&window, Vec::new());
             window.invoke_show_query();

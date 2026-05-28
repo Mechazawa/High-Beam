@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 
 use tokio_util::sync::CancellationToken;
 
+use super::callbacks::sync_view_blocks_model;
 use crate::QueryWindow;
 use crate::logging::LogErr;
 use crate::ui::ViewBlock;
@@ -49,6 +50,21 @@ impl UpdateViewState {
     pub(super) fn position(&self, name: &str) -> Option<usize> {
         self.entries.iter().position(|e| e.name == name)
     }
+}
+
+/// Clear the slot, firing the captured cancel token. Returns `true` when
+/// a view was actually live so callers can branch on "was anything
+/// closed?" without re-locking. Lock-poisoning and an already-empty slot
+/// both report `false`.
+pub(super) fn take_and_cancel(slot: &HostView) -> bool {
+    let Ok(mut guard) = slot.lock() else {
+        tracing::error!("host_view: lock poisoned; take skipped");
+        return false;
+    };
+    let Some(state) = guard.take() else { return false };
+
+    state.cancel.cancel();
+    true
 }
 
 /// One plugin's row in the update view.
@@ -143,8 +159,9 @@ fn paint_update(window: &QueryWindow, state: &UpdateViewState) {
         -1.0
     } else {
         #[allow(clippy::cast_precision_loss)]
-        let v = done as f64 / total as f64;
-        v
+        {
+            done as f64 / total as f64
+        }
     };
     blocks.push(progress_block(progress_value));
 
@@ -158,19 +175,17 @@ fn paint_update(window: &QueryWindow, state: &UpdateViewState) {
     }
 
     if let Some(summary) = state.summary.as_ref() {
-        let mut parts = Vec::new();
-        if summary.updated > 0 {
-            parts.push(format!("{} updated", summary.updated));
-        }
-        if summary.up_to_date > 0 {
-            parts.push(format!("{} up to date", summary.up_to_date));
-        }
-        if summary.skipped > 0 {
-            parts.push(format!("{} skipped", summary.skipped));
-        }
-        if summary.failed > 0 {
-            parts.push(format!("{} failed", summary.failed));
-        }
+        let parts: Vec<String> = [
+            (summary.updated, "updated"),
+            (summary.up_to_date, "up to date"),
+            (summary.skipped, "skipped"),
+            (summary.failed, "failed"),
+        ]
+        .into_iter()
+        .filter(|(n, _)| *n > 0)
+        .map(|(n, label)| format!("{n} {label}"))
+        .collect();
+
         let line = if parts.is_empty() {
             "Nothing to update".to_owned()
         } else {
@@ -185,7 +200,7 @@ fn paint_update(window: &QueryWindow, state: &UpdateViewState) {
     // Reuse the same persistent VecModel JS view paints use — keeps the
     // Slint child elements alive across status mutations instead of
     // rebuilding every block on every paint.
-    super::callbacks::sync_view_blocks_model(window, blocks);
+    sync_view_blocks_model(window, blocks);
     window.invoke_show_view_frame();
 }
 
