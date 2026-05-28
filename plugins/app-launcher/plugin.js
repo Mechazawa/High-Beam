@@ -23,6 +23,10 @@ const APP_EXT = ".app";
 const DESKTOP_EXT = ".desktop";
 const RESULT_LIMIT = 10;
 const SCORE_THRESHOLD = 0.05;
+// Catches one level of grouping like `/System/Applications/Utilities` or
+// `/Applications/Setapp` without descending into `.app` bundles themselves
+// (those would expose thousands of internal files to readDir).
+const MAC_MAX_DEPTH = 2;
 
 // Module-level cache — scanning these dirs is hundreds of ms; the host
 // re-imports rarely, so this survives across queries.
@@ -35,24 +39,39 @@ function basenameWithoutExt(path, ext) {
 }
 
 
-async function collectMacApps() {
-    const apps = [];
-    for (const dir of MAC_APP_DIRECTORIES) {
-        try {
-            for await (const entry of readDir(dir, { recursive: false })) {
-                // Filter on basename — `.app` bundles flip between file vs
-                // dir depending on filesystem.
-                const name = entry.name ?? "";
-                if (!name.endsWith(APP_EXT)) continue;
+async function walkMacAppDir(dir, depth, apps) {
+    const subdirs = [];
+    try {
+        for await (const entry of readDir(dir, { recursive: false })) {
+            // Filter on basename — `.app` bundles flip between file vs
+            // dir depending on filesystem.
+            const name = entry.name ?? "";
+            if (name.endsWith(APP_EXT)) {
                 apps.push({
                     kind: "mac",
                     path: entry.path,
                     appName: basenameWithoutExt(entry.path, APP_EXT),
                 });
+                continue;
             }
-        } catch {
-            // Missing dirs are normal (~/Applications, older macOS layouts).
+            if (depth >= MAC_MAX_DEPTH) continue;
+            if (!entry.isDir) continue;
+            if (name.startsWith(".")) continue;
+            subdirs.push(entry.path);
         }
+    } catch {
+        // Missing dirs are normal (~/Applications, older macOS layouts).
+        return;
+    }
+    for (const subdir of subdirs) {
+        await walkMacAppDir(subdir, depth + 1, apps);
+    }
+}
+
+async function collectMacApps() {
+    const apps = [];
+    for (const dir of MAC_APP_DIRECTORIES) {
+        await walkMacAppDir(dir, 0, apps);
     }
     return apps;
 }
