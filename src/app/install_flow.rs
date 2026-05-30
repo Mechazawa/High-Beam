@@ -1,11 +1,16 @@
 //! Install / update / reload pipeline driven by Core's `install <url>`,
 //! `update`, and `reload` verbs.
 //!
-//! Each verb fires a single `HostTask` (see [`crate::plugins::actions`]) at
-//! the runtime thread, which calls into [`handle_host_task`]. From there the
-//! pipeline streams progress rows back into the launcher's result list
-//! through [`ProgressEmitter`] under stable per-task keys so re-emitted lines
+//! Install + reload fire a [`actions::HostTask`] at the runtime thread,
+//! which calls into [`handle_host_task`]. From there the pipeline streams
+//! progress rows back into the launcher's result list through
+//! [`ProgressEmitter`] under stable per-task keys so re-emitted lines
 //! replace the previous row in place.
+//!
+//! Update is different: it opens a dedicated host view (see
+//! [`super::host_view`]) and the per-plugin progress lives as state
+//! mutations on that view instead of rows. [`run_update_view`] is the
+//! entry point.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -27,6 +32,7 @@ use crate::settings_ui::SettingsController;
 use crate::ui::ConfirmCapRow;
 
 use super::ConfirmState;
+use super::host_view::{self, EntryStatus, HostView, UpdateEntry, UpdateSummary};
 
 /// Stable-key stream of progress rows shared with the launcher's result
 /// list. Re-emitting a key replaces the previous row in place, so the
@@ -121,16 +127,13 @@ pub(super) async fn handle_host_task(
         actions::HostTask::Install { url } => {
             run_install(&url, registry, &progress, &confirm_state, &weak, settings).await;
         }
-        actions::HostTask::UpdateAll => {
-            run_update_all(registry, &progress, &confirm_state, &weak, settings).await;
-        }
     }
 }
 
 /// Drive the install pipeline for a single manifest URL, streaming progress
 /// rows under the stable key `install`. Returns the loaded plugin's name on
-/// success — `run_update_all` re-uses this so each per-plugin update lands
-/// progress under a stable per-plugin key.
+/// success. The update flow drives [`install_pipeline`] directly (under a
+/// per-plugin key), so it doesn't route through here.
 async fn run_install(
     url: &str,
     registry: &PluginRegistry,
@@ -543,99 +546,238 @@ fn emit_install_failure(progress: &ProgressEmitter, progress_key: &str, plugin_n
     );
 }
 
-async fn run_update_all(
+/// Update entry point — runs against a host-driven update view (see
+/// [`super::host_view`]). The Slint thread already seeded the slot before
+/// posting `HostMessage::UpdateAll`; here we discover the plugin list,
+/// fill in entries, then walk each one updating the view state in place.
+/// Cancellation: the slot's cancel token fires on Esc — we abort between
+/// plugins (and skip pending ones with `is_cancelled()` checks).
+pub(super) async fn run_update_view(
     registry: &PluginRegistry,
-    progress: &ProgressEmitter,
-    confirm_state: &ConfirmState,
-    weak: &slint::Weak<QueryWindow>,
+    host_view: HostView,
+    weak: slint::Weak<QueryWindow>,
+    confirm_state: ConfirmState,
     settings: &SettingsController,
 ) {
     let plugins = registry.snapshot().await;
+    let cancel = match host_view.lock() {
+        Ok(g) => g.as_ref().map(|s| s.cancel.clone()),
+        Err(err) => {
+            tracing::error!(%err, "update: host_view lock poisoned at start");
+            return;
+        }
+    };
+    let Some(cancel) = cancel else {
+        tracing::warn!("update: host view slot empty at start; aborting");
+        return;
+    };
 
-    if plugins.is_empty() {
-        progress.emit(
-            "update-summary",
-            "No plugins loaded".to_owned(),
-            Some("nothing to update".to_owned()),
-        );
+    seed_update_entries(&host_view, &weak, &plugins);
+
+    let mut tally = UpdateTally::default();
+    // install_pipeline writes progress rows through ProgressEmitter; we
+    // wire a silent one so those writes don't clobber the real launcher
+    // result list (which becomes visible again the moment the user Escs
+    // out of the update view). `query_id = 0` against a pre-bumped
+    // latest_id of 1 makes every emit() short-circuit on the stale-check
+    // at the top of `ProgressEmitter::emit`. Hoisting it out of the loop
+    // avoids 16+ pointless allocations per update run.
+    let silent_progress = ProgressEmitter::new(
+        0,
+        weak.clone(),
+        Arc::new(Mutex::new(Vec::new())),
+        Arc::new(AtomicU64::new(1)),
+    );
+
+    for plugin in plugins {
+        if cancel.is_cancelled() {
+            tracing::info!("update: cancelled mid-loop");
+            return;
+        }
+        process_one_update(
+            &plugin,
+            &host_view,
+            &weak,
+            registry,
+            &confirm_state,
+            settings,
+            &silent_progress,
+            &mut tally,
+        )
+        .await;
+        // The install pipeline switches the window to VIEW-CONFIRM mid-flow
+        // for capability prompts. After the prompt resolves, the confirm
+        // callback returns the window to VIEW-QUERY by default — repaint
+        // the host view so we come back to it instead of a blank launcher.
+        host_view::schedule_paint(&host_view, &weak);
+    }
+
+    update_view_state(&host_view, &weak, |s| {
+        s.summary = Some(UpdateSummary {
+            updated: tally.updated,
+            up_to_date: tally.up_to_date,
+            skipped: tally.skipped,
+            failed: tally.failed,
+        });
+    });
+}
+
+#[derive(Default)]
+struct UpdateTally {
+    updated: usize,
+    up_to_date: usize,
+    skipped: usize,
+    failed: usize,
+}
+
+/// Seed one entry per plugin so the view paints "N queued" immediately.
+/// Plugins without `manifestUrl` get Skipped up front.
+fn seed_update_entries(
+    host_view: &HostView,
+    weak: &slint::Weak<QueryWindow>,
+    plugins: &[Arc<crate::plugins::runtime::LoadedPlugin>],
+) {
+    let entries: Vec<UpdateEntry> = plugins
+        .iter()
+        .map(|p| UpdateEntry {
+            name: p.manifest.name.clone(),
+            local_version: p.manifest.version.clone().unwrap_or_default(),
+            status: if p.manifest.manifest_url.is_none() {
+                EntryStatus::Skipped {
+                    reason: "no manifestUrl".to_owned(),
+                }
+            } else {
+                EntryStatus::Queued
+            },
+        })
+        .collect();
+
+    update_view_state(host_view, weak, |s| s.entries = entries);
+}
+
+/// Run one plugin's update sub-flow: fetch manifest, version-compare,
+/// optionally drive `install_pipeline`. Mutates `tally` and the matching
+/// view entry's status as it goes.
+#[allow(clippy::too_many_arguments)]
+async fn process_one_update(
+    plugin: &Arc<crate::plugins::runtime::LoadedPlugin>,
+    host_view: &HostView,
+    weak: &slint::Weak<QueryWindow>,
+    registry: &PluginRegistry,
+    confirm_state: &ConfirmState,
+    settings: &SettingsController,
+    silent_progress: &ProgressEmitter,
+    tally: &mut UpdateTally,
+) {
+    let name = plugin.manifest.name.clone();
+    let local_version = plugin.manifest.version.clone().unwrap_or_default();
+    let installed_caps = plugin.manifest.capabilities.clone();
+
+    let Some(manifest_url) = plugin.manifest.manifest_url.clone() else {
+        tally.skipped += 1;
+        // Entry was already seeded with Skipped — nothing to update.
+        return;
+    };
+
+    set_entry_status(host_view, weak, &name, EntryStatus::Checking);
+
+    let remote = match plugins::install::fetch_and_validate_manifest(&manifest_url).await {
+        Ok(m) => m,
+        Err(err) => {
+            tally.failed += 1;
+            set_entry_status(host_view, weak, &name, EntryStatus::Failed { error: err.to_string() });
+
+            return;
+        }
+    };
+
+    let remote_version = remote.version.clone().unwrap_or_default();
+
+    if !plugins::manifest::is_newer_version(&remote_version, &local_version) {
+        tally.up_to_date += 1;
+        set_entry_status(host_view, weak, &name, EntryStatus::UpToDate);
 
         return;
     }
-    let mut updated = 0usize;
-    let mut up_to_date = 0usize;
-    let mut failed = 0usize;
-
-    for plugin in plugins {
-        let local_version = plugin.manifest.version.clone().unwrap_or_default();
-        let installed_caps = plugin.manifest.capabilities.clone();
-        let Some(manifest_url) = plugin.manifest.manifest_url.clone() else {
-            let key = format!("update-{}", plugin.manifest.name);
-            progress.emit(
-                &key,
-                format!("Skipped {}", plugin.manifest.name),
-                Some("no manifestUrl — plugin opts out of updates".to_owned()),
-            );
-
-            continue;
-        };
-
-        let name = plugin.manifest.name.clone();
-        let key = format!("update-{name}");
-
-        progress.emit(&key, format!("Checking {name}…"), Some(manifest_url.clone()));
-
-        let remote = match plugins::install::fetch_and_validate_manifest(&manifest_url).await {
-            Ok(m) => m,
-            Err(err) => {
-                failed += 1;
-                progress.emit(&key, format!("Update check failed: {name}"), Some(err.to_string()));
-
-                continue;
-            }
-        };
-
-        let remote_version = remote.version.clone().unwrap_or_default();
-
-        if !plugins::manifest::is_newer_version(&remote_version, &local_version) {
-            up_to_date += 1;
-            progress.emit(&key, format!("Up to date: {name} v{local_version}"), None);
-
-            continue;
-        }
-
-        progress.emit(
-            &key,
-            format!("Updating {name} v{local_version} → v{remote_version}…"),
-            None,
-        );
-
-        // Only prompt if the update introduces new capabilities.
-        let needs_prompt = crate::confirm::update_needs_prompt(&remote.capabilities, &installed_caps);
-        let caps_arg: Option<&[String]> = needs_prompt.then_some(&installed_caps);
-
-        if install_pipeline(
-            &manifest_url,
-            &key,
-            caps_arg,
-            registry,
-            progress,
-            confirm_state,
-            weak,
-            settings,
-        )
-        .await
-        .is_some()
-        {
-            updated += 1;
-        } else {
-            failed += 1;
-        }
-    }
-    progress.emit(
-        "update-summary",
-        format!("Update complete — {updated} updated, {up_to_date} up to date, {failed} failed"),
-        None,
+    set_entry_status(
+        host_view,
+        weak,
+        &name,
+        EntryStatus::Updating {
+            new_version: remote_version.clone(),
+        },
     );
+
+    let needs_prompt = crate::confirm::update_needs_prompt(&remote.capabilities, &installed_caps);
+    let caps_arg: Option<&[String]> = needs_prompt.then_some(&installed_caps);
+
+    let result = install_pipeline(
+        &manifest_url,
+        &format!("update-{name}"),
+        caps_arg,
+        registry,
+        silent_progress,
+        confirm_state,
+        weak,
+        settings,
+    )
+    .await;
+
+    if result.is_some() {
+        tally.updated += 1;
+        set_entry_status(
+            host_view,
+            weak,
+            &name,
+            EntryStatus::Updated {
+                new_version: remote_version,
+            },
+        );
+    } else {
+        tally.failed += 1;
+        set_entry_status(
+            host_view,
+            weak,
+            &name,
+            EntryStatus::Failed {
+                error: "install pipeline failed (see logs)".to_owned(),
+            },
+        );
+    }
+}
+
+/// Mutate the live update-view state under the slot lock and trigger a
+/// repaint. No-op when the slot is empty (the user closed the view
+/// mid-run). Runs on the runtime thread; the repaint hops to the Slint
+/// thread.
+fn update_view_state<F>(host_view: &HostView, weak: &slint::Weak<QueryWindow>, mutate: F)
+where
+    F: FnOnce(&mut host_view::UpdateViewState),
+{
+    {
+        let Ok(mut guard) = host_view.lock() else {
+            tracing::error!("update: host_view lock poisoned during update");
+            return;
+        };
+        let Some(state) = guard.as_mut() else {
+            return;
+        };
+        mutate(state);
+    }
+    host_view::schedule_paint(host_view, weak);
+}
+
+/// Find the entry by name and replace its status. Logs a debug line when
+/// the entry isn't found (would mean a race between seeding and the
+/// per-plugin loop, but bail safely rather than corrupting state).
+fn set_entry_status(host_view: &HostView, weak: &slint::Weak<QueryWindow>, name: &str, status: EntryStatus) {
+    update_view_state(host_view, weak, |s| {
+        let Some(idx) = s.position(name) else {
+            tracing::debug!(%name, "update: entry not found for status update");
+            return;
+        };
+        s.entries[idx].status = status;
+    });
 }
 
 fn temp_dir_for_install(name: &str) -> std::io::Result<PathBuf> {

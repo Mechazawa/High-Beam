@@ -15,12 +15,14 @@ use crate::plugins::result::Action;
 /// `HideWindow` is the default — invoking the row's action removes the
 /// reason the launcher is on screen, so we close it. `KeepOpen` is for
 /// in-window navigation actions like `OpenSettings`, which switch views
-/// rather than dismissing. `HostTask` is the install/update/reload path —
+/// rather than dismissing. `HostTask` is the install/reload path —
 /// the action couldn't be executed inline because it needs the tokio
 /// runtime; the caller forwards the task to the runtime thread instead.
 /// `ShowView` / `CloseView` route into the view-stack the caller owns —
 /// the action layer is pure; stack mutation happens in `app::callbacks`
-/// where the picked row's plugin name is in scope.
+/// where the picked row's plugin name is in scope. `ShowUpdateView` opens
+/// the host-driven progress view and kicks off the update loop on the
+/// runtime thread.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ActionOutcome {
     HideWindow,
@@ -33,19 +35,19 @@ pub enum ActionOutcome {
         reset: bool,
     },
     CloseView,
+    ShowUpdateView,
 }
 
 /// Host-side maintenance tasks the runtime thread executes off the back of
-/// pressing Enter on a Core verb row.
+/// pressing Enter on a Core verb row. `update` doesn't appear here — it
+/// flows through [`ActionOutcome::ShowUpdateView`] so the Slint thread can
+/// open the host view before the runtime thread starts the update loop.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HostTask {
     /// `None` ⇒ reload every plugin; `Some(name)` ⇒ reload just that one.
     Reload { name: Option<String> },
     /// Install a plugin from the given manifest URL.
     Install { url: String },
-    /// Iterate every plugin with a `manifestUrl` and install any newer
-    /// remote version.
-    UpdateAll,
 }
 
 /// Execute an action.
@@ -82,7 +84,7 @@ pub fn execute(action: &Action) -> Result<ActionOutcome, Box<dyn Error>> {
         Action::OpenSettings => Ok(ActionOutcome::OpenSettingsView),
         Action::ReloadPlugin { name } => Ok(ActionOutcome::HostTask(HostTask::Reload { name: name.clone() })),
         Action::InstallPlugin { url } => Ok(ActionOutcome::HostTask(HostTask::Install { url: url.clone() })),
-        Action::UpdatePlugins => Ok(ActionOutcome::HostTask(HostTask::UpdateAll)),
+        Action::UpdatePlugins => Ok(ActionOutcome::ShowUpdateView),
         // Noop preserved the pre-outcome behaviour of hiding the window —
         // the launcher closes after Enter, even on a `Noop` row like the
         // version readout, because the user explicitly chose to act.
@@ -168,9 +170,9 @@ mod tests {
     }
 
     #[test]
-    fn update_action_yields_host_task() {
+    fn update_action_yields_show_update_view() {
         let outcome = execute(&Action::UpdatePlugins).expect("execute");
-        assert_eq!(outcome, ActionOutcome::HostTask(HostTask::UpdateAll));
+        assert_eq!(outcome, ActionOutcome::ShowUpdateView);
     }
 
     #[test]

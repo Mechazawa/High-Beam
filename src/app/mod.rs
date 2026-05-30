@@ -10,8 +10,10 @@
 //! - `callbacks` — Slint window-callback wiring.
 //! - `query` — per-keystroke streaming dispatch + result rendering.
 //! - `install_flow` — install / update / reload host-task pipeline.
+//! - `host_view` — host-driven view-frame painting (update progress).
 
 mod callbacks;
+mod host_view;
 mod install_flow;
 mod query;
 
@@ -56,6 +58,9 @@ pub(super) enum HostMessage {
         input: String,
     },
     Task(actions::HostTask),
+    /// Run the update-all pipeline, streaming progress into the host-driven
+    /// update view (the slot was seeded before this message was sent).
+    UpdateAll,
     Shutdown,
     /// Drive a freshly-pushed view frame through its `setup → first render
     /// → mounted` sequence. Sent by `callbacks::push_view_frame`. The
@@ -115,6 +120,7 @@ pub fn start(
     let history_state = Arc::new(Mutex::new(QueryHistoryState::new(initial_entries)));
 
     let view_stack = Arc::new(Mutex::new(ViewStack::new()));
+    let host_view = host_view::new_slot();
 
     spawn_runtime_thread(
         rx,
@@ -126,6 +132,7 @@ pub fn start(
         Arc::clone(&confirm_state),
         settings.clone(),
         Arc::clone(&view_stack),
+        Arc::clone(&host_view),
         tx.clone(),
     )?;
 
@@ -141,6 +148,7 @@ pub fn start(
             history_db,
             history_state,
             view_stack,
+            host_view,
         },
     );
 
@@ -160,6 +168,7 @@ fn spawn_runtime_thread(
     confirm_state: ConfirmState,
     settings: SettingsController,
     view_stack: Arc<Mutex<ViewStack>>,
+    host_view: host_view::HostView,
     host_tx: mpsc::UnboundedSender<HostMessage>,
 ) -> Result<(), Box<dyn Error>> {
     thread::Builder::new()
@@ -234,36 +243,14 @@ fn spawn_runtime_thread(
                             if let Some(prev) = current_cancel.take() {
                                 prev.cancel();
                             }
-                            // Any host task (reload / install / update)
-                            // can swap the QuickJS context a view is
-                            // attached to. Tear down every open frame
-                            // first so plugins get a clean `unmounted`
-                            // call before their old context dies.
-                            for ((plugin, handle), signal) in view_close_signals.drain() {
-                                tracing::info!(
-                                    %plugin,
-                                    handle,
-                                    reason = "host task",
-                                    "views: tearing down",
-                                );
-                                signal.cancel();
-                            }
-                            view_event_senders.clear();
-
-                            if !view_stack.lock().map_or(true, |s| s.depth() == 0) {
-                                let view_stack_for_clear = Arc::clone(&view_stack);
-                                let weak_for_clear = weak.clone();
-                                slint::invoke_from_event_loop(move || {
-                                    if let Ok(mut stack) = view_stack_for_clear.lock() {
-                                        stack.clear();
-                                    }
-
-                                    if let Some(w) = weak_for_clear.upgrade() {
-                                        w.invoke_show_query();
-                                    }
-                                })
-                                .log_debug("views: host-task stack clear");
-                            }
+                            tear_down_views(
+                                &mut view_close_signals,
+                                &mut view_event_senders,
+                                &view_stack,
+                                &host_view,
+                                &weak,
+                                "host task",
+                            );
                             // Bump the query id so any stale yield from the
                             // last keystroke can't paint over the progress
                             // rows the task is about to push.
@@ -280,6 +267,39 @@ fn spawn_runtime_thread(
                                 progress,
                                 Arc::clone(&confirm_state),
                                 weak.clone(),
+                                &settings,
+                            )
+                            .await;
+                        }
+                        HostMessage::UpdateAll => {
+                            if let Some(prev) = current_cancel.take() {
+                                prev.cancel();
+                            }
+                            // JS views must die before the runtime kicks off
+                            // an update — the same reasoning as HostMessage::Task.
+                            // The host view slot was seeded by the Slint
+                            // thread before this message arrived; don't
+                            // touch it here, and don't switch the window
+                            // away from VIEW-VIEWS where it already lives.
+                            tear_down_js_views(
+                                &mut view_close_signals,
+                                &mut view_event_senders,
+                                &view_stack,
+                                &weak,
+                                "update view",
+                                false,
+                            );
+                            // Bump the query id for the same stale-yield
+                            // reason as HostMessage::Task — even though the
+                            // update view doesn't paint into the result list,
+                            // the launcher view shouldn't show stale rows
+                            // from the query that preceded the `update` pick.
+                            latest_id.fetch_add(1, Ordering::Relaxed);
+                            install_flow::run_update_view(
+                                &registry,
+                                Arc::clone(&host_view),
+                                weak.clone(),
+                                Arc::clone(&confirm_state),
                                 &settings,
                             )
                             .await;
@@ -346,6 +366,76 @@ fn spawn_runtime_thread(
             });
         })?;
     Ok(())
+}
+
+/// Tear down every open JS view frame and any live host view, firing
+/// each cancel signal so the underlying tasks (`spawn_view` for JS,
+/// `run_update_view` for host) clean up. Switches the window back to
+/// VIEW-QUERY when anything was live. Used before a launcher-row host
+/// task (install/reload) repaints the launcher view list.
+fn tear_down_views(
+    view_close_signals: &mut std::collections::HashMap<(String, u64), CancellationToken>,
+    view_event_senders: &mut std::collections::HashMap<
+        (String, u64),
+        mpsc::UnboundedSender<crate::plugins::runtime::ViewEventEnvelope>,
+    >,
+    view_stack: &Arc<Mutex<ViewStack>>,
+    host_view: &host_view::HostView,
+    weak: &slint::Weak<QueryWindow>,
+    reason: &'static str,
+) {
+    let host_view_was_live = host_view::take_and_cancel(host_view);
+
+    tear_down_js_views(
+        view_close_signals,
+        view_event_senders,
+        view_stack,
+        weak,
+        reason,
+        host_view_was_live,
+    );
+}
+
+/// JS-stack teardown — fires close signals, drains the stack, optionally
+/// flips the window back to VIEW-QUERY. The update flow passes
+/// `route_back_when_idle = false` so the host view it just seeded keeps
+/// VIEW-VIEWS on screen; the install/reload flow passes `true` to bring
+/// the launcher back into view when a host view was just closed.
+fn tear_down_js_views(
+    view_close_signals: &mut std::collections::HashMap<(String, u64), CancellationToken>,
+    view_event_senders: &mut std::collections::HashMap<
+        (String, u64),
+        mpsc::UnboundedSender<crate::plugins::runtime::ViewEventEnvelope>,
+    >,
+    view_stack: &Arc<Mutex<ViewStack>>,
+    weak: &slint::Weak<QueryWindow>,
+    reason: &'static str,
+    route_back_when_idle: bool,
+) {
+    for ((plugin, handle), signal) in view_close_signals.drain() {
+        tracing::info!(%plugin, handle, %reason, "views: tearing down");
+        signal.cancel();
+    }
+    view_event_senders.clear();
+
+    let stack_was_non_empty = !view_stack.lock().map_or(true, |s| s.depth() == 0);
+    let route_back = stack_was_non_empty || route_back_when_idle;
+
+    if !stack_was_non_empty && !route_back {
+        return;
+    }
+    let view_stack_for_clear = Arc::clone(view_stack);
+    let weak_for_clear = weak.clone();
+    slint::invoke_from_event_loop(move || {
+        if let Ok(mut stack) = view_stack_for_clear.lock() {
+            stack.clear();
+        }
+
+        if route_back && let Some(w) = weak_for_clear.upgrade() {
+            w.invoke_show_query();
+        }
+    })
+    .log_debug("views: host-task stack clear");
 }
 
 /// Open the query-history DB at the platform default path. Returns `None` on
