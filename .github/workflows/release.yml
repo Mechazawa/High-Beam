@@ -93,15 +93,17 @@ jobs:
 
           rm -f "$CERT_PATH"
 
-      - name: Build .app + .dmg
-        run: just bundle
+      # Universal2 build: one .dmg that runs on Apple Silicon + Intel, so
+      # the Homebrew cask needs a single url + sha256 (no arch branches).
+      - name: Build universal .app + .dmg
+        run: just bundle-universal
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v5
         with:
           name: macos
           path: |
-            target/release/HighBeam_*.dmg
+            target/release/HighBeam_*_universal.dmg
             target/release/HighBeam.app
           if-no-files-found: error
 

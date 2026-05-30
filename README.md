@@ -10,12 +10,20 @@ Pre-release.
 
 ## Install
 
+macOS (Homebrew tap):
+
+```
+brew install --cask mechazawa/high-beam/high-beam
+```
+
+From source:
+
 ```
 cargo install --path .
 ```
 
 Packaged builds (.app, .dmg, .deb, .pacman, .rpm, tarball) via
-`just bundle` / `just bundle-linux`. See
+`just bundle` / `just bundle-universal` / `just bundle-linux`. See
 [docs/distribution.md](docs/distribution.md).
 
 macOS post-install:
