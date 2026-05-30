@@ -132,8 +132,8 @@ pub(super) async fn handle_host_task(
 
 /// Drive the install pipeline for a single manifest URL, streaming progress
 /// rows under the stable key `install`. Returns the loaded plugin's name on
-/// success — `run_update_all` re-uses this so each per-plugin update lands
-/// progress under a stable per-plugin key.
+/// success. The update flow drives [`install_pipeline`] directly (under a
+/// per-plugin key), so it doesn't route through here.
 async fn run_install(
     url: &str,
     registry: &PluginRegistry,
