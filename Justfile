@@ -34,6 +34,37 @@ bundle:
     cargo build --release
     cargo packager --release
 
+# Universal2 (arm64 + x86_64) .app + .dmg for the Homebrew cask.
+#
+# cargo-packager packages whatever binary already sits at
+# `target/release/high-beam`, so we build both arches separately and
+# `lipo` them into that path before packaging. The result is one fat
+# binary that runs on Apple Silicon and Intel from a single download —
+# which keeps the cask to one `url` + one `sha256` instead of arch
+# branches. macOS-only (lipo + the Apple toolchain); run on a Mac.
+#
+# The dmg cargo-packager emits is named after the *host* arch
+# (`HighBeam_<ver>_aarch64.dmg` on a CI arm runner) even though the
+# payload is universal, so we rename it to `_universal` for an honest,
+# stable cask URL.
+bundle-universal:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rustup target add aarch64-apple-darwin x86_64-apple-darwin
+    cargo build --release --target aarch64-apple-darwin
+    cargo build --release --target x86_64-apple-darwin
+    mkdir -p target/release
+    lipo -create -output target/release/high-beam \
+        target/aarch64-apple-darwin/release/high-beam \
+        target/x86_64-apple-darwin/release/high-beam
+    cargo packager --release --formats app dmg
+    version="$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)"
+    src="$(ls target/release/HighBeam_${version}_*.dmg | head -1)"
+    dest="target/release/HighBeam_${version}_universal.dmg"
+    [ "$src" = "$dest" ] || mv "$src" "$dest"
+    echo "-> $dest"
+    shasum -a 256 "$dest"
+
 # Build every Linux artifact. Run this on a Linux host — cargo-packager
 # silently skips deb/pacman when the host is macOS.
 bundle-linux: bundle-tarball bundle-deb bundle-arch bundle-rpm

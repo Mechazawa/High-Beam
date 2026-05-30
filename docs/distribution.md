@@ -100,6 +100,28 @@ the packager wraps `xcrun notarytool` + `stapler` directly. Apple's
 [Notarizing macOS software](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)
 docs cover the cert + notarytool setup.
 
+## Homebrew (macOS)
+
+High Beam ships through a **personal tap** as a cask (it's a GUI `.app`,
+so `homebrew/core` is out, and the official `homebrew/cask` repo gates on
+notability + notarization we don't clear yet):
+
+```sh
+brew install --cask mechazawa/high-beam/high-beam
+```
+
+The cask pins a **universal2 `.dmg`** — `just bundle-universal` lipo-joins
+the arm64 + x86_64 release binaries into one `.app` so a single download
+covers every Mac (one `url`, one `sha256`, no arch branches). The macOS
+release job runs this recipe instead of `just bundle`.
+
+The cask source of truth and the publish workflow (first-time tap setup,
+per-release `version` + `sha256` bump, and the remaining gates for an
+eventual `homebrew/cask` submission) live under
+[`packaging/homebrew/`](../packaging/homebrew/README.md). Because the app
+is still self-signed, the cask carries the `xattr -dr
+com.apple.quarantine` step as a `caveats` note until notarization lands.
+
 ## Linux
 
 Four shipped package formats, in the user-stated priority order. The

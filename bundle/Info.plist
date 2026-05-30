@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <key>NSHumanReadableCopyright</key>
-    <string>Bas Bieling — MIT licensed</string>
+    <string>Bas Bieling — GPL-3.0-or-later</string>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
     <key>NSPrincipalClass</key>
