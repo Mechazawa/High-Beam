@@ -347,3 +347,48 @@ jobs:
             dist/linux/**/*.deb
             dist/linux/**/*.rpm
             dist/linux/**/*.tar.gz
+
+      # Auto-bump the Homebrew cask: compute the universal .dmg's sha256 and
+      # push the resolved version + digest to the tap repo, so
+      # `brew install --cask` tracks each release without a manual edit. The
+      # in-repo Casks/high-beam.rb stays a template (placeholder sha) — we
+      # copy it, pin version + sha, and commit the result to the tap.
+      #
+      # Gated on HOMEBREW_TAP_TOKEN (a PAT with contents:write on
+      # Mechazawa/homebrew-high-beam); absent → no-op, same opt-in pattern as
+      # signing. Pre-release tags are skipped so the tap only points at stable.
+      - name: Update Homebrew tap cask
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        if: >-
+          env.HOMEBREW_TAP_TOKEN != ''
+          && !contains(github.ref_name, '-rc')
+          && !contains(github.ref_name, '-beta')
+          && !contains(github.ref_name, '-alpha')
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          dmg="$(ls dist/macos/HighBeam_*_universal.dmg | head -1)"
+          sha="$(sha256sum "$dmg" | cut -d' ' -f1)"
+          echo "Bumping high-beam cask to ${version} (${sha})"
+
+          git clone --depth 1 \
+              "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/Mechazawa/homebrew-high-beam.git" \
+              tap
+          mkdir -p tap/Casks
+          # Carry over any non-version cask edits (caveats/zap/livecheck) from
+          # the in-repo source of truth, then pin the two volatile fields.
+          cp packaging/homebrew/Casks/high-beam.rb tap/Casks/high-beam.rb
+          sed -i -E "s/^  version \".*\"/  version \"${version}\"/" tap/Casks/high-beam.rb
+          sed -i -E "s/^  sha256 \".*\"/  sha256 \"${sha}\"/"       tap/Casks/high-beam.rb
+
+          cd tap
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- Casks/high-beam.rb; then
+            echo "Cask already up to date; nothing to push."
+          else
+            git add Casks/high-beam.rb
+            git commit -m "high-beam ${version}"
+            git push
+          fi

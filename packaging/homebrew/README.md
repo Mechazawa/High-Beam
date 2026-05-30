@@ -31,8 +31,14 @@ expands to `github.com/Mechazawa/homebrew-high-beam`.
 ## First-time setup (once)
 
 1. Create the public repo `Mechazawa/homebrew-high-beam` on GitHub.
-2. Copy `Casks/high-beam.rb` into its `Casks/` directory and push.
-3. Verify end-to-end:
+2. Add a repo secret on **Mechazawa/High-Beam** named `HOMEBREW_TAP_TOKEN`
+   — a PAT (fine-grained, `contents: write` on `homebrew-high-beam`, or a
+   classic `repo`-scoped token). This is what lets the release workflow
+   push cask bumps into the tap.
+3. Seed the tap once so `brew tap` has something to read — either copy
+   `Casks/high-beam.rb` in by hand, or just cut one stable release and
+   let the workflow create it.
+4. Verify end-to-end:
 
    ```sh
    brew tap mechazawa/high-beam
@@ -40,26 +46,35 @@ expands to `github.com/Mechazawa/homebrew-high-beam`.
    brew uninstall --cask high-beam
    ```
 
-## Per-release update
+## Per-release update — automated
 
-The cask pins a universal `.dmg` and its SHA-256, so both move every
-release:
+`version` + `sha256` are bumped for you. On every **stable** `vX.Y.Z`
+tag, `.github/workflows/release.yml` (step "Update Homebrew tap cask"):
 
-1. Cut the release as usual (push a `vX.Y.Z` tag). The macOS job runs
-   `just bundle-universal`, which lipo-joins the arm64 + x86_64 binaries
-   into one universal2 `.app`, packages `HighBeam_<version>_universal.dmg`,
-   and uploads it to the GitHub Release.
-2. Grab the digest — `just bundle-universal` prints it, or:
+1. Builds `HighBeam_<version>_universal.dmg` via `just bundle-universal`.
+2. Computes its `sha256`.
+3. Copies this template into the tap repo, pins `version` + `sha256`, and
+   commits/pushes `high-beam <version>` to `Mechazawa/homebrew-high-beam`.
 
-   ```sh
-   shasum -a 256 HighBeam_<version>_universal.dmg
-   ```
+Pre-release tags (`-rc`/`-beta`/`-alpha`) and a missing `HOMEBREW_TAP_TOKEN`
+both skip the step — no manual sha edit in the normal path.
 
-3. Bump `version` and `sha256` in `Casks/high-beam.rb` here, then mirror
-   the file into the tap repo and push.
+The in-repo `Casks/high-beam.rb` stays a **template** with placeholder
+`version`/`sha256`; edit it only for the hand-maintained fields
+(`caveats`, `zap`, `livecheck`, `desc`) — those propagate to the tap on
+the next release.
+
+### Bumping by hand (fallback)
+
+If you ever need to bump without a tagged release:
+
+```sh
+shasum -a 256 HighBeam_<version>_universal.dmg
+# set version + sha256 in the tap repo's Casks/high-beam.rb, commit, push
+```
 
 `brew livecheck high-beam` reads GitHub Releases and reports when a newer
-tag exists, so the bump can be scripted later if desired.
+tag exists.
 
 ## Before validating with `brew audit`
 

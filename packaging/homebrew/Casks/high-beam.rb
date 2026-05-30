@@ -7,16 +7,18 @@
 # Install once the tap is published:
 #   brew install --cask mechazawa/high-beam/high-beam
 #
-# The `sha256` below MUST be refreshed every release — it pins the
-# universal .dmg `just bundle-universal` uploads to GitHub Releases.
-# `just bundle-universal` prints the digest at the end of its run, or:
-#   shasum -a 256 HighBeam_<version>_universal.dmg
+# This file is the TEMPLATE / source of truth. The release workflow
+# (.github/workflows/release.yml § "Update Homebrew tap cask") copies it
+# to the tap repo on every stable tag, rewriting `version` + `sha256` to
+# the freshly built universal .dmg. So the placeholders below are
+# expected here and never need a manual edit — only the non-version
+# fields (caveats/zap/livecheck/desc) are hand-maintained in this copy.
 cask "high-beam" do
+  # version/sha256 are placeholders in this template; the release
+  # workflow pins them to the published universal .dmg when it syncs
+  # this file into the tap. (To bump by hand instead, set both and copy
+  # to tap Casks/: `shasum -a 256 HighBeam_<version>_universal.dmg`.)
   version "0.3.1"
-  # PLACEHOLDER — replace with the real digest of the universal .dmg for
-  # this `version` before publishing. No universal artifact has been cut
-  # yet (current releases ship an arm64-only .dmg), so this stays fake
-  # until the first release built by the updated workflow lands.
   sha256 "0000000000000000000000000000000000000000000000000000000000000000"
 
   url "https://github.com/Mechazawa/high-beam/releases/download/v#{version}/HighBeam_#{version}_universal.dmg",
