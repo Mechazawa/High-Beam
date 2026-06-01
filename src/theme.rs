@@ -199,11 +199,22 @@ impl Theme {
             return Self::default_bundled();
         }
 
-        let Some(path) = paths::themes_dir().map(|dir| dir.join(format!("{name}.toml"))) else {
+        let Some(dir) = paths::themes_dir() else {
             tracing::warn!(theme = name, "theme: could not resolve themes dir; using default");
 
             return Self::default_bundled();
         };
+
+        Self::load_named_in(&dir, name)
+    }
+
+    /// Read `<dir>/<name>.toml`, falling back to the bundled default on any
+    /// read or parse error. Split from [`Self::load_named`] so the on-disk
+    /// path is testable against a fixture dir; production resolves `dir` via
+    /// [`paths::themes_dir`]. A malformed file must never abort startup.
+    #[must_use]
+    fn load_named_in(dir: &std::path::Path, name: &str) -> Self {
+        let path = dir.join(format!("{name}.toml"));
 
         match fs::read_to_string(&path) {
             Ok(text) => Self::from_toml_or_default(&text, &path),
@@ -508,7 +519,18 @@ fn expand_nibble(byte: u8) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
+
+    /// Per-test scratch directory, unique across parallel tests (distinct
+    /// `tag`) and across runs (clock nanos).
+    fn unique_temp_dir(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+
+        std::env::temp_dir().join(format!("high-beam-{tag}-{nanos}"))
+    }
 
     #[test]
     fn default_dark_variant_differs_from_light() {
@@ -760,6 +782,38 @@ mod tests {
         // degrade to the builtin rather than panic or block startup.
         let theme = Theme::load_named("definitely-not-a-real-theme-xyz-9999");
         assert_eq!(theme, Theme::default_bundled());
+    }
+
+    #[test]
+    fn load_named_in_reads_a_valid_file_from_disk() {
+        // Guards the meaning of the corrupt-file test below: prove the on-disk
+        // path actually parses a present file, so a fallback-to-default there
+        // reflects the parse error rather than an always-default no-op.
+        let dir = unique_temp_dir("theme-valid");
+        std::fs::create_dir_all(&dir).expect("create fixture dir");
+        std::fs::write(dir.join("custom.toml"), "[colors]\nbackground = \"#abcdef\"\n").expect("write fixture");
+
+        let theme = Theme::load_named_in(&dir, "custom");
+        assert_eq!(
+            theme.light.colors.background,
+            Color::from_argb_u8(0xFF, 0xAB, 0xCD, 0xEF)
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_named_in_corrupt_file_falls_back_to_default() {
+        // A malformed theme file present on disk must degrade to the bundled
+        // default, never abort startup — the daemon loads the selected theme
+        // at boot, so one bad file would otherwise be a launch blocker.
+        let dir = unique_temp_dir("theme-corrupt");
+        std::fs::create_dir_all(&dir).expect("create fixture dir");
+        std::fs::write(dir.join("broken.toml"), "this = is not [valid toml").expect("write corrupt fixture");
+
+        assert_eq!(Theme::load_named_in(&dir, "broken"), Theme::default_bundled());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
