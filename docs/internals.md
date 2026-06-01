@@ -17,7 +17,7 @@ see [plugin-authoring.md](./plugin-authoring.md) and
 | Language | Rust (edition 2024) | Native binary, no GC, mature ecosystem for the pieces we need |
 | UI toolkit | Slint | Declarative `.slint` files with runtime-bound properties (good fit for theme tokens); winit windowing |
 | Plugin runtime | rquickjs (QuickJS binding) | ~1 MB embed, pure ECMAScript (not Node), per-context memory caps, interrupt hooks for timeouts |
-| Persistence | SQLite via `rusqlite` | Frecency + query history. Boring, reliable. |
+| Persistence | SQLite via `rusqlite` | Frecency + query history; schemas versioned with `rusqlite_migration`. Boring, reliable. |
 | Global hotkey | `global-hotkey` (macOS); CLI `--open` (Linux) | Wayland has no portable global-hotkey API; punt to the WM. |
 
 ## Threading
@@ -65,6 +65,32 @@ write paths.
 - Modifier (`src/frecency/score.rs`):
   `1.0 + 0.10 * picks * 2^(-age/14d)`. Half-life 14 days; one fresh
   pick is roughly a 10% bump; modifier decays back to 1.0 as picks age.
+
+## Schema migrations
+
+The frecency and query-history schemas are versioned with
+`rusqlite_migration` — a thin layer over the `rusqlite` we already bundle.
+It tracks applied versions in SQLite's `user_version` pragma and replays an
+ordered list of `M::up(...)` statements via `to_latest`. The list lives
+inline in each `db.rs` (the `MIGRATIONS` static), so there are no loose
+`.sql` files and no build step.
+
+Why this over the alternatives the issue raised:
+
+- **`rusqlite_migration`** *(chosen)* — keeps the raw `rusqlite` already in
+  the tree, adds one small crate (plus `log`), and brings no query layer.
+  The 1.x line pins to `rusqlite` 0.32; moving to 2.x would force `rusqlite`
+  to 0.40+.
+- **`refinery`** — also rusqlite-compatible, but embeds `.sql` files through
+  a proc-macro and carries multi-backend machinery we'd never exercise.
+- **`diesel` / `sqlx` migrations** — arrive welded to an ORM / async query
+  layer. Two single-table databases don't want a query layer, and both add
+  meaningful binary size.
+
+Migration v1 is the original `CREATE TABLE IF NOT EXISTS`, verbatim: a
+database written before migrations existed already holds its table at
+`user_version` 0, so v1 must no-op against it while still creating the table
+on a fresh file.
 
 ## Built-in plugins live in the host
 
