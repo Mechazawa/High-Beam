@@ -15,6 +15,8 @@ use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
 
 use crate::QueryWindow;
+#[cfg(target_os = "macos")]
+use crate::logging::LogErr;
 use crate::settings::WindowPosition;
 use crate::settings_ui::SettingsController;
 use crate::theme::ThemeVariant;
@@ -181,11 +183,20 @@ pub(crate) fn configure(window: &QueryWindow, settings: SettingsController) {
 
         EventResult::Propagate
     });
+}
 
-    // TODO: hide macOS Dock/Cmd-Tab presence via
-    // `NSApp.setActivationPolicy(NSApplicationActivationPolicyAccessory)`, or
-    // bundle as `.app` with `LSUIElement=1` in Info.plist. Independent of the
-    // activation logic below.
+/// Drop the process out of the macOS Dock / Cmd-Tab by switching it to an
+/// accessory app. No-op off macOS.
+///
+/// Scheduled onto the event loop rather than run inline: winit's
+/// `applicationDidFinishLaunching` forces `.regular` for an unbundled
+/// `cargo run`, and it fires once the loop starts — an inline call during
+/// daemon startup would be clobbered. Running post-launch makes `.accessory`
+/// stick. Packaged `.app` builds reach the same state through
+/// `background-app = true` (`LSUIElement`), which winit leaves untouched.
+pub(crate) fn hide_from_dock() {
+    #[cfg(target_os = "macos")]
+    slint::invoke_from_event_loop(macos::set_accessory_policy).log_debug("macos: schedule hide-from-dock");
 }
 
 /// Push theme tokens into the window's `in-out` properties. Re-callable
@@ -451,7 +462,7 @@ mod macos {
 
     use std::ptr::NonNull;
 
-    use objc2_app_kit::{NSApplication, NSView, NSWindow};
+    use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSView, NSWindow};
     use objc2_foundation::MainThreadMarker;
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use slint::ComponentHandle;
@@ -459,20 +470,30 @@ mod macos {
 
     use crate::QueryWindow;
 
+    /// Resolve the shared `NSApplication`, or `None` (logged against
+    /// `caller`) when invoked off the main thread. `MainThreadMarker::new()`
+    /// (rather than `new_unchecked()`) makes an off-thread caller fail loudly
+    /// instead of being UB.
+    fn ns_app(caller: &str) -> Option<objc2::rc::Retained<NSApplication>> {
+        let Some(mtm) = MainThreadMarker::new() else {
+            tracing::error!("{caller} called off the main thread");
+            return None;
+        };
+
+        Some(NSApplication::sharedApplication(mtm))
+    }
+
     /// Activate our app process and make our `NSWindow` key + frontmost.
     ///
     /// Order matters: `NSApp.activate(ignoringOtherApps: true)` first to
     /// flip the process to frontmost; without it `makeKeyAndOrderFront` on
     /// a background app's window may show the window but won't move keyboard
-    /// focus. `MainThreadMarker::new()` (rather than `new_unchecked()`) makes
-    /// a future off-thread caller fail loudly instead of being UB.
+    /// focus.
     pub fn activate_and_make_key(window: &QueryWindow) {
-        let Some(mtm) = MainThreadMarker::new() else {
-            tracing::error!("activate_and_make_key called off the main thread");
+        let Some(app) = ns_app("activate_and_make_key") else {
             return;
         };
 
-        let app = NSApplication::sharedApplication(mtm);
         // reason: `activateIgnoringOtherApps:` is deprecated in macOS 14 in
         // favour of cooperative `activate()`, but launchers explicitly do NOT
         // want to be cooperative — the whole point is being summoned over
@@ -491,6 +512,21 @@ mod macos {
         };
 
         ns_window.makeKeyAndOrderFront(None);
+    }
+
+    /// Switch the process to an accessory (agent) app so it never appears in
+    /// the Dock or Cmd-Tab. Accessory apps can still become key and frontmost,
+    /// so [`activate_and_make_key`] keeps landing focus on show.
+    ///
+    /// See [`super::hide_from_dock`] for the post-launch scheduling rationale.
+    pub fn set_accessory_policy() {
+        let Some(app) = ns_app("set_accessory_policy") else {
+            return;
+        };
+
+        if !app.setActivationPolicy(NSApplicationActivationPolicy::Accessory) {
+            tracing::warn!("setActivationPolicy(.accessory) was rejected");
+        }
     }
 
     fn ns_window_from_winit(winit_window: &winit::window::Window) -> Option<objc2::rc::Retained<NSWindow>> {
