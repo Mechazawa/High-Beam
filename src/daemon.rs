@@ -41,7 +41,19 @@ pub struct Options {
     /// Override for the plugins directory. `None` uses the default search
     /// order in [`crate::plugins::loader::LoaderOptions::resolve`].
     pub plugins_dir: Option<PathBuf>,
+    /// Text to pre-fill the query box with on the cold-start open (the
+    /// `--query` flag). Forwarded daemons receive it over IPC instead; see
+    /// [`crate::ipc::Command::OpenQuery`].
+    pub initial_query: Option<String>,
 }
+
+/// Name of the bundled tutorial plugin (its manifest `name`). The first-launch
+/// path auto-invokes this plugin's result to open its view.
+const TUTORIAL_PLUGIN_NAME: &str = "tutorial";
+
+/// Query fired on first launch; the tutorial plugin answers it (and the typed
+/// `tutorial` / `help` keywords) with the row that opens its view.
+const TUTORIAL_LAUNCH_QUERY: &str = "tutorial";
 
 /// Run the daemon. Blocks until the Slint event loop exits.
 ///
@@ -68,9 +80,11 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
     // it. A `--plugins-dir` override bypasses the platform default and
     // therefore the bundle install path too — that's intentional, devs
     // pointing at an arbitrary checkout don't want their workspace seeded.
-    if options.plugins_dir.is_none() {
-        bundle_install::install_default_plugins_if_needed();
-    }
+    //
+    // The return is `true` only when this run actually seeded — the first
+    // launch, which is when the tutorial auto-opens (the override skips
+    // seeding, so it never triggers the tutorial either).
+    let first_launch = options.plugins_dir.is_none() && bundle_install::install_default_plugins_if_needed();
 
     // Independent of the plugins-dir override — themes live in the config dir.
     bundle_install::install_default_themes_if_needed();
@@ -172,8 +186,27 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
     #[cfg(not(target_os = "macos"))]
     let _ = hotkey_spec;
 
-    if options.open_on_start {
-        window::show(&window, &settings_controller, options.activation_token.as_deref());
+    if first_launch && options.initial_query.is_none() {
+        // Open the tutorial on first launch — even a background daemon start
+        // (no `--open`) should surface it. An explicit `--query` takes
+        // precedence (handled by the branch below), since the user asked for
+        // something specific. The query queues on the runtime thread and runs
+        // once plugins finish loading; `auto-invoke-plugin` makes the
+        // tutorial's result open its view with no interaction.
+        window.set_auto_invoke_plugin(TUTORIAL_PLUGIN_NAME.into());
+        window::show(
+            &window,
+            &settings_controller,
+            options.activation_token.as_deref(),
+            Some(TUTORIAL_LAUNCH_QUERY),
+        );
+    } else if options.open_on_start {
+        window::show(
+            &window,
+            &settings_controller,
+            options.activation_token.as_deref(),
+            options.initial_query.as_deref(),
+        );
     }
 
     // `run_event_loop_until_quit` (not `window.run()`) — the daemon must
@@ -190,18 +223,23 @@ fn spawn_ipc_listener(
 ) -> io::Result<()> {
     let server = Server::bind(socket_path)?;
     thread::Builder::new().name("highbeam-ipc".into()).spawn(move || {
-        let result = server.run(move |cmd| match cmd {
-            Command::Open { activation_token } => {
-                let weak = weak.clone();
-                let settings = settings.clone();
+        let result = server.run(move |cmd| {
+            let weak = weak.clone();
+            let settings = settings.clone();
+            let (activation_token, query) = match cmd {
+                Command::Open { activation_token } => (activation_token, None),
+                Command::OpenQuery {
+                    query,
+                    activation_token,
+                } => (activation_token, Some(query)),
+            };
 
-                slint::invoke_from_event_loop(move || {
-                    if let Some(w) = weak.upgrade() {
-                        window::show(&w, &settings, activation_token.as_deref());
-                    }
-                })
-                .log_debug("ipc: post Open to event loop");
-            }
+            slint::invoke_from_event_loop(move || {
+                if let Some(w) = weak.upgrade() {
+                    window::show(&w, &settings, activation_token.as_deref(), query.as_deref());
+                }
+            })
+            .log_debug("ipc: post show to event loop");
         });
 
         if let Err(err) = result {
@@ -333,7 +371,7 @@ fn spawn_hotkey_listener(
                         // The macOS hotkey path doesn't use an activation
                         // token — `activate_and_make_key` handles focus
                         // itself via `NSApp.activate`.
-                        window::show(&w, &settings, None);
+                        window::show(&w, &settings, None, None);
                     }
                 })
                 .log_debug("hotkey: post show to event loop");

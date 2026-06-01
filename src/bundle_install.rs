@@ -20,17 +20,21 @@ use crate::logging::LogErr;
 /// Install bundled default plugins into the user's plugin directory if the
 /// directory is empty or absent. Errors are logged and swallowed — a failed
 /// install must not prevent the daemon from booting.
-pub fn install_default_plugins_if_needed() {
+///
+/// Returns `true` only when this call actually seeded the directory — i.e.
+/// the first launch. Every skip path (already populated, unbundled, stat or
+/// copy failure) returns `false`.
+pub fn install_default_plugins_if_needed() -> bool {
     let Some(user_dir) = crate::paths::plugins_dir() else {
         tracing::debug!("bundle-install: no platform plugin dir; skipping");
-        return;
+        return false;
     };
 
     let Some(bundled) = bundled_plugins_dir() else {
         // Running unbundled (cargo run) — not an error.
         tracing::debug!("bundle-install: no bundled resources; running unbundled");
 
-        return;
+        return false;
     };
 
     match user_dir_needs_seeding(&user_dir) {
@@ -40,7 +44,7 @@ pub fn install_default_plugins_if_needed() {
                 "bundle-install: user plugin dir already populated"
             );
 
-            return;
+            return false;
         }
         Ok(true) => {}
         Err(err) => {
@@ -50,7 +54,7 @@ pub fn install_default_plugins_if_needed() {
                 "bundle-install: could not stat user plugin dir; skipping install",
             );
 
-            return;
+            return false;
         }
     }
 
@@ -61,21 +65,29 @@ pub fn install_default_plugins_if_needed() {
             "bundle-install: failed to create user plugin dir",
         );
 
-        return;
+        return false;
     }
 
     match copy_dir_recursive(&bundled, &user_dir) {
-        Ok(()) => tracing::info!(
-            plugins_dir = %user_dir.display(),
-            source = %bundled.display(),
-            "bundle-install: copied default plugins into user dir",
-        ),
-        Err(err) => tracing::warn!(
-            source = %bundled.display(),
-            target = %user_dir.display(),
-            %err,
-            "bundle-install: copy failed; user must install plugins manually",
-        ),
+        Ok(()) => {
+            tracing::info!(
+                plugins_dir = %user_dir.display(),
+                source = %bundled.display(),
+                "bundle-install: copied default plugins into user dir",
+            );
+
+            true
+        }
+        Err(err) => {
+            tracing::warn!(
+                source = %bundled.display(),
+                target = %user_dir.display(),
+                %err,
+                "bundle-install: copy failed; user must install plugins manually",
+            );
+
+            false
+        }
     }
 }
 

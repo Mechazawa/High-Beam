@@ -122,6 +122,19 @@ pub(super) fn render_results(window: &QueryWindow, results: &[RankedResult]) {
     if previously_selected >= row_count || previously_selected < 0 {
         window.set_selected_index(0);
     }
+
+    maybe_auto_invoke(window);
+}
+
+/// First-launch hook: while `auto-invoke-plugin` is armed, drive the normal
+/// invoke path on every render. `invoke_selected` resolves the named plugin's
+/// result against the live results and clears the flag once it fires, so this
+/// runs exactly once and can never hit a different plugin answering the same
+/// query.
+fn maybe_auto_invoke(window: &QueryWindow) {
+    if !window.get_auto_invoke_plugin().is_empty() {
+        window.invoke_invoke_selected(false, false, false, false);
+    }
 }
 
 /// Anything that isn't a base64 data URI is treated as "no icon" so the row

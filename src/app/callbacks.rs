@@ -347,14 +347,29 @@ fn invoke_selected(
 ) {
     let Some(w) = weak.upgrade() else { return };
 
-    let idx = usize::try_from(w.get_selected_index().max(0)).unwrap_or(0);
-    let query_text = w.get_query_text().to_string();
+    // A non-empty `auto-invoke-plugin` means this fire was machine-initiated
+    // by the first-launch tutorial, not a user pressing Enter. Resolve the
+    // target by plugin name against the live `latest` (not `selected-index`,
+    // which is read from a possibly-stale render snapshot) so a yield that
+    // re-sorted the list can't make us run the wrong result; leave the flag
+    // armed until the target actually appears so a later render retries.
+    let auto_target = w.get_auto_invoke_plugin();
+    let is_auto = !auto_target.is_empty();
     let snapshot = match latest.lock() {
         Ok(s) => s,
         Err(err) => {
             tracing::error!(%err, "plugins: latest results lock poisoned");
             return;
         }
+    };
+    let idx = if is_auto {
+        let Some(found) = snapshot.iter().position(|r| r.plugin_name == auto_target.as_str()) else {
+            return;
+        };
+
+        found
+    } else {
+        usize::try_from(w.get_selected_index().max(0)).unwrap_or(0)
     };
     let Some(picked) = snapshot.get(idx) else {
         return;
@@ -376,18 +391,25 @@ fn invoke_selected(
     let result_key = picked.result.key.clone();
     drop(snapshot);
 
-    // Push the query to history before the action runs — if the action hides
-    // the window we still want the entry recorded.
-    push_history(
-        history_db,
-        history_state,
-        &query_text,
-        settings.query_history_max_entries(),
-    );
+    if is_auto {
+        // One-shot: now that the target resolved we've committed to firing.
+        w.set_auto_invoke_plugin(slint::SharedString::new());
+    } else {
+        // Push the query to history before the action runs — if the action
+        // hides the window we still want the entry recorded. The synthetic
+        // auto-invoke is skipped: it must not seed history or earn frecency.
+        let query_text = w.get_query_text().to_string();
+        push_history(
+            history_db,
+            history_state,
+            &query_text,
+            settings.query_history_max_entries(),
+        );
+    }
 
     match actions::execute(&action) {
         Ok(outcome) => {
-            if let Some(db) = frecency_db {
+            if !is_auto && let Some(db) = frecency_db {
                 spawn_pick_bump(db, plugin_name.clone(), result_key);
             }
 

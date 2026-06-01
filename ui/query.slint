@@ -32,6 +32,11 @@ export component QueryWindow inherits Window {
     in-out property <int> selected-index: 0;
     in-out property <int> max-rows: 9;
 
+    // When non-empty, the next result render that contains a row from this
+    // plugin auto-invokes it (the first-launch tutorial uses this to open its
+    // view without interaction). Cleared by Rust the moment it fires.
+    in-out property <string> auto-invoke-plugin: "";
+
     // View state. 0 = launcher (query), 1 = settings, 2 = install confirm,
     // 3 = plugin view frame (top of the view stack).
     property <int> VIEW-QUERY: 0;
@@ -265,6 +270,20 @@ export component QueryWindow inherits Window {
     // `query-edited` the edit-while-cycling state machine would clobber it.
     public function set-input-text(text: string) {
         launcher.set-input-text(text);
+    }
+
+    // Pre-fill the query box and dispatch it as a real query. Unlike
+    // `set-input-text` this fires `query-edited`, so the plugin pipeline runs
+    // exactly as if the user had typed the text. Used by the `--query` launch
+    // path and the first-launch tutorial.
+    //
+    // `show-query` first so a query forwarded to a daemon parked in settings /
+    // confirm / a plugin view lands on the visible, focused launcher rather
+    // than rendering into a hidden component.
+    public function prefill-query(text: string) {
+        root.show-query();
+        launcher.set-input-text(text);
+        root.query-edited(text);
     }
 
     // Switch between launcher and settings views. Public so Rust can invoke

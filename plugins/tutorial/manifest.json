@@ -1,0 +1,11 @@
+{
+    "name": "tutorial",
+    "displayName": "Tutorial",
+    "version": "0.1.0",
+    "description": "First-launch getting-started guide. Shown automatically the first time High Beam runs; reachable any time by typing 'tutorial', 'help', or 'welcome'.",
+    "entry": "plugin.js",
+    "timeoutMs": 500,
+    "memoryMb": 32,
+    "capabilities": ["actions"],
+    "defaultEnabled": true
+}

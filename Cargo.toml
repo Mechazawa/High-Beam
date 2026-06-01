@@ -45,6 +45,8 @@ resources = [
     { src = "plugins/quick-links/manifest.json",       target = "plugins/quick-links/manifest.json" },
     { src = "plugins/quick-links/plugin.js",           target = "plugins/quick-links/plugin.js" },
     { src = "plugins/quick-links/links.json",          target = "plugins/quick-links/links.json" },
+    { src = "plugins/tutorial/manifest.json",          target = "plugins/tutorial/manifest.json" },
+    { src = "plugins/tutorial/plugin.js",              target = "plugins/tutorial/plugin.js" },
     { src = "plugins/unit-conversions/manifest.json",  target = "plugins/unit-conversions/manifest.json" },
     { src = "plugins/unit-conversions/plugin.js",      target = "plugins/unit-conversions/plugin.js" },
     { src = "plugins/web-search/manifest.json",        target = "plugins/web-search/manifest.json" },

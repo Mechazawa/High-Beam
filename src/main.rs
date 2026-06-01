@@ -32,29 +32,40 @@ fn main() -> ExitCode {
     // etc.) don't inherit a stale token.
     let activation_token = consume_activation_token();
 
-    // `--open` first tries to contact a running daemon; if there isn't one
-    // it falls through and starts a daemon that opens immediately.
+    // `--open` and `--query` first try to contact a running daemon; if there
+    // isn't one they fall through and start a daemon that opens immediately.
+    // `--query` carries its text (and so takes precedence over a bare `--open`).
     //
     // `--once` deliberately skips the IPC fast-path: every invocation
     // cold-starts a fresh process that exits on dismiss, no single-instance
     // lock, no socket. That sidesteps the Slint-1.16 Wayland re-show issues
     // entirely. `--once` implies `--open`.
-    if args.open && !args.once {
-        let cmd = Command::Open {
-            activation_token: activation_token.clone(),
+    if !args.once {
+        let cmd = match &args.query {
+            Some(query) => Some(Command::OpenQuery {
+                query: query.clone(),
+                activation_token: activation_token.clone(),
+            }),
+            None if args.open => Some(Command::Open {
+                activation_token: activation_token.clone(),
+            }),
+            None => None,
         };
 
-        if ipc::send(&socket_path, &cmd).is_ok() {
+        if let Some(cmd) = cmd
+            && ipc::send(&socket_path, &cmd).is_ok()
+        {
             return ExitCode::SUCCESS;
         }
     }
 
     let options = Options {
-        open_on_start: args.open || args.once,
+        open_on_start: args.open || args.once || args.query.is_some(),
         once: args.once,
         activation_token,
         socket_path,
         plugins_dir: args.plugins_dir,
+        initial_query: args.query,
     };
 
     match daemon::run(options) {
