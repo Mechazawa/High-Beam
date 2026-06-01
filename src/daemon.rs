@@ -5,7 +5,7 @@
 use std::error::Error;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, PoisonError, RwLock};
 use std::thread;
 
 use slint::ComponentHandle;
@@ -50,12 +50,6 @@ pub struct Options {
 /// Returns an error if the Slint backend fails to initialize, the window
 /// fails to construct, the unix socket can't be bound (e.g. another daemon
 /// is already running), or the event loop reports a runtime error.
-///
-/// # Panics
-///
-/// Panics if the active-theme `RwLock` is poisoned — a previous panic while
-/// holding it corrupted the shared theme and painting from it would risk
-/// rendering garbage.
 // reason: `Options` is a config struct created by the caller and consumed
 // here; by-value is more ergonomic than forcing the caller to keep it alive.
 #[allow(clippy::needless_pass_by_value)]
@@ -97,7 +91,7 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
     // with the appearance watcher via `Arc`.
     let theme = Arc::new(RwLock::new(Theme::load_named(settings_for_ui.theme())));
     {
-        let theme = theme.read().expect("theme lock");
+        let theme = theme.read().unwrap_or_else(PoisonError::into_inner);
         window::apply_theme(
             &window,
             theme.variant_for(settings_for_ui.theme_mode(), os_appearance::current()),
@@ -118,7 +112,7 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
             let mode = controller.theme_mode();
             slint::invoke_from_event_loop(move || {
                 if let Some(w) = weak.upgrade() {
-                    let theme = theme.read().expect("theme lock");
+                    let theme = theme.read().unwrap_or_else(PoisonError::into_inner);
                     window::apply_theme(&w, theme.variant_for(mode, appearance));
                 }
             })
