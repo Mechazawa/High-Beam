@@ -140,8 +140,8 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
     // settings UI is writing.
     window::configure(&window, settings_controller.clone());
 
-    // Drop the daemon out of the Dock / Cmd-Tab (macOS accessory app). Safe
-    // before the loop runs: it schedules onto the event loop, see the fn doc.
+    // Keep the daemon out of the Dock / Cmd-Tab (macOS accessory app).
+    #[cfg(target_os = "macos")]
     window::hide_from_dock();
 
     // Keep the host alive for the daemon's lifetime; `Drop` sends Shutdown.

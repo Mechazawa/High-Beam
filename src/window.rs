@@ -185,17 +185,14 @@ pub(crate) fn configure(window: &QueryWindow, settings: SettingsController) {
     });
 }
 
-/// Drop the process out of the macOS Dock / Cmd-Tab by switching it to an
-/// accessory app. No-op off macOS.
+/// Keep the process out of the Dock / Cmd-Tab by making it an accessory app.
 ///
-/// Scheduled onto the event loop rather than run inline: winit's
-/// `applicationDidFinishLaunching` forces `.regular` for an unbundled
-/// `cargo run`, and it fires once the loop starts. An inline call during
-/// daemon startup would be clobbered. Running post-launch makes `.accessory`
-/// stick. Packaged `.app` builds reach the same state through
-/// `background-app = true` (`LSUIElement`), which winit leaves untouched.
+/// Deferred onto the event loop because winit resets an unbundled `cargo run`
+/// back to `.regular` in `applicationDidFinishLaunching` once the loop starts;
+/// an inline call would be undone. Bundled `.app`s use `LSUIElement`
+/// (`background-app = true`) instead.
+#[cfg(target_os = "macos")]
 pub(crate) fn hide_from_dock() {
-    #[cfg(target_os = "macos")]
     slint::invoke_from_event_loop(macos::set_accessory_policy).log_debug("macos: schedule hide-from-dock");
 }
 
@@ -470,10 +467,9 @@ mod macos {
 
     use crate::QueryWindow;
 
-    /// Resolve the shared `NSApplication`, or `None` (logged against
-    /// `caller`) when invoked off the main thread. `MainThreadMarker::new()`
-    /// (rather than `new_unchecked()`) makes an off-thread caller fail loudly
-    /// instead of being UB.
+    /// Shared `NSApplication`, or `None` (logged as `caller`) off the main
+    /// thread. `new()` over `new_unchecked()` so an off-thread call fails loud
+    /// instead of risking UB.
     fn ns_app(caller: &str) -> Option<objc2::rc::Retained<NSApplication>> {
         let Some(mtm) = MainThreadMarker::new() else {
             tracing::error!("{caller} called off the main thread");
@@ -514,11 +510,9 @@ mod macos {
         ns_window.makeKeyAndOrderFront(None);
     }
 
-    /// Switch the process to an accessory (agent) app so it never appears in
-    /// the Dock or Cmd-Tab. Accessory apps can still become key and frontmost,
-    /// so [`activate_and_make_key`] keeps landing focus on show.
-    ///
-    /// See [`super::hide_from_dock`] for the post-launch scheduling rationale.
+    /// Accessory app: no Dock icon, no Cmd-Tab entry. Still becomes
+    /// key/frontmost, so [`activate_and_make_key`] is unaffected. Scheduled
+    /// post-launch, see [`super::hide_from_dock`].
     pub fn set_accessory_policy() {
         let Some(app) = ns_app("set_accessory_policy") else {
             return;

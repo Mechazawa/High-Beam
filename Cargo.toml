@@ -242,8 +242,7 @@ global-hotkey = "0.8"
 objc2 = "0.5"
 objc2-app-kit = { version = "0.2", features = [
     "NSApplication",
-    # `setActivationPolicy:` + the `NSApplicationActivationPolicy` enum live
-    # behind this feature, used to drop the daemon out of the Dock/Cmd-Tab.
+    # `setActivationPolicy` (accessory app, no Dock icon) lives behind this.
     "NSRunningApplication",
     "NSView",
     "NSWindow",
