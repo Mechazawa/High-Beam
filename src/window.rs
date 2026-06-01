@@ -190,7 +190,7 @@ pub(crate) fn configure(window: &QueryWindow, settings: SettingsController) {
 ///
 /// Scheduled onto the event loop rather than run inline: winit's
 /// `applicationDidFinishLaunching` forces `.regular` for an unbundled
-/// `cargo run`, and it fires once the loop starts — an inline call during
+/// `cargo run`, and it fires once the loop starts. An inline call during
 /// daemon startup would be clobbered. Running post-launch makes `.accessory`
 /// stick. Packaged `.app` builds reach the same state through
 /// `background-app = true` (`LSUIElement`), which winit leaves untouched.
