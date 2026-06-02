@@ -740,6 +740,7 @@ The host throws JavaScript `Error` instances with a structured `.name`:
 |---------------------|------------------------------------------------------------------------|
 | `CapabilityError`   | Function called without its declared capability                        |
 | `AbortError`        | Operation was aborted via `AbortSignal` (a `DOMException`, also `signal.reason`) |
+| `TimeoutError`      | An `AbortSignal.timeout(ms)` deadline fired, including fetch's default 30 s one (a `DOMException`) |
 | `FsError`           | `highbeam:fs` read / cache failure (other than capability)             |
 | `ClipboardError`    | Clipboard read / write failure                                         |
 | `IconError`         | Icon resolution failed (other than the Linux placeholder fallback)     |
@@ -747,9 +748,10 @@ The host throws JavaScript `Error` instances with a structured `.name`:
 
 Plain `Error` and `TypeError` cover the usual JS-level failures (bad
 arguments, JSON parse errors, etc.). `fetch` rejects with a `TypeError` on
-transport failure and an `AbortError` `DOMException` on abort or timeout.
-`try / catch` is the right tool — the plugin can render a failed-state row
-instead of yielding nothing.
+transport failure and with the aborting signal's reason otherwise: an
+`AbortError` `DOMException` for an explicit abort, a `TimeoutError` one
+when a deadline fired. `try / catch` is the right tool — the plugin can
+render a failed-state row instead of yielding nothing.
 
 ## Versioning + drift
 

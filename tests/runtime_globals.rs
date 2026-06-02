@@ -244,6 +244,60 @@ export async function* query(_input, signal) {
 }
 
 #[test]
+fn fetch_honors_request_embedded_signal() {
+    // The guard wrapper always sets init.signal (the 30s deadline), and
+    // llrt gives the init arg precedence over a Request's own options — so
+    // without folding `input.signal` into the join, a signal baked into a
+    // Request instance would be silently dropped. A pre-aborted one must
+    // reject with AbortError before any I/O happens.
+    let report = probe(
+        "fetch-request-signal",
+        r#"{"name":"fetch-request-signal","entry":"plugin.js","timeoutMs":5000,"capabilities":["http"]}"#,
+        r#"
+export async function* query(_input, _signal) {
+    const controller = new AbortController();
+    controller.abort();
+    let report;
+    try {
+        await fetch(new Request("https://example.invalid/", { signal: controller.signal }));
+        report = "no-throw";
+    } catch (e) {
+        report = e.name;
+    }
+    yield { key: "k", title: "t", subtitle: report, action: { kind: "noop" } };
+}
+"#,
+    );
+    assert_eq!(report, "AbortError");
+}
+
+#[test]
+fn fetch_rejects_immediately_on_pre_aborted_init_signal() {
+    // Companion to the Request-embedded case: llrt's fetch only subscribes
+    // to future abort sends and AbortSignal.any's already-aborted
+    // early-return never sends, so without the guard's upfront check a
+    // pre-aborted init.signal would hang the request until transport
+    // failure instead of rejecting.
+    let report = probe(
+        "fetch-pre-aborted",
+        r#"{"name":"fetch-pre-aborted","entry":"plugin.js","timeoutMs":5000,"capabilities":["http"]}"#,
+        r#"
+export async function* query(_input, _signal) {
+    let report;
+    try {
+        await fetch("https://example.invalid/", { signal: AbortSignal.abort() });
+        report = "no-throw";
+    } catch (e) {
+        report = e.name;
+    }
+    yield { key: "k", title: "t", subtitle: report, action: { kind: "noop" } };
+}
+"#,
+    );
+    assert_eq!(report, "AbortError");
+}
+
+#[test]
 fn abort_signal_timeout_actually_fires() {
     // The native AbortSignal.timeout is replaced at install with a
     // setTimeout-backed impl (the native one routes into llrt_timers'

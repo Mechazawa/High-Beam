@@ -182,9 +182,10 @@ rquickjs = { version = "0.12", features = ["loader", "futures", "macro", "parall
 # by feature unification (llrt_fetch depends on it with defaults), which
 # routes into llrt_timers' unsound global table — the host replaces the
 # static with a setTimeout-based impl at install (sdk/js/abort_timeout_patch.js).
-# llrt_fetch: `compression-rust` instead of the default C codecs (no C
-# toolchain dep); `tls-ring` matches the rustls provider reqwest already
-# links so the process has one CryptoProvider.
+# llrt_fetch: `compression-rust` swaps brotli/gzip/deflate to Rust impls;
+# zstd has no pure-Rust impl and stays a C dep either way. `tls-ring`
+# matches the rustls provider reqwest already links so the process has one
+# CryptoProvider.
 llrt_abort = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
 llrt_buffer = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
 llrt_exceptions = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
