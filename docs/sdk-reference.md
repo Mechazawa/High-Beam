@@ -11,8 +11,10 @@ build), [plugin-cookbook.md](./plugin-cookbook.md) (recipes),
 
 ## Conventions
 
-- Every module is imported under the `highbeam:` scheme. `import 'fs'`,
-  `import 'lodash'`, etc. are rejected at load time.
+- Modules are imported under the `highbeam:` scheme, or the `node:` scheme
+  for the supported Node built-ins (`node:path`, `node:fs`,
+  `node:fs/promises`). Anything else (`import 'fs'`, `import 'lodash'`,
+  even `import 'node:os'`) is rejected at load time.
 - A module loads when the plugin declares *any* capability the module
   recognises. Functions within the module may gate themselves further — e.g.
   `highbeam:clipboard` loads on either `clipboard.read` or `clipboard.write`,
@@ -58,28 +60,12 @@ type Action =
     | { kind: 'closeView' }
     | { kind: 'noop' };       // inert row — Enter just dismisses the launcher
 
-interface HttpResponse {
-    status: number;
-    statusText: string;
-    headers: Record<string, string>;
-    body: string;
-    ok: boolean;                 // status in 200..=299
-    json(): unknown;             // throws on parse failure
-    text(): string;              // alias for body
-}
-
-interface HttpOpts {
-    headers?: Record<string, string>;
-    signal?: AbortSignal;
-    timeoutMs?: number;          // per-request override of default 30s
-}
-
 interface AbortSignal {
     readonly aborted: boolean;
-    readonly reason?: unknown;
+    readonly reason: unknown;    // a DOMException once aborted
     addEventListener(type: 'abort', listener: () => void): void;
     removeEventListener(type: 'abort', listener: () => void): void;
-    throwIfAborted(): void;
+    throwIfAborted(): void;      // throws signal.reason if aborted
 }
 
 interface AbortController {
@@ -166,77 +152,61 @@ selected.
 - Linux: best-effort `xdg-open <parent_dir>`; no selection (the freedesktop
   spec doesn't have a portable equivalent).
 
-## `highbeam:http`
+## `fetch`
 
-Async HTTP client. Built on a shared reqwest client.
-
-```js
-import { get, post, put, patch } from 'highbeam:http';
-// `delete` is a JS reserved word — rename on import, or use the
-// namespace form: `import * as http from 'highbeam:http';`.
-import { delete as del } from 'highbeam:http';
-```
+Standard WHATWG `fetch`. No import: declaring the `http` capability installs
+it (and `Headers`, `Request`, `Response`, `FormData`) as a global. Real
+classes, binary bodies, and a `ReadableStream` on `response.body`.
 
 **Capability:** `http`.
 
-### `get(url: string, opts?: HttpOpts): Promise<HttpResponse>`
-
 ```js
-const res = await get('https://xkcd.com/info.0.json', { signal });
+const res = await fetch('https://xkcd.com/info.0.json', { signal });
 if (!res.ok) throw new Error(`HTTP ${res.status}`);
-const data = res.json();
+const data = await res.json();
 ```
 
-Resolves to an `HttpResponse` regardless of HTTP status. Check `.ok` or
-`.status` to detect errors. Non-2xx does not throw.
-
-### `post(url: string, body?: string | object, opts?: HttpOpts): Promise<HttpResponse>`
-### `put(url: string, body?: string | object, opts?: HttpOpts): Promise<HttpResponse>`
-### `patch(url: string, body?: string | object, opts?: HttpOpts): Promise<HttpResponse>`
-### `delete(url: string, body?: string | object, opts?: HttpOpts): Promise<HttpResponse>`
+`fetch(input, init?)` takes a URL string or `Request` and the usual `init`
+(`method`, `headers`, `body`, `signal`, …). `body` accepts a string,
+`Uint8Array`/`ArrayBuffer`, `Blob`, `FormData`, or `URLSearchParams`. The
+`Response` exposes `.ok`, `.status`, `.statusText`, `.headers`, and the
+async readers `.json()`, `.text()`, `.arrayBuffer()`, `.blob()`, plus a
+`.body` `ReadableStream`.
 
 ```js
-const res = await post('https://api.example.com/items', { name: 'x' }, {
-    headers: { 'authorization': 'bearer ...' },
-    timeoutMs: 5000,
+const res = await fetch('https://api.example.com/items', {
+    method: 'POST',
+    headers: { 'authorization': 'bearer ...', 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'x' }),
     signal,
 });
 ```
 
-All four share the same shape — verbatim string body, JSON-stringified
-object body, or no body. `body` semantics:
-
-- `undefined` — empty body, no `Content-Type` set.
-- `string` — sent verbatim, no `Content-Type` set.
-- `object` — JSON-stringified, `Content-Type: application/json` injected.
-
-`delete` is exposed under its conventional name on the module; consumers
-must rename on import to dodge the JS reserved word (see the import block
-above).
-
 ### Behavior notes
 
-- Default timeout is 30 s. Override per request via `opts.timeoutMs`.
-- Cancellation: pass an `AbortSignal` via `opts.signal`. The signal the host
-  hands to `query(input, signal)` is the one to propagate — aborting it
-  cascades into the in-flight reqwest future when the user types another
-  keystroke.
-- `HttpResponse.body` is decoded as UTF-8. Binary bodies are post-v1.
-- `HttpResponse.json()` throws on parse failure; wrap in `try/catch` if the
-  server is allowed to return non-JSON.
-- `HttpResponse.headers` keys are lowercased.
+- Every fetch gets a 30 s timeout, injected host-side by joining your
+  `signal` (if any) with a deadline via `AbortSignal.any`. Your own signal
+  can abort sooner (`AbortSignal.timeout(5000)`, a keystroke cancel) but
+  cannot extend past the 30 s ceiling.
+- Cancellation: pass an `AbortSignal` via `init.signal`. The signal the host
+  hands to `query(input, signal)` is the one to propagate, so the next
+  keystroke cancels the in-flight request.
+- The body readers (`.json()`, `.text()`, `.arrayBuffer()`, `.blob()`) are
+  async. There is no transfer cap; a response body is bounded by the
+  plugin's `memoryMb`.
+- A non-2xx status resolves normally (check `.ok` / `.status`). `fetch`
+  rejects only on transport failure or abort.
 
 ### Example
 
 ```js
 import { openUrl } from 'highbeam:actions';
-import { get } from 'highbeam:http';
 
 export async function* query(input, signal) {
     if (!/^xkcd latest$/i.test(input)) return;
-    const res = await get('https://xkcd.com/info.0.json', { signal });
+    const res = await fetch('https://xkcd.com/info.0.json', { signal });
     if (!res.ok) return;
-    const comic = res.json();
+    const comic = await res.json();
     yield {
         key: `xkcd-${comic.num}`,
         title: `${comic.num}: ${comic.title}`,
@@ -246,7 +216,20 @@ export async function* query(input, signal) {
 }
 ```
 
-See `plugins/xkcd` for a full HTTP-driven plugin with caching.
+See `plugins/xkcd` for a full fetch-driven plugin with caching.
+
+### Migrating from `highbeam:http`
+
+The `highbeam:http` module is gone. Translate calls to `fetch`:
+
+- `get(url, opts)` → `fetch(url, opts)`.
+- `post(url, body, opts)` → `fetch(url, { method: 'POST', body, ...opts })`.
+  An object body is no longer JSON-stringified for you: call
+  `JSON.stringify(body)` and set `content-type: application/json` yourself.
+- `res.json()` / `res.text()` are now async: `await res.json()`.
+- The `timeoutMs` option is gone. Use `AbortSignal.timeout(ms)` (composed
+  with the host signal via `AbortSignal.any` when you also want
+  keystroke cancellation).
 
 ## `highbeam:clipboard`
 
@@ -292,7 +275,9 @@ import { readDir, readFile, readText, readCache, writeCache, basename } from 'hi
 
 **Capabilities:** `fs.read` for the file readers, `fs.cache` for the cache
 helpers. Both can be declared independently. `basename` is a pure string
-helper available with either.
+helper available with either. Declaring the broad `fs` capability (full
+filesystem access, see [`node:fs`](#nodefs--nodefspromises)) unlocks every
+helper here too, without naming `fs.read` / `fs.cache` separately.
 
 Relative paths passed to `readDir` / `readFile` / `readText` resolve against
 the plugin's own directory, so `readText('./bundled.json')` works regardless
@@ -649,21 +634,99 @@ have to gate every call site behind `isMacOS()`. **Capability:**
 macOS may prompt for automation permission the first time the script tries
 to control a system app (Finder, System Events, etc.). Grant once.
 
+## Always-on globals
+
+Pure-compute Web platform APIs are installed for every plugin, no capability
+and no import. They come from the llrt module crates layered on QuickJS:
+
+- `URL` / `URLSearchParams`.
+- `Buffer`, `Blob`, `File`.
+- `TextEncoder` / `TextDecoder` (multi-encoding: utf-8, utf-16le, utf-16be,
+  windows-1252, with BOM handling; invalid byte sequences decode to U+FFFD).
+- `ReadableStream` and the rest of the web-streams family.
+- `DOMException`.
+- `AbortController` / `AbortSignal`, including `AbortSignal.timeout(ms)`,
+  `AbortSignal.any([...])`, `AbortSignal.abort(reason)`, and on a signal
+  `signal.reason` (a `DOMException`) and `signal.throwIfAborted()`.
+
+`fetch` and its companions (`Headers`, `Request`, `Response`, `FormData`)
+are not in this list: they need the `http` capability (see [`fetch`](#fetch)).
+
+## `node:path`
+
+Path manipulation, importable by every plugin, no capability.
+
+```js
+import { join, basename, extname } from 'node:path';
+// or: import * as path from 'node:path';
+```
+
+**Capability:** none.
+
+Exports: `basename`, `dirname`, `extname`, `format`, `parse`, `join`,
+`resolve`, `relative`, `normalize`, `isAbsolute`, `delimiter`, `sep`.
+
+```js
+join('/Applications', 'Safari.app');        // '/Applications/Safari.app'
+extname('notes.txt');                        // '.txt'
+parse('/foo/bar.json').name;                 // 'bar'
+```
+
+Pure string operators, no filesystem access.
+
+## `node:fs` / `node:fs/promises`
+
+Full filesystem access: read and write any file the user can.
+
+```js
+import { readFileSync, writeFileSync } from 'node:fs';
+import { readFile, writeFile } from 'node:fs/promises';
+```
+
+**Capability:** `fs`. Its user-facing meaning is "FULL filesystem access,
+read and write any file your user can", so the settings UI surfaces it as a
+broad grant. Declaring `fs` also unlocks all the scoped
+[`highbeam:fs`](#highbeamfs) helpers (`readDir` / `readFile` / `readText` /
+`readCache` / `writeCache` / `basename`) without naming `fs.read` /
+`fs.cache`. The reverse does not hold: the narrower `fs.read` / `fs.cache`
+caps do NOT load `node:fs`.
+
+`node:fs` exports (sync): `accessSync`, `mkdirSync`, `mkdtempSync`,
+`readdirSync`, `readFileSync`, `rmdirSync`, `rmSync`, `statSync`,
+`lstatSync`, `writeFileSync`, `chmodSync`, `renameSync`, `symlinkSync`,
+`constants`, `promises`.
+
+`node:fs/promises` exports: `access`, `open`, `readFile`, `writeFile`,
+`rename`, `readdir`, `mkdir`, `mkdtemp`, `rm`, `rmdir`, `stat`, `lstat`,
+`chmod`, `symlink`, `constants`.
+
+```js
+import { readFile } from 'node:fs/promises';
+
+const text = await readFile('/etc/hosts', 'utf-8');
+```
+
+Prefer scoped `highbeam:fs` (relative-to-plugin reads, plugin-keyed cache)
+when that covers the need. Reach for `node:fs` only when a plugin genuinely
+needs to touch arbitrary user paths.
+
 ## Capabilities table
 
 | Capability             | Grants                                              |
 |------------------------|-----------------------------------------------------|
 | `actions`              | `highbeam:actions`                                  |
-| `http`                 | `highbeam:http.get` / `.post` / `.put` / `.patch` / `.delete` |
+| `http`                 | global `fetch` / `Headers` / `Request` / `Response` / `FormData` |
 | `clipboard.read`       | `highbeam:clipboard.read`                           |
 | `clipboard.write`      | `highbeam:clipboard.write`                          |
 | `fs.read`              | `highbeam:fs.readDir` / `.readFile` / `.readText`   |
 | `fs.cache`             | `highbeam:fs.readCache` / `.writeCache`             |
+| `fs`                   | `node:fs` / `node:fs/promises` + all `highbeam:fs.*` |
 | `icons`                | `highbeam:icons.forPath`                            |
 | `system.exec`          | `highbeam:system.exec`                              |
 | `system.applescript`   | `highbeam:system.applescript`                       |
 
-`highbeam:match`, `highbeam:platform`, and `highbeam:settings` are uncapped.
+`highbeam:match`, `highbeam:platform`, `highbeam:settings`, and `node:path`
+are uncapped, as are the always-on globals.
 
 A module loads if the plugin declares *any* of its required caps. Within a
 module, individual functions can still gate themselves more tightly.
@@ -676,16 +739,17 @@ The host throws JavaScript `Error` instances with a structured `.name`:
 | `error.name`        | When                                                                   |
 |---------------------|------------------------------------------------------------------------|
 | `CapabilityError`   | Function called without its declared capability                        |
-| `AbortError`        | Operation was aborted via `AbortSignal`                                |
-| `HttpError`         | Network failure, request timeout, body decode failure                  |
-| `FsError`           | Filesystem read / cache failure (other than capability)                |
+| `AbortError`        | Operation was aborted via `AbortSignal` (a `DOMException`, also `signal.reason`) |
+| `FsError`           | `highbeam:fs` read / cache failure (other than capability)             |
 | `ClipboardError`    | Clipboard read / write failure                                         |
 | `IconError`         | Icon resolution failed (other than the Linux placeholder fallback)     |
 | `SystemError`       | Subprocess / AppleScript failure                                       |
 
 Plain `Error` and `TypeError` cover the usual JS-level failures (bad
-arguments, JSON parse errors, etc.). `try / catch` is the right tool — the
-plugin can render a failed-state row instead of yielding nothing.
+arguments, JSON parse errors, etc.). `fetch` rejects with a `TypeError` on
+transport failure and an `AbortError` `DOMException` on abort or timeout.
+`try / catch` is the right tool — the plugin can render a failed-state row
+instead of yielding nothing.
 
 ## Versioning + drift
 

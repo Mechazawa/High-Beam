@@ -266,7 +266,8 @@ Authors who want graceful failure handle it themselves:
 ```js
 async load() {
     try {
-        this.pipeline = await http.getJson(url);
+        const res = await fetch(url);
+        this.pipeline = await res.json();
     } catch (e) {
         this.err = e;
     }
@@ -380,10 +381,10 @@ Notes:
   actual size. Same for tones.
 - **`ProgressBar.value`** is in `[0, 1]`. Omit it for indeterminate
   ("working, no fixed total"); set it for `N / total` step progress.
-- **`Image.src` is `data:` only in v1.** Plugins fetch via
-  `highbeam:http` and base64-encode. For images > ~1 MB, cache via
-  `fs.writeCache` or bump `manifest.memoryMb` — base64 of a 5 MB JPEG
-  easily blows the default 32 MB cap.
+- **`Image.src` is `data:` only in v1.** Plugins `fetch` the bytes and
+  base64-encode (`Buffer.from(await res.arrayBuffer()).toString('base64')`).
+  For images > ~1 MB, cache via `fs.writeCache` or bump `manifest.memoryMb`
+  (base64 of a 5 MB JPEG easily blows the default 32 MB cap).
 - **`Row` overlaps with `Result` on purpose** so a view can be a
   picker list. Pass `onClick: showView(Detail, { id })` to make a row
   push a detail view.
