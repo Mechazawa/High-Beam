@@ -167,7 +167,7 @@ serde_json = "1"
 #                  function* query()` without manual job-queue pumping
 #   * `macro`    — `#[rquickjs::module]` ergonomics for host modules
 #   * `parallel` — required by `futures` for Send-able runtime handles
-rquickjs = { version = "0.11", features = ["loader", "futures", "macro", "parallel"] }
+rquickjs = { version = "0.12", features = ["loader", "futures", "macro", "parallel"] }
 
 # Single-threaded tokio drives the AsyncRuntime per query.
 tokio = { version = "1", features = ["rt", "macros", "time", "sync", "process", "io-util"] }

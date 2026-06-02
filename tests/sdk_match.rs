@@ -1,7 +1,7 @@
 //! Behavioural tests for `highbeam:match` — the fuzzy matcher is Rust but
 //! only callable via JS, so we exercise it via rquickjs.
 
-use rquickjs::loader::{Loader, Resolver};
+use rquickjs::loader::{ImportAttributes, Loader, Resolver};
 use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Error as JsError, Module, async_with};
 
 use high_beam::sdk::r#match::MatchModule;
@@ -9,7 +9,13 @@ use high_beam::sdk::r#match::MatchModule;
 struct OnlyMatch;
 
 impl Resolver for OnlyMatch {
-    fn resolve(&mut self, _ctx: &Ctx<'_>, _base: &str, name: &str) -> Result<String, JsError> {
+    fn resolve<'js>(
+        &mut self,
+        _ctx: &Ctx<'js>,
+        _base: &str,
+        name: &str,
+        _attributes: Option<ImportAttributes<'js>>,
+    ) -> Result<String, JsError> {
         if name == "highbeam:match" || name == "test:harness" {
             Ok(name.to_owned())
         } else {
@@ -19,7 +25,12 @@ impl Resolver for OnlyMatch {
 }
 
 impl Loader for OnlyMatch {
-    fn load<'js>(&mut self, ctx: &Ctx<'js>, name: &str) -> Result<Module<'js>, JsError> {
+    fn load<'js>(
+        &mut self,
+        ctx: &Ctx<'js>,
+        name: &str,
+        _attributes: Option<ImportAttributes<'js>>,
+    ) -> Result<Module<'js>, JsError> {
         Module::declare_def::<MatchModule, _>(ctx.clone(), name)
     }
 }

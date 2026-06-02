@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use rquickjs::loader::{Loader, Resolver};
+use rquickjs::loader::{ImportAttributes, Loader, Resolver};
 use rquickjs::{AsyncContext, AsyncRuntime, Ctx, Error as JsError, Module, async_with};
 use serde_json::Value as JsonValue;
 use serde_json::json;
@@ -15,7 +15,13 @@ use high_beam::sdk::settings::{self, SettingsModule};
 struct OnlySettings;
 
 impl Resolver for OnlySettings {
-    fn resolve(&mut self, _ctx: &Ctx<'_>, _base: &str, name: &str) -> Result<String, JsError> {
+    fn resolve<'js>(
+        &mut self,
+        _ctx: &Ctx<'js>,
+        _base: &str,
+        name: &str,
+        _attributes: Option<ImportAttributes<'js>>,
+    ) -> Result<String, JsError> {
         if name == "highbeam:settings" || name == "settings:test" {
             Ok(name.to_owned())
         } else {
@@ -30,7 +36,12 @@ impl Resolver for OnlySettings {
 struct SettingsLoader;
 
 impl Loader for SettingsLoader {
-    fn load<'js>(&mut self, ctx: &Ctx<'js>, name: &str) -> Result<Module<'js>, JsError> {
+    fn load<'js>(
+        &mut self,
+        ctx: &Ctx<'js>,
+        name: &str,
+        _attributes: Option<ImportAttributes<'js>>,
+    ) -> Result<Module<'js>, JsError> {
         Module::declare_def::<SettingsModule, _>(ctx.clone(), name)
     }
 }

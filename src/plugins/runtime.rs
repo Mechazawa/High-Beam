@@ -19,7 +19,7 @@ use std::time::Duration;
 use serde_json::Value as JsonValue;
 
 use rquickjs::function::This;
-use rquickjs::loader::{Loader, Resolver};
+use rquickjs::loader::{ImportAttributes, Loader, Resolver};
 use rquickjs::module::Evaluated;
 use rquickjs::{
     AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Error as JsError, Function, IntoJs, Module, Object, Promise,
@@ -908,7 +908,13 @@ pub(crate) fn default_cache_dir(plugin_name: &str) -> std::path::PathBuf {
 struct HighbeamResolver;
 
 impl Resolver for HighbeamResolver {
-    fn resolve(&mut self, _ctx: &Ctx<'_>, _base: &str, name: &str) -> Result<String, JsError> {
+    fn resolve<'js>(
+        &mut self,
+        _ctx: &Ctx<'js>,
+        _base: &str,
+        name: &str,
+        _attributes: Option<ImportAttributes<'js>>,
+    ) -> Result<String, JsError> {
         if name.starts_with(HIGHBEAM_SCHEME) || name == "plugin:main" {
             Ok(name.to_owned())
         } else {
@@ -934,7 +940,12 @@ impl HighbeamLoader {
 }
 
 impl Loader for HighbeamLoader {
-    fn load<'js>(&mut self, ctx: &Ctx<'js>, name: &str) -> Result<Module<'js>, JsError> {
+    fn load<'js>(
+        &mut self,
+        ctx: &Ctx<'js>,
+        name: &str,
+        _attributes: Option<ImportAttributes<'js>>,
+    ) -> Result<Module<'js, rquickjs::module::Declared>, JsError> {
         if !name.starts_with(HIGHBEAM_SCHEME) {
             return Err(JsError::new_loading_message(
                 name,

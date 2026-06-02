@@ -1,7 +1,7 @@
 //! Behavioural tests for `highbeam:icons` — capability gating and the
 //! in-process cache.
 
-use rquickjs::loader::{Loader, Resolver};
+use rquickjs::loader::{ImportAttributes, Loader, Resolver};
 use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Error as JsError, Module, async_with};
 
 use high_beam::sdk::icons::{IconsModule, install};
@@ -9,7 +9,13 @@ use high_beam::sdk::icons::{IconsModule, install};
 struct OnlyIcons;
 
 impl Resolver for OnlyIcons {
-    fn resolve(&mut self, _ctx: &Ctx<'_>, _base: &str, name: &str) -> Result<String, JsError> {
+    fn resolve<'js>(
+        &mut self,
+        _ctx: &Ctx<'js>,
+        _base: &str,
+        name: &str,
+        _attributes: Option<ImportAttributes<'js>>,
+    ) -> Result<String, JsError> {
         if name == "highbeam:icons" || name == "test:harness" {
             Ok(name.to_owned())
         } else {
@@ -19,7 +25,12 @@ impl Resolver for OnlyIcons {
 }
 
 impl Loader for OnlyIcons {
-    fn load<'js>(&mut self, ctx: &Ctx<'js>, name: &str) -> Result<Module<'js>, JsError> {
+    fn load<'js>(
+        &mut self,
+        ctx: &Ctx<'js>,
+        name: &str,
+        _attributes: Option<ImportAttributes<'js>>,
+    ) -> Result<Module<'js>, JsError> {
         Module::declare_def::<IconsModule, _>(ctx.clone(), name)
     }
 }

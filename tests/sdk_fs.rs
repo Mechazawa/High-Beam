@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use rquickjs::loader::{Loader, Resolver};
+use rquickjs::loader::{ImportAttributes, Loader, Resolver};
 use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Error as JsError, Module, async_with};
 
 use high_beam::sdk::fs::{FsModule, install};
@@ -14,7 +14,13 @@ use common::fresh_tmp;
 struct OnlyFs;
 
 impl Resolver for OnlyFs {
-    fn resolve(&mut self, _ctx: &Ctx<'_>, _base: &str, name: &str) -> Result<String, JsError> {
+    fn resolve<'js>(
+        &mut self,
+        _ctx: &Ctx<'js>,
+        _base: &str,
+        name: &str,
+        _attributes: Option<ImportAttributes<'js>>,
+    ) -> Result<String, JsError> {
         if name == "highbeam:fs" || name == "test:harness" {
             Ok(name.to_owned())
         } else {
@@ -24,7 +30,12 @@ impl Resolver for OnlyFs {
 }
 
 impl Loader for OnlyFs {
-    fn load<'js>(&mut self, ctx: &Ctx<'js>, name: &str) -> Result<Module<'js>, JsError> {
+    fn load<'js>(
+        &mut self,
+        ctx: &Ctx<'js>,
+        name: &str,
+        _attributes: Option<ImportAttributes<'js>>,
+    ) -> Result<Module<'js>, JsError> {
         Module::declare_def::<FsModule, _>(ctx.clone(), name)
     }
 }

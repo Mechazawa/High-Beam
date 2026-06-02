@@ -2,7 +2,7 @@
 //! hand-written `.d.ts` under `sdk/highbeam/`. Drift surfaces as a failing
 //! test rather than as cryptic plugin-author errors at runtime.
 
-use rquickjs::loader::{Loader, Resolver};
+use rquickjs::loader::{ImportAttributes, Loader, Resolver};
 use rquickjs::{AsyncContext, AsyncRuntime, Ctx, Error as JsError, Module, Object, async_with};
 
 use high_beam::sdk::actions::ActionsModule;
@@ -50,7 +50,13 @@ fn expected_for(name: &str) -> &'static [&'static str] {
 struct OneShotResolver(&'static str);
 
 impl Resolver for OneShotResolver {
-    fn resolve(&mut self, _ctx: &Ctx<'_>, _base: &str, name: &str) -> Result<String, JsError> {
+    fn resolve<'js>(
+        &mut self,
+        _ctx: &Ctx<'js>,
+        _base: &str,
+        name: &str,
+        _attributes: Option<ImportAttributes<'js>>,
+    ) -> Result<String, JsError> {
         if name == self.0 || name == "shape:test" {
             Ok(name.to_owned())
         } else {
@@ -76,7 +82,12 @@ enum OneShotLoader {
 }
 
 impl Loader for OneShotLoader {
-    fn load<'js>(&mut self, ctx: &Ctx<'js>, name: &str) -> Result<Module<'js>, JsError> {
+    fn load<'js>(
+        &mut self,
+        ctx: &Ctx<'js>,
+        name: &str,
+        _attributes: Option<ImportAttributes<'js>>,
+    ) -> Result<Module<'js>, JsError> {
         match self {
             Self::Actions => Module::declare_def::<ActionsModule, _>(ctx.clone(), name),
             Self::Http => Module::declare_def::<HttpModule, _>(ctx.clone(), name),
