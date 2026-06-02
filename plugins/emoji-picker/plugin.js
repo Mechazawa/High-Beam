@@ -73,22 +73,10 @@ function scoreField(items, q, project, threshold) {
     return out;
 }
 
-function bestAliasHay(item) {
-    const aliases = item.a ?? [];
-    if (aliases.length === 0) return "";
-    return aliases.join(" ");
-}
-
-function bestTagHay(item) {
-    const tags = item.t ?? [];
-    if (tags.length === 0) return "";
-    return tags.join(" ");
-}
-
 function rank(items, q) {
     const nameScores = scoreField(items, q, (i) => i.n, MATCH_THRESHOLD);
-    const aliasScores = scoreField(items, q, bestAliasHay, MATCH_THRESHOLD);
-    const tagScores = scoreField(items, q, bestTagHay, MATCH_THRESHOLD);
+    const aliasScores = scoreField(items, q, (i) => (i.a ?? []).join(" "), MATCH_THRESHOLD);
+    const tagScores = scoreField(items, q, (i) => (i.t ?? []).join(" "), MATCH_THRESHOLD);
 
     const seen = new Set([
         ...nameScores.keys(),

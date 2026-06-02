@@ -26,7 +26,7 @@ pub fn install_default_plugins_if_needed() {
         return;
     };
 
-    let Some(bundled) = bundled_plugins_dir() else {
+    let Some(bundled) = bundled_resource_dir("plugins") else {
         // Running unbundled (cargo run) — not an error.
         tracing::debug!("bundle-install: no bundled resources; running unbundled");
 
@@ -118,12 +118,6 @@ pub fn install_default_themes_if_needed() {
             "bundle-install: theme seed failed",
         ),
     }
-}
-
-/// Resolve the bundled plugin dir relative to the running executable.
-/// Thin wrapper over [`bundled_resource_dir`] — see its docs for the layout.
-fn bundled_plugins_dir() -> Option<PathBuf> {
-    bundled_resource_dir("plugins")
 }
 
 /// Resolve a bundled resource subdirectory (`plugins`, `themes`, …) relative
