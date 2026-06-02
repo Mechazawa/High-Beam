@@ -5,7 +5,7 @@ big choices, threading model, cancellation contract, and the Slint
 gotchas that took a day to debug the first time around. Read this when
 you're about to touch the host, not when you're using it.
 
-For the module layout, `src/lib.rs` is the source of truth — listing
+For the module layout, `src/lib.rs` is the source of truth. Listing
 modules here just drifts on every rename. For the plugin-author API,
 see [plugin-authoring.md](./plugin-authoring.md) and
 [sdk-reference.md](./sdk-reference.md).
@@ -17,7 +17,7 @@ see [plugin-authoring.md](./plugin-authoring.md) and
 | Language | Rust (edition 2024) | Native binary, no GC, mature ecosystem for the pieces we need |
 | UI toolkit | Slint | Declarative `.slint` files with runtime-bound properties (good fit for theme tokens); winit windowing |
 | Plugin runtime | rquickjs (QuickJS binding) | ~1 MB embed, pure ECMAScript (not Node), per-context memory caps, interrupt hooks for timeouts |
-| Persistence | SQLite via `rusqlite` | Frecency + query history. Boring, reliable. |
+| Persistence | SQLite via `rusqlite` | Frecency + query history; schemas versioned with `rusqlite_migration`. Boring, reliable. |
 | Global hotkey | `global-hotkey` (macOS); CLI `--open` (Linux) | Wayland has no portable global-hotkey API; punt to the WM. |
 
 ## Threading
@@ -25,14 +25,14 @@ see [plugin-authoring.md](./plugin-authoring.md) and
 Three threads carry the protocol; a handful of small ones do
 fire-and-forget housekeeping.
 
-- **Slint event loop (main)** — owns the window, runs Slint callbacks,
+- **Slint event loop (main)**: owns the window, runs Slint callbacks,
   owns the `global-hotkey` manager on macOS. All Slint operations must
   run here; other threads route through `slint::invoke_from_event_loop`.
-- **`highbeam-plugin-runtime`** — single-threaded tokio runtime that
+- **`highbeam-plugin-runtime`**: single-threaded tokio runtime that
   owns every loaded `LoadedPlugin` (rquickjs `AsyncContext`). Plugins
   live here because rquickjs futures are `!Send` across `async_with!`
   under the `parallel` feature, so they can't cross threads.
-- **`highbeam-ipc`** — blocks on the unix socket; hops back to the
+- **`highbeam-ipc`**: blocks on the unix socket; hops back to the
   Slint thread to show the window.
 
 The hotkey listener thread (`highbeam-hotkey`, macOS only) is a tiny
@@ -52,7 +52,7 @@ write paths.
 - All host APIs that do I/O (`http.get`, `fs.readDir`, `system.exec`,
   etc.) accept an optional `signal` and honor it.
 - CPU-bound plugins that block synchronously can't be cancelled
-  gracefully — the per-plugin `timeoutMs` is the hard kill via the
+  gracefully. The per-plugin `timeoutMs` is the hard kill via the
   rquickjs interrupt hook. The watchdog runs on the blocking thread
   pool so a `while(true){}` JS body can't starve it.
 
@@ -66,18 +66,44 @@ write paths.
   `1.0 + 0.10 * picks * 2^(-age/14d)`. Half-life 14 days; one fresh
   pick is roughly a 10% bump; modifier decays back to 1.0 as picks age.
 
+## Schema migrations
+
+The frecency and query-history schemas are versioned with
+`rusqlite_migration`, a thin layer over the `rusqlite` we already bundle.
+It tracks applied versions in SQLite's `user_version` pragma and replays an
+ordered list of `M::up(...)` statements via `to_latest`. The list lives
+inline in each `db.rs` (the `MIGRATIONS` static), so there are no loose
+`.sql` files and no build step.
+
+Why this over the alternatives:
+
+- **`rusqlite_migration`** *(chosen)*: keeps the raw `rusqlite` already in
+  the tree, adds one small crate (plus `log`), and brings no query layer.
+  The 1.x line pins to `rusqlite` 0.32; moving to 2.x would force `rusqlite`
+  to 0.40+.
+- **`refinery`**: also rusqlite-compatible, but embeds `.sql` files through
+  a proc-macro and carries multi-backend machinery we'd never exercise.
+- **`diesel` / `sqlx` migrations**: arrive welded to an ORM / async query
+  layer. Two single-table databases don't want a query layer, and both add
+  meaningful binary size.
+
+Migration v1 is the original `CREATE TABLE IF NOT EXISTS`, verbatim: a
+database written before migrations existed already holds its table at
+`user_version` 0, so v1 must no-op against it while still creating the table
+on a fresh file.
+
 ## Built-in plugins live in the host
 
 Core system actions (shutdown / restart / lock / sleep / exit High Beam
 / install / reload / update / settings / version readout) are
 implemented in Rust as in-process built-ins
 (`src/plugins/builtin/core.rs`). They appear alongside JS plugins in
-the result list but never go through rquickjs — a buggy plugin must
+the result list but never go through rquickjs. A buggy plugin must
 not be able to power off the user's machine.
 
 ## Slint gotchas
 
-These are load-bearing for future UI work — they're easy to relearn
+These are load-bearing for future UI work; they're easy to relearn
 the hard way.
 
 ### Daemon-shaped event loops: do NOT use `ComponentHandle::run()`
@@ -85,7 +111,7 @@ the hard way.
 `ComponentHandle::run()` calls `show()` → `run_event_loop()` →
 `hide()` and couples the event-loop lifetime to the window's
 lifetime. The first time the last window closes, the loop ends and
-the daemon dies — taking the IPC listener and global hotkey with it.
+the daemon dies, taking the IPC listener and global hotkey with it.
 
 Use `slint::run_event_loop_until_quit()`. Show/hide windows freely;
 the loop only ends on explicit `quit_event_loop()`.
@@ -113,7 +139,7 @@ that directly assigns `input.text = ""` and call it from Rust.
 Slint 1.16's Wayland `hide()` destroys the underlying winit window
 via `suspend()`, and when the destroy fails (because Slint's renderer
 holds extra `Arc<winit::Window>` refs we can't drop from app code)
-the state still flips to `None` — so the *next* `show()` won't
+the state still flips to `None`, so the *next* `show()` won't
 re-attach the surface and the launcher silently never opens again.
 
 The workaround in `src/window.rs::hide`: set an `is-hidden` flag in
@@ -144,7 +170,7 @@ In `src/window.rs` (gated `#[cfg(target_os = "macos")]`):
 
 1. `NSApplication.sharedApplication().activate(ignoringOtherApps: true)`
 2. `nsWindow.makeKeyAndOrderFront(nil)`
-3. Slint's focus call — now sticks.
+3. Slint's focus call (now sticks).
 
 `activateIgnoringOtherApps:` is deprecated on macOS 14+ in favor of
 cooperative `activate()`. Launchers explicitly want non-cooperative
@@ -173,7 +199,7 @@ Considered seriously. Rejected because:
 
 - Async + debugging DX are still rough in WASI Preview 2 / Component
   Model.
-- Sandboxing is theoretical — Alfred (900+ workflows), Raycast (2000+
+- Sandboxing is theoretical: Alfred (900+ workflows), Raycast (2000+
   extensions), Albert, Ulauncher all forgo it. Without sandboxing as
   a load-bearing reason, the DX cost is too high.
 - Polyglot plugins are a feature we don't need.
