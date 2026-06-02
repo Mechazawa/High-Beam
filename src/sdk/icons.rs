@@ -108,7 +108,7 @@ async fn resolve_icon(ctx: &Ctx<'_>, path: &str, size: u32) -> JsResult<String> 
     // falls back to a transparent PNG below).
     let (bytes, mime) = tokio::task::spawn_blocking(move || extract_icon_bytes(&path_owned, size))
         .await
-        .map_err(|e| throw_io(ctx, &join_error_message(&e)))?
+        .map_err(|e| throw_named(ctx, "IconError", &join_error_message(&e)))?
         .unwrap_or_else(|| (fallback_icon_bytes().to_vec(), "image/png"));
 
     let encoded = STANDARD.encode(&bytes);
@@ -278,10 +278,6 @@ fn fallback_icon_bytes() -> &'static [u8] {
         0xb4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
     ];
     PNG
-}
-
-fn throw_io(ctx: &Ctx<'_>, message: &str) -> rquickjs::Error {
-    throw_named(ctx, "IconError", message)
 }
 
 #[cfg(test)]
