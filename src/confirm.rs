@@ -8,10 +8,8 @@ use tokio::sync::oneshot;
 use crate::plugins::manifest::Manifest;
 use crate::sdk::capability::explain_cap;
 
-/// One row in the capability list the confirmation view renders.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CapabilityEntry {
-    /// Raw capability string from the manifest.
     pub cap: String,
     /// Human-readable explanation — falls back to the raw cap when unknown.
     pub explanation: String,
@@ -30,20 +28,14 @@ impl CapabilityEntry {
     }
 }
 
-/// Everything the confirmation view needs to render itself.
 #[derive(Debug, Clone)]
 pub struct ConfirmationSummary {
     /// `display_name` when present, otherwise `name`.
     pub display_name: String,
-    /// Raw plugin name (manifest `name`).
     pub plugin_name: String,
-    /// Semver string, may be empty.
     pub version: String,
-    /// Optional human-readable description.
     pub description: String,
-    /// Source manifest URL.
     pub manifest_url: String,
-    /// Capability list to render.
     pub capabilities: Vec<CapabilityEntry>,
 }
 
@@ -74,7 +66,6 @@ impl ConfirmationSummary {
     }
 }
 
-/// Pending install/update waiting for the user's decision.
 pub struct PendingConfirmation {
     /// Send `true` → proceed, `false` → cancel.
     pub tx: oneshot::Sender<bool>,

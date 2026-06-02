@@ -19,7 +19,6 @@ use crate::plugins::runtime::LoadedPlugin;
 /// holding up an otherwise responsive UI.
 pub(crate) const MAX_DEBOUNCE_MS: u64 = 2000;
 
-/// One result, tagged with the plugin name that produced it.
 #[derive(Debug)]
 pub(crate) struct StreamedResult {
     pub plugin_name: String,

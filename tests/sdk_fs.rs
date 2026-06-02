@@ -57,6 +57,33 @@ async fn run_script(can_read: bool, can_cache: bool, cache_dir: PathBuf, src: Ve
 }
 
 #[test]
+fn basename_strips_directories_and_trailing_slashes() {
+    let dir = fresh_tmp("basename");
+    let cache = dir.join("cache");
+    let rt = rt();
+    // Both caps false — basename is a pure helper and must work ungated.
+    let outcome = rt.block_on(run_script(
+        false,
+        false,
+        cache,
+        br"
+            import { basename } from 'highbeam:fs';
+            globalThis.__test = Promise.resolve([
+                basename('/foo/bar.txt'),
+                basename('/foo/bar/'),
+                basename('relative.md'),
+                basename('/'),
+                basename(''),
+                basename('..'),
+            ].join('|'));
+        "
+        .to_vec(),
+    ));
+    assert_eq!(outcome, "bar.txt|bar|relative.md|||..");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn read_text_without_cap_throws() {
     let dir = fresh_tmp("no-cap");
     let cache = dir.join("cache");

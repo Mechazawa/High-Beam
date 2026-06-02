@@ -23,7 +23,6 @@ use crate::theme::Theme;
 use crate::window;
 
 pub struct Options {
-    /// Open the window immediately after the daemon starts.
     pub open_on_start: bool,
     /// Single-shot: skip the IPC socket bind and the hotkey listener, and
     /// quit the event loop on the first dismiss. The launcher behaves as

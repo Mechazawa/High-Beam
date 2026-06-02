@@ -22,7 +22,7 @@ fn expected_for(name: &str) -> &'static [&'static str] {
         "highbeam:actions" => &["openUrl", "copy", "exec", "reveal", "showView", "closeView"],
         "highbeam:http" => &["get", "post", "put", "patch", "delete"],
         "highbeam:clipboard" => &["read", "write"],
-        "highbeam:fs" => &["readDir", "readFile", "readText", "readCache", "writeCache"],
+        "highbeam:fs" => &["readDir", "readFile", "readText", "readCache", "writeCache", "basename"],
         "highbeam:icons" => &["forPath"],
         "highbeam:match" => &["fuzzy"],
         "highbeam:system" => &["exec", "applescript"],

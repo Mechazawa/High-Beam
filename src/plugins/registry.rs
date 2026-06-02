@@ -156,15 +156,16 @@ impl PluginRegistry {
     }
 }
 
-/// Reasons [`PluginRegistry::reload_one`] could fail.
 #[derive(Debug)]
 pub enum ReloadError {
-    /// The registry doesn't currently hold a plugin by that name.
     NotFound(String),
     /// The plugin dir was found but the new load failed (manifest parse,
     /// JS eval, etc.). The previous instance is kept in the registry so the
     /// user isn't left with a hole.
-    Failed { name: String, reason: String },
+    Failed {
+        name: String,
+        reason: String,
+    },
 }
 
 impl std::fmt::Display for ReloadError {

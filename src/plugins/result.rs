@@ -12,7 +12,6 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-/// One result row.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PluginResult {
     pub key: String,
@@ -118,6 +117,32 @@ pub enum Action {
     /// same thing.
     #[serde(rename = "closeView")]
     CloseView,
+}
+
+impl Action {
+    /// The wire `kind` when this variant is host-only (Core built-in only),
+    /// `None` for plugin-legal variants. The serde derive happily parses
+    /// every variant from plugin JSON, so the boundaries that accept
+    /// plugin-supplied actions (`stream_query`, view dispatch) reject these
+    /// explicitly — otherwise any plugin could yield `{"kind":"quit"}` and
+    /// kill the daemon on Enter.
+    #[must_use]
+    pub fn host_only_kind(&self) -> Option<&'static str> {
+        match self {
+            Self::Quit => Some("quit"),
+            Self::OpenSettings => Some("openSettings"),
+            Self::ReloadPlugin { .. } => Some("reloadPlugin"),
+            Self::InstallPlugin { .. } => Some("installPlugin"),
+            Self::UpdatePlugins => Some("updatePlugins"),
+            Self::OpenUrl { .. }
+            | Self::Copy { .. }
+            | Self::Exec { .. }
+            | Self::Reveal { .. }
+            | Self::Noop
+            | Self::ShowView { .. }
+            | Self::CloseView => None,
+        }
+    }
 }
 
 /// A result enriched with the plugin name that produced it. Two plugins

@@ -191,7 +191,6 @@ pub(super) fn wire_window_callbacks(
         );
     });
 
-    // Install — confirmed.
     let confirm_state_install = Arc::clone(&confirm_state);
     let host_view_for_confirm_install = Arc::clone(&host_view);
     let weak_confirm_install = window.as_weak();
@@ -205,7 +204,6 @@ pub(super) fn wire_window_callbacks(
         );
     });
 
-    // Install — cancelled.
     let confirm_state_cancel = confirm_state;
     let host_view_for_confirm_cancel = Arc::clone(&host_view);
     let weak_confirm_cancel = window.as_weak();
@@ -899,6 +897,14 @@ fn handle_view_dispatch(
             return;
         }
     };
+
+    // Must be rejected before execute() — Quit's effect (process::exit)
+    // happens inside execute, so the outcome-level guards below come too
+    // late for it.
+    if let Some(kind) = action.host_only_kind() {
+        tracing::warn!(%plugin, kind, "views: dispatch of host-only action ignored");
+        return;
+    }
     let outcome = match actions::execute(&action) {
         Ok(o) => o,
         Err(err) => {

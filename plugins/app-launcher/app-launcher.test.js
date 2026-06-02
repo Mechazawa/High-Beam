@@ -181,7 +181,7 @@ describe('app-launcher Linux', () => {
 
         expect(results.length).toBeGreaterThan(0);
         const firefox = results.find((r) =>
-            /firefox/i.test(r.title.replace(/<[^>]+>/g, '')),
+            /firefox/i.test(r.title),
         );
         expect(firefox).toBeDefined();
         expect(firefox.key).toBe(`${LINUX_DIR}/firefox.desktop`);
@@ -198,7 +198,7 @@ describe('app-launcher Linux', () => {
             plugin.query('gimp', { aborted: false }),
         );
         const gimp = results.find((r) =>
-            /gimp/i.test(r.title.replace(/<[^>]+>/g, '')),
+            /gimp/i.test(r.title),
         );
         expect(gimp).toBeDefined();
         expect(gimp.icon).toBe(ICON_SENTINEL);
@@ -208,7 +208,7 @@ describe('app-launcher Linux', () => {
             plugin.query('firefox', { aborted: false }),
         );
         const firefox = fireResults.find((r) =>
-            /firefox/i.test(r.title.replace(/<[^>]+>/g, '')),
+            /firefox/i.test(r.title),
         );
         // Bare XDG names now resolve via the host's freedesktop-icons lookup;
         // the plugin hands the raw spec to `forPath` and lets the host walk

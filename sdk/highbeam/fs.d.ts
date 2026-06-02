@@ -69,3 +69,10 @@ export function writeCache(
     name: string,
     data: Uint8Array | string,
 ): Promise<void>;
+
+/**
+ * Final component of `path` after stripping trailing slashes. Empty string
+ * for the root and the empty path; `.` / `..` pass through as-is (matching
+ * Node's `path.posix.basename`). Pure string helper — no I/O, no extra cap.
+ */
+export function basename(path: string): string;

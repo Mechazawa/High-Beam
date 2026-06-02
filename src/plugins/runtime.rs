@@ -31,7 +31,7 @@ use tokio_util::sync::CancellationToken;
 use crate::logging::LogErr;
 use crate::plugins::log::{LogLevel, PluginLog};
 use crate::plugins::manifest::Manifest;
-use crate::plugins::result::PluginResult;
+use crate::plugins::result::{Action, PluginResult};
 use crate::sdk::abort::{Abort, install_global_controller};
 use crate::sdk::actions::ActionsModule;
 use crate::sdk::capability;
@@ -44,6 +44,7 @@ use crate::sdk::r#match::MatchModule;
 use crate::sdk::platform::PlatformModule;
 use crate::sdk::settings::{self, SettingsModule};
 use crate::sdk::system;
+use crate::sdk::text_codec;
 use crate::sdk::timers;
 use crate::sdk::view::ViewModule;
 
@@ -72,7 +73,6 @@ const QUERY_GLOBAL: &str = "__highbeam_query";
 const ON_ENABLE_GLOBAL: &str = "__highbeam_on_enable";
 const ON_DISABLE_GLOBAL: &str = "__highbeam_on_disable";
 
-/// Which lifecycle hook to dispatch.
 #[derive(Debug, Clone, Copy)]
 pub enum HookKind {
     Enable,
@@ -141,9 +141,7 @@ pub struct LoadedPlugin {
     // Mirrors what the interrupt hook captures; we keep the Arc alive here.
     interrupt_flag: Arc<AtomicBool>,
     log: Arc<PluginLog>,
-    /// Whether the plugin exported an `onEnable` function.
     has_on_enable: bool,
-    /// Whether the plugin exported an `onDisable` function.
     has_on_disable: bool,
     /// Fires when this plugin is being torn down (e.g. registry swap, daemon
     /// shutdown). Lifecycle hook tasks observe this and forward it to the
@@ -151,7 +149,6 @@ pub struct LoadedPlugin {
     shutdown: CancellationToken,
 }
 
-/// Errors surfaced while loading or running a plugin.
 #[derive(Debug)]
 pub enum PluginError {
     Io(std::io::Error),
@@ -545,7 +542,6 @@ impl Drop for LoadedPlugin {
     }
 }
 
-/// Set of hook exports we found on the plugin's entry module.
 struct ExportFlags {
     has_on_enable: bool,
     has_on_disable: bool,
@@ -593,6 +589,10 @@ fn install_host_globals<S: std::hash::BuildHasher>(
     timers::install(ctx)
         .catch(ctx)
         .map_err(|err| PluginError::Js(format!("install setTimeout: {err}")))?;
+
+    text_codec::install(ctx)
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("install TextEncoder/TextDecoder: {err}")))?;
 
     // Per-plugin options bag; populated even when the plugin declared no
     // options so `get('anything')` is always callable and returns undefined.
@@ -727,7 +727,6 @@ async fn run_hook<'js>(
     result
 }
 
-/// Map a hook outcome to a `plugin.log` line.
 fn log_hook_outcome(
     log: &PluginLog,
     plugin_name: &str,
@@ -855,6 +854,16 @@ async fn stream_query<'js>(
             .map_err(|err| PluginError::Js(format!("JSON.stringify yielded value: {err}")))?;
         let parsed: PluginResult =
             serde_json::from_str(&json_str).map_err(|err| PluginError::InvalidResult(format!("{err}: {json_str}")))?;
+
+        let host_only = parsed
+            .action
+            .host_only_kind()
+            .or_else(|| parsed.alt_action.as_ref().and_then(Action::host_only_kind));
+        if let Some(kind) = host_only {
+            return Err(PluginError::InvalidResult(format!(
+                "action kind `{kind}` is host-only and not allowed from plugins"
+            )));
+        }
 
         if tx.send(parsed).is_err() {
             // Receiver dropped — treat as a cancel.

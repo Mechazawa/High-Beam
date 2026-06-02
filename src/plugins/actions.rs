@@ -45,9 +45,12 @@ pub enum ActionOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HostTask {
     /// `None` ⇒ reload every plugin; `Some(name)` ⇒ reload just that one.
-    Reload { name: Option<String> },
-    /// Install a plugin from the given manifest URL.
-    Install { url: String },
+    Reload {
+        name: Option<String>,
+    },
+    Install {
+        url: String,
+    },
 }
 
 /// Execute an action.

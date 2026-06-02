@@ -64,7 +64,6 @@ impl Abort {
         &self.token
     }
 
-    /// Has this signal been aborted?
     #[must_use]
     pub fn is_aborted(&self) -> bool {
         self.token.is_cancelled()

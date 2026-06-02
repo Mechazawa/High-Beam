@@ -238,7 +238,6 @@ async fn request_confirmation(
     rx.await.unwrap_or(false)
 }
 
-/// Populate the `confirm-*` Slint properties from a [`ConfirmationSummary`].
 fn populate_confirm_view(window: &QueryWindow, summary: &ConfirmationSummary) {
     window.set_confirm_plugin_name(SharedString::from(summary.plugin_name.as_str()));
     window.set_confirm_display_name(SharedString::from(summary.display_name.as_str()));

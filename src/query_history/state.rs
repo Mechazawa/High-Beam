@@ -22,9 +22,7 @@ pub(crate) struct QueryHistoryState {
 /// What the caller should do with the input field after a state transition.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum InputAction {
-    /// Leave the input text unchanged.
     NoChange,
-    /// Replace the input text with the contained string.
     SetTo(String),
 }
 

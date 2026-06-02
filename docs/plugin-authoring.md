@@ -157,6 +157,19 @@ Plugins can `import` only from the `highbeam:*` scheme. `import 'fs'`,
 — no declaration required. See [sdk-reference.md](./sdk-reference.md) for
 per-function behavior, signatures, and examples.
 
+## Runtime globals
+
+The runtime is bare `QuickJS` plus exactly these host-installed globals — no
+other Web APIs exist (`fetch`, `URLSearchParams`, `crypto`, …):
+
+- `console.log/info/warn/error/debug` — see below.
+- `setTimeout` — awaitable; `clearTimeout` / `clearInterval` are no-ops.
+- `AbortController` / `AbortSignal` — the signal passed to `query()` is one.
+- `TextEncoder` / `TextDecoder` — UTF-8 only. Constructing `TextDecoder`
+  with any other encoding throws `RangeError`; invalid byte sequences
+  decode to U+FFFD. The main consumer is `fs.readCache`, which returns a
+  `Uint8Array`.
+
 ## Console + logging
 
 `console.log/info/warn/error/debug` from a plugin are captured to

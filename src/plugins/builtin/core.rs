@@ -13,9 +13,7 @@ pub const NAME: &str = "core";
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Verb the user types to install a plugin from a manifest URL.
 const INSTALL_VERB: &str = "install";
-/// Verb the user types to reload one or every loaded plugin.
 const RELOAD_VERB: &str = "reload";
 /// Verb the user types to check every loaded plugin against its remote
 /// manifest and re-install any with a newer version.

@@ -25,7 +25,6 @@ use crate::ui::ViewBlock;
 /// Shared slot. `None` when no host view is live.
 pub(super) type HostView = Arc<Mutex<Option<UpdateViewState>>>;
 
-/// Build a fresh empty slot for `AppState::start`.
 pub(super) fn new_slot() -> HostView {
     Arc::new(Mutex::new(None))
 }
@@ -46,7 +45,6 @@ impl UpdateViewState {
         }
     }
 
-    /// Index of the entry matching `name`, or `None` if absent.
     pub(super) fn position(&self, name: &str) -> Option<usize> {
         self.entries.iter().position(|e| e.name == name)
     }
@@ -67,7 +65,6 @@ pub(super) fn take_and_cancel(slot: &HostView) -> bool {
     true
 }
 
-/// One plugin's row in the update view.
 pub(super) struct UpdateEntry {
     pub name: String,
     pub local_version: String,
@@ -83,16 +80,22 @@ pub(super) enum EntryStatus {
     /// Local == remote (or remote isn't newer).
     UpToDate,
     /// Local plugin has no `manifestUrl`, can't auto-update.
-    Skipped { reason: String },
+    Skipped {
+        reason: String,
+    },
     /// Download + extract in flight.
-    Updating { new_version: String },
-    /// Install finished.
-    Updated { new_version: String },
+    Updating {
+        new_version: String,
+    },
+    Updated {
+        new_version: String,
+    },
     /// Check or install failed.
-    Failed { error: String },
+    Failed {
+        error: String,
+    },
 }
 
-/// End-of-run tallies.
 pub(super) struct UpdateSummary {
     pub updated: usize,
     pub up_to_date: usize,

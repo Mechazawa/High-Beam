@@ -14,7 +14,6 @@ import { ThemedComboBox } from "themed_combobox.slint";
 import { PluginSlot, PluginOption } from "types.slint";
 
 export component SettingsView {
-    // Rail + plugin data
     in-out property <[PluginSlot]> plugin-slots: [];
     in-out property <int> selected-plugin-index: 0;
     in-out property <[PluginOption]> plugin-options: [];
@@ -23,7 +22,6 @@ export component SettingsView {
     in-out property <bool> showing-global: true;
     in-out property <int> rail-focus-index: 0;
 
-    // Global pane state
     in-out property <string> hotkey-value: "Shift+Space";
     in-out property <bool> capturing-hotkey: false;
     in-out property <string> alt-action-modifier: "Alt";
@@ -36,7 +34,6 @@ export component SettingsView {
     in property <[string]> theme-names: ["default"];
     in property <int> theme-index: 0;
 
-    // Theme tokens
     in property <color> background-color;
     in property <color> foreground-color;
     in property <color> muted-color;
@@ -72,7 +69,6 @@ export component SettingsView {
     }
 
     VerticalLayout {
-        // Header bar.
         Rectangle {
             height: 48px;
             background: transparent;
@@ -135,7 +131,6 @@ export component SettingsView {
             background: root.border-color;
         }
 
-        // Body: split into left rail (plugin list) + right pane (options).
         HorizontalLayout {
             spacing: 0px;
 
@@ -191,7 +186,6 @@ export component SettingsView {
                     ScrollView {
                         VerticalLayout {
                             spacing: 0px;
-                            // "Global" entry pinned at the top of the rail.
                             TouchArea {
                                 height: 44px;
                                 clicked => {
@@ -220,7 +214,6 @@ export component SettingsView {
                                     }
                                 }
                             }
-                            // Faint separator between Global and the plugin list.
                             Rectangle {
                                 height: 1px;
                                 background: root.border-color;
@@ -278,7 +271,6 @@ export component SettingsView {
                 }
             }
 
-            // Vertical divider.
             Rectangle {
                 width: 1px;
                 background: root.border-color;
@@ -365,7 +357,6 @@ export component SettingsView {
                             }
                         }
 
-                        // Window position group.
                         VerticalLayout {
                             spacing: 4px;
                             Text {
@@ -399,7 +390,6 @@ export component SettingsView {
                             }
                         }
 
-                        // Alt-action modifier group.
                         VerticalLayout {
                             spacing: 4px;
                             Text {
@@ -437,7 +427,6 @@ export component SettingsView {
                             }
                         }
 
-                        // Theme group: which theme + a manual reload.
                         VerticalLayout {
                             spacing: 4px;
                             Text {
@@ -493,7 +482,6 @@ export component SettingsView {
                             }
                         }
 
-                        // Theme mode group.
                         VerticalLayout {
                             spacing: 4px;
                             Text {
@@ -530,7 +518,6 @@ export component SettingsView {
                             }
                         }
 
-                        // Config files group.
                         VerticalLayout {
                             spacing: 4px;
                             Text {
@@ -571,7 +558,6 @@ export component SettingsView {
                     VerticalLayout {
                         padding: 16px;
                         spacing: 12px;
-                        // Selected-plugin header: name + optional version.
                         if plugin-slots.length > 0 && root.selected-plugin-index < plugin-slots.length: HorizontalLayout {
                             spacing: 8px;
                             alignment: space-between;
@@ -591,7 +577,6 @@ export component SettingsView {
                             }
                         }
 
-                        // Plugin description — only shown when present.
                         if root.selected-plugin-description != "": Text {
                             text: root.selected-plugin-description;
                             color: root.muted-color;

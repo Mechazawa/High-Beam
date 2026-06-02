@@ -20,7 +20,6 @@ export component ConfirmView {
     // 0 = Install button focused, 1 = Cancel button focused.
     in-out property <int> confirm-focus-index: 0;
 
-    // Theme tokens
     in property <color> foreground-color;
     in property <color> muted-color;
     in property <color> highlight-color;
@@ -29,7 +28,6 @@ export component ConfirmView {
     in property <length> font-size-title;
     in property <length> font-size-subtitle;
 
-    // Callbacks
     callback confirm-install();
     callback confirm-cancel();
 
@@ -39,7 +37,6 @@ export component ConfirmView {
     }
 
     VerticalLayout {
-        // Header bar.
         Rectangle {
             height: 48px;
             background: transparent;
@@ -62,13 +59,11 @@ export component ConfirmView {
             background: root.border-color;
         }
 
-        // Body: scrollable plugin info + capability list.
         ScrollView {
             VerticalLayout {
                 padding: 16px;
                 spacing: 10px;
 
-                // Plugin name + version.
                 HorizontalLayout {
                     spacing: 8px;
                     alignment: start;
@@ -86,7 +81,6 @@ export component ConfirmView {
                     }
                 }
 
-                // Description.
                 if root.confirm-description != "": Text {
                     text: root.confirm-description;
                     color: root.muted-color;
@@ -94,7 +88,6 @@ export component ConfirmView {
                     wrap: word-wrap;
                 }
 
-                // Source URL.
                 Text {
                     text: root.confirm-manifest-url;
                     color: root.muted-color;
@@ -102,14 +95,12 @@ export component ConfirmView {
                     overflow: elide;
                 }
 
-                // Capability list header.
                 if root.confirm-capabilities.length > 0: Text {
                     text: "Capabilities requested:";
                     color: root.foreground-color;
                     font-size: root.font-size-title;
                 }
 
-                // One row per capability.
                 for cap-row in confirm-capabilities: Rectangle {
                     height: 44px;
                     background: cap-row.is-new
@@ -197,7 +188,6 @@ export component ConfirmView {
                 spacing: 12px;
                 alignment: end;
 
-                // Cancel button.
                 TouchArea {
                     width: 90px;
                     height: 32px;
@@ -222,7 +212,6 @@ export component ConfirmView {
                     }
                 }
 
-                // Install button — receives initial focus.
                 TouchArea {
                     width: 90px;
                     height: 32px;
