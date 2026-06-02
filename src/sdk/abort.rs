@@ -3,12 +3,11 @@
 //!
 //! Plugins receive a spec-shaped `AbortSignal` as the second arg to
 //! `query(input, signal)`. [`Abort::cancel`] fires the JS-side listeners
-//! (via the native controller) and the Rust [`CancellationToken`] in one
-//! call. `highbeam:fs` / `highbeam:system` accept a signal from plugin code
-//! and turn it back into a token via [`token_from_js_signal`] — that works
-//! against any spec-shaped signal because it attaches through
-//! `addEventListener`, which the native class exposes via its
-//! `EventTarget` prototype.
+//! via the native controller. `highbeam:fs` / `highbeam:system` accept a
+//! signal from plugin code and turn it into a Rust [`CancellationToken`]
+//! via [`token_from_js_signal`] — that works against any spec-shaped
+//! signal because it attaches through `addEventListener`, which the native
+//! class exposes via its `EventTarget` prototype.
 //!
 //! Unlike the old JS polyfill there is no host-side controller registry:
 //! the controller is a GC-managed class instance, so there is no `release`
@@ -25,7 +24,6 @@ use tokio_util::sync::CancellationToken;
 /// the same `async_with` scope.
 pub struct Abort<'js> {
     controller: Class<'js, AbortController<'js>>,
-    token: CancellationToken,
 }
 
 impl<'js> Abort<'js> {
@@ -40,39 +38,18 @@ impl<'js> Abort<'js> {
         let signal = controller.borrow().signal();
         let signal_obj: Object<'js> = signal.into_inner();
 
-        Ok((
-            Self {
-                controller,
-                token: CancellationToken::new(),
-            },
-            signal_obj,
-        ))
+        Ok((Self { controller }, signal_obj))
     }
 
-    /// The Rust-side token. Host I/O futures race this against their work.
-    #[must_use]
-    pub fn token(&self) -> &CancellationToken {
-        &self.token
-    }
-
-    #[must_use]
-    pub fn is_aborted(&self) -> bool {
-        self.token.is_cancelled()
-    }
-
-    /// Abort the controller: fires JS-side listeners (with a spec
-    /// `DOMException` `AbortError` reason) AND the Rust-side token.
-    /// Idempotent. Must be called from inside an `async_with` block on the
-    /// owning context.
+    /// Abort the controller: fires JS-side listeners with a spec
+    /// `DOMException` `AbortError` reason. Idempotent (the native controller
+    /// early-returns on an already-aborted signal). Must be called from
+    /// inside an `async_with` block on the owning context.
     ///
     /// # Errors
     ///
     /// Propagates errors from the native controller's `abort()`.
     pub fn cancel(&self, ctx: &Ctx<'js>) -> Result<(), JsError> {
-        if self.token.is_cancelled() {
-            return Ok(());
-        }
-        self.token.cancel();
         AbortController::abort(ctx.clone(), This(self.controller.clone()), Opt(None))
     }
 }
@@ -175,7 +152,7 @@ mod tests {
     }
 
     #[test]
-    fn host_abort_cancels_token_and_fires_js_listener() {
+    fn host_abort_fires_js_listener_and_flips_signal() {
         let runtime = rt();
         runtime.block_on(async {
             let async_rt = AsyncRuntime::new().expect("rt");
@@ -192,9 +169,11 @@ mod tests {
                     )
                     .expect("eval attach");
                 attach.call::<_, ()>((signal.clone(),)).expect("attach call");
-                assert!(!abort.is_aborted());
+                let aborted_before: bool = signal.get("aborted").expect("read aborted");
+                assert!(!aborted_before);
                 abort.cancel(&ctx).expect("cancel");
-                assert!(abort.is_aborted());
+                // Idempotent: the native controller swallows the repeat.
+                abort.cancel(&ctx).expect("second cancel");
                 let observed: bool = signal.get("_observed").expect("read observed");
                 assert!(observed, "JS listener did not fire");
                 let aborted: bool = signal.get("aborted").expect("read aborted");

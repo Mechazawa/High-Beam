@@ -138,7 +138,7 @@ describe('currency-converter plugin', () => {
 
     test('parses `200 SEK eur` (case-insensitive)', async () => {
         const { plugin, fetchMock } = await loadPlugin();
-            fetchMock.mockResolvedValueOnce(okJson(rateResponse({
+        fetchMock.mockResolvedValueOnce(okJson(rateResponse({
             base: 'SEK',
             rates: { EUR: 0.087, USD: 0.096 },
         })));

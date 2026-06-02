@@ -620,7 +620,7 @@ fn install_host_globals<S: std::hash::BuildHasher>(
     // `AbortSignal.timeout` into every call (joined with the caller's
     // signal via `AbortSignal.any`). Response size is bounded by the
     // plugin's memory cap rather than a transfer limit.
-    if plugin_caps.iter().any(|c| c == "http") {
+    if capability::grants_any(plugin_caps, &["http"]) {
         llrt_fetch::init(ctx)
             .catch(ctx)
             .map_err(|err| PluginError::Js(format!("install fetch: {err}")))?;
@@ -645,10 +645,10 @@ fn install_host_globals<S: std::hash::BuildHasher>(
 
     // The coarse `fs` cap (full node:fs access) implies the scoped
     // highbeam:fs conveniences — a plugin that may touch the whole disk
-    // shouldn't have to declare the narrower caps separately.
-    let has_full_fs = plugin_caps.iter().any(|c| c == "fs");
-    let can_fs_read = has_full_fs || plugin_caps.iter().any(|c| c == "fs.read");
-    let can_fs_cache = has_full_fs || plugin_caps.iter().any(|c| c == "fs.cache");
+    // shouldn't have to declare the narrower caps separately. Same
+    // `any_of` semantics as the module gate in [`capability::MODULES`].
+    let can_fs_read = capability::grants_any(plugin_caps, &["fs.read", "fs"]);
+    let can_fs_cache = capability::grants_any(plugin_caps, &["fs.cache", "fs"]);
     fs::install(ctx, can_fs_read, can_fs_cache, cache_dir, plugin_dir)
         .catch(ctx)
         .map_err(|err| PluginError::Js(format!("install fs: {err}")))?;
