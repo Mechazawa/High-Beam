@@ -1,13 +1,13 @@
-//! Capability gating — central truth for which `highbeam:*` modules a plugin
-//! is allowed to import.
+//! Capability gating — central truth for which `highbeam:*` / `node:*`
+//! modules a plugin is allowed to import.
 //!
 //! A module is importable if the plugin's caps include any of the module's
 //! `any_of`. Functions inside the module can still gate themselves tighter
 //! (e.g. `clipboard` imports on either read or write, but `write()` throws if
 //! the plugin only declared `clipboard.read`).
 //!
-//! `highbeam:match`, `highbeam:platform`, and `highbeam:settings` skip the
-//! gate entirely.
+//! `highbeam:match`, `highbeam:platform`, `highbeam:settings`, and
+//! `node:path` skip the gate entirely (pure compute, no I/O).
 
 pub(crate) struct ModuleCap {
     pub specifier: &'static str,
@@ -32,7 +32,7 @@ const CAPABILITIES: &[Capability] = &[
     },
     Capability {
         name: "http",
-        explanation: "make outbound HTTP requests",
+        explanation: "make outbound HTTP requests (fetch)",
     },
     Capability {
         name: "clipboard.read",
@@ -49,6 +49,10 @@ const CAPABILITIES: &[Capability] = &[
     Capability {
         name: "fs.cache",
         explanation: "read and write a per-plugin cache directory",
+    },
+    Capability {
+        name: "fs",
+        explanation: "FULL filesystem access — read and write any file your user can",
     },
     Capability {
         name: "system.exec",
@@ -72,16 +76,20 @@ pub(crate) const MODULES: &[ModuleCap] = &[
         any_of: &["actions"],
     },
     ModuleCap {
-        specifier: "highbeam:http",
-        any_of: &["http"],
-    },
-    ModuleCap {
         specifier: "highbeam:clipboard",
         any_of: &["clipboard.read", "clipboard.write"],
     },
     ModuleCap {
         specifier: "highbeam:fs",
-        any_of: &["fs.read", "fs.cache"],
+        any_of: &["fs.read", "fs.cache", "fs"],
+    },
+    ModuleCap {
+        specifier: "node:fs",
+        any_of: &["fs"],
+    },
+    ModuleCap {
+        specifier: "node:fs/promises",
+        any_of: &["fs"],
     },
     ModuleCap {
         specifier: "highbeam:icons",
@@ -98,6 +106,7 @@ const UNCAPPED_MODULES: &[&str] = &[
     "highbeam:platform",
     "highbeam:settings",
     "highbeam:view",
+    "node:path",
 ];
 
 #[must_use]

@@ -1,5 +1,4 @@
 import { copy } from "highbeam:actions";
-import { get } from "highbeam:http";
 import { readCache, writeCache } from "highbeam:fs";
 import { getInt, getString } from "highbeam:settings";
 
@@ -141,13 +140,13 @@ function cacheIsFresh(cache, cacheSecondsOverride) {
 }
 
 async function fetchRates(base, signal) {
-    const res = await get(API_URL(base), { signal });
+    const res = await fetch(API_URL(base), { signal });
 
     if (!res.ok) {
         throw new Error(`open.er-api.com returned HTTP ${res.status}`);
     }
 
-    const data = res.json();
+    const data = await res.json();
 
     if (!data || data.result !== "success") {
         throw new Error(`open.er-api.com result=${data?.result}`);

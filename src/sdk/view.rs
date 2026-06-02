@@ -300,7 +300,7 @@ mod tests {
             ctx.async_with(async move |ctx| {
                 // Bootstrap AbortController so the runtime's `new AbortController()`
                 // in init() resolves.
-                crate::sdk::abort::install_global_controller(&ctx).expect("abort");
+                crate::sdk::abort::install(&ctx).expect("abort");
                 install_runtime(&ctx, test_bridge("t")).expect("install");
 
                 // Plant a fake registry + view that records calls on globals
@@ -352,7 +352,7 @@ mod tests {
             let async_rt = AsyncRuntime::new().expect("rt");
             let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
             ctx.async_with(async move |ctx| {
-                crate::sdk::abort::install_global_controller(&ctx).expect("abort");
+                crate::sdk::abort::install(&ctx).expect("abort");
                 install_runtime(&ctx, test_bridge("t")).expect("install");
                 // Override the stub paint hooks with recorders so we can assert.
                 ctx.eval::<(), _>(
@@ -396,7 +396,7 @@ mod tests {
             let async_rt = AsyncRuntime::new().expect("rt");
             let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
             ctx.async_with(async move |ctx| {
-                crate::sdk::abort::install_global_controller(&ctx).expect("abort");
+                crate::sdk::abort::install(&ctx).expect("abort");
                 install_runtime(&ctx, test_bridge("t")).expect("install");
 
                 ctx.eval::<(), _>(

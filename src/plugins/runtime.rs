@@ -31,19 +31,17 @@ use crate::logging::LogErr;
 use crate::plugins::log::{LogLevel, PluginLog};
 use crate::plugins::manifest::Manifest;
 use crate::plugins::result::{Action, PluginResult};
-use crate::sdk::abort::{Abort, install_global_controller};
+use crate::sdk::abort::{self, Abort};
 use crate::sdk::actions::ActionsModule;
 use crate::sdk::capability;
 use crate::sdk::clipboard;
 use crate::sdk::console;
 use crate::sdk::fs;
-use crate::sdk::http::HttpModule;
 use crate::sdk::icons;
 use crate::sdk::r#match::MatchModule;
 use crate::sdk::platform::PlatformModule;
 use crate::sdk::settings::{self, SettingsModule};
 use crate::sdk::system;
-use crate::sdk::text_codec;
 use crate::sdk::timers;
 use crate::sdk::view::ViewModule;
 
@@ -52,8 +50,8 @@ use crate::sdk::view::ViewModule;
 const ITERATOR_NORMALIZE_JS: &str = include_str!("../sdk/js/iterator_normalize.js");
 
 const HIGHBEAM_SCHEME: &str = "highbeam:";
+const NODE_SCHEME: &str = "node:";
 const ACTIONS_MODULE: &str = "highbeam:actions";
-const HTTP_MODULE: &str = "highbeam:http";
 const CLIPBOARD_MODULE: &str = "highbeam:clipboard";
 const FS_MODULE: &str = "highbeam:fs";
 const ICONS_MODULE: &str = "highbeam:icons";
@@ -62,6 +60,14 @@ const MATCH_MODULE: &str = "highbeam:match";
 const PLATFORM_MODULE: &str = "highbeam:platform";
 const SETTINGS_MODULE: &str = "highbeam:settings";
 const VIEW_MODULE: &str = "highbeam:view";
+const NODE_PATH_MODULE: &str = "node:path";
+const NODE_FS_MODULE: &str = "node:fs";
+const NODE_FS_PROMISES_MODULE: &str = "node:fs/promises";
+
+/// Wraps the llrt `fetch` global so every request carries a default
+/// timeout — `llrt_fetch` has none of its own, and an unbounded request
+/// would otherwise outlive the query that issued it.
+const FETCH_GUARD_JS: &str = include_str!("../sdk/js/fetch_guard.js");
 /// Slot on `globalThis` for the plugin's `query` export. We can't carry a
 /// `Module<'js>` across iterator `.await` points, and
 /// `Persistent<Function<'static>>` holds a raw `!Send` pointer that can't
@@ -584,17 +590,44 @@ fn install_host_globals<S: std::hash::BuildHasher>(
         .catch(ctx)
         .map_err(|err| PluginError::Js(format!("install console: {err}")))?;
 
-    install_global_controller(ctx)
+    abort::install(ctx)
         .catch(ctx)
-        .map_err(|err| PluginError::Js(format!("install AbortController: {err}")))?;
+        .map_err(|err| PluginError::Js(format!("install AbortController/DOMException: {err}")))?;
 
     timers::install(ctx)
         .catch(ctx)
         .map_err(|err| PluginError::Js(format!("install setTimeout: {err}")))?;
 
-    text_codec::install(ctx)
+    // Web/Node globals from llrt, ungated — all pure compute, no I/O.
+    // Buffer must precede any `node:fs` import: the fs read paths construct
+    // Buffer instances through BufferPrimordials, which throws if
+    // `llrt_buffer::init` hasn't defined the global yet.
+    llrt_buffer::init(ctx)
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("install Buffer/Blob/File: {err}")))?;
+    llrt_url::init(ctx)
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("install URL/URLSearchParams: {err}")))?;
+    llrt_util::init(ctx)
         .catch(ctx)
         .map_err(|err| PluginError::Js(format!("install TextEncoder/TextDecoder: {err}")))?;
+    llrt_stream_web::init(ctx)
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("install web streams: {err}")))?;
+
+    // `fetch` is the one global behind a capability — network egress.
+    // llrt_fetch ships no request timeout, so a guard wrapper injects
+    // `AbortSignal.timeout` into every call (joined with the caller's
+    // signal via `AbortSignal.any`). Response size is bounded by the
+    // plugin's memory cap rather than a transfer limit.
+    if plugin_caps.iter().any(|c| c == "http") {
+        llrt_fetch::init(ctx)
+            .catch(ctx)
+            .map_err(|err| PluginError::Js(format!("install fetch: {err}")))?;
+        ctx.eval::<(), _>(FETCH_GUARD_JS)
+            .catch(ctx)
+            .map_err(|err| PluginError::Js(format!("install fetch guard: {err}")))?;
+    }
 
     // Per-plugin options bag; populated even when the plugin declared no
     // options so `get('anything')` is always callable and returns undefined.
@@ -610,8 +643,12 @@ fn install_host_globals<S: std::hash::BuildHasher>(
         .catch(ctx)
         .map_err(|err| PluginError::Js(format!("install clipboard: {err}")))?;
 
-    let can_fs_read = plugin_caps.iter().any(|c| c == "fs.read");
-    let can_fs_cache = plugin_caps.iter().any(|c| c == "fs.cache");
+    // The coarse `fs` cap (full node:fs access) implies the scoped
+    // highbeam:fs conveniences — a plugin that may touch the whole disk
+    // shouldn't have to declare the narrower caps separately.
+    let has_full_fs = plugin_caps.iter().any(|c| c == "fs");
+    let can_fs_read = has_full_fs || plugin_caps.iter().any(|c| c == "fs.read");
+    let can_fs_cache = has_full_fs || plugin_caps.iter().any(|c| c == "fs.cache");
     fs::install(ctx, can_fs_read, can_fs_cache, cache_dir, plugin_dir)
         .catch(ctx)
         .map_err(|err| PluginError::Js(format!("install fs: {err}")))?;
@@ -707,7 +744,7 @@ async fn run_hook<'js>(
         .map_err(|err| PluginError::Js(format!("call {label}(): {err}", label = kind.label())))?;
     let fut = promise.into_future::<()>();
 
-    let result = tokio::select! {
+    tokio::select! {
         biased;
         () = shutdown.cancelled() => {
             abort.cancel(ctx).log_debug("plugin hook: fire abort listeners on shutdown");
@@ -716,17 +753,7 @@ async fn run_hook<'js>(
         res = fut => res
             .catch(ctx)
             .map_err(|err| PluginError::Js(format!("await {label}(): {err}", label = kind.label()))),
-    };
-
-    // Cancel paths already disposed via `abort.cancel`; release only on
-    // the natural-completion arm. Either way the JS controller is now out
-    // of the registry.
-    if result.is_ok() {
-        abort
-            .release(ctx)
-            .log_debug("plugin hook: release abort controller after success");
     }
-    result
 }
 
 fn log_hook_outcome(
@@ -836,13 +863,6 @@ async fn stream_query<'js>(
             .map_err(|err| PluginError::Js(format!("read step.done: {err}")))?;
 
         if done {
-            // Natural completion: dispose the JS-side controller so the
-            // registry doesn't accumulate one entry per query over the
-            // plugin context's lifetime.
-            abort
-                .release(&ctx)
-                .log_debug("query stream: release abort controller on natural completion");
-
             return Ok(());
         }
 
@@ -906,7 +926,7 @@ pub(crate) fn default_cache_dir(plugin_name: &str) -> std::path::PathBuf {
         .join(plugin_name)
 }
 
-/// Resolves `highbeam:*` specifiers; rejects everything else.
+/// Resolves `highbeam:*` and `node:*` specifiers; rejects everything else.
 struct HighbeamResolver;
 
 impl Resolver for HighbeamResolver {
@@ -917,20 +937,20 @@ impl Resolver for HighbeamResolver {
         name: &str,
         _attributes: Option<ImportAttributes<'js>>,
     ) -> Result<String, JsError> {
-        if name.starts_with(HIGHBEAM_SCHEME) || name == "plugin:main" {
+        if name.starts_with(HIGHBEAM_SCHEME) || name.starts_with(NODE_SCHEME) || name == "plugin:main" {
             Ok(name.to_owned())
         } else {
             Err(JsError::new_resolving(
                 "<plugin>",
-                format!("high-beam plugins may only import from `highbeam:*` (got {name:?})"),
+                format!("high-beam plugins may only import from `highbeam:*` or `node:*` (got {name:?})"),
             ))
         }
     }
 }
 
-/// Loads exactly the `highbeam:*` modules the plugin's capabilities permit.
-/// Adding a module is a one-line table edit in [`crate::sdk::capability`]
-/// plus a loader arm below.
+/// Loads exactly the `highbeam:*` and `node:*` modules the plugin's
+/// capabilities permit. Adding a module is a one-line table edit in
+/// [`crate::sdk::capability`] plus a loader arm below.
 struct HighbeamLoader {
     capabilities: Vec<String>,
 }
@@ -948,19 +968,19 @@ impl Loader for HighbeamLoader {
         name: &str,
         _attributes: Option<ImportAttributes<'js>>,
     ) -> Result<Module<'js, rquickjs::module::Declared>, JsError> {
-        if !name.starts_with(HIGHBEAM_SCHEME) {
+        if !name.starts_with(HIGHBEAM_SCHEME) && !name.starts_with(NODE_SCHEME) {
             return Err(JsError::new_loading_message(
                 name,
-                format!("`{name}` is not a recognised highbeam module"),
+                format!("`{name}` is not a recognised highbeam or node module"),
             ));
         }
 
-        // Modules marked uncapped (match, platform) skip the gate.
+        // Modules marked uncapped (match, platform, node:path, …) skip the gate.
         if !capability::is_uncapped_module(name) {
             let Some(module_cap) = capability::for_module(name) else {
                 return Err(JsError::new_loading_message(
                     name,
-                    format!("`{name}` is not a recognised highbeam module"),
+                    format!("`{name}` is not a recognised highbeam or node module"),
                 ));
             };
 
@@ -977,7 +997,6 @@ impl Loader for HighbeamLoader {
 
         match name {
             ACTIONS_MODULE => Module::declare_def::<ActionsModule, _>(ctx.clone(), name),
-            HTTP_MODULE => Module::declare_def::<HttpModule, _>(ctx.clone(), name),
             CLIPBOARD_MODULE => Module::declare_def::<clipboard::ClipboardModule, _>(ctx.clone(), name),
             FS_MODULE => Module::declare_def::<fs::FsModule, _>(ctx.clone(), name),
             ICONS_MODULE => Module::declare_def::<icons::IconsModule, _>(ctx.clone(), name),
@@ -986,6 +1005,9 @@ impl Loader for HighbeamLoader {
             PLATFORM_MODULE => Module::declare_def::<PlatformModule, _>(ctx.clone(), name),
             SETTINGS_MODULE => Module::declare_def::<SettingsModule, _>(ctx.clone(), name),
             VIEW_MODULE => Module::declare_def::<ViewModule, _>(ctx.clone(), name),
+            NODE_PATH_MODULE => Module::declare_def::<llrt_path::PathModule, _>(ctx.clone(), name),
+            NODE_FS_MODULE => Module::declare_def::<llrt_fs::FsModule, _>(ctx.clone(), name),
+            NODE_FS_PROMISES_MODULE => Module::declare_def::<llrt_fs::FsPromisesModule, _>(ctx.clone(), name),
             other => Err(JsError::new_loading_message(
                 name,
                 format!("`{other}` is registered in the capability table but not in the loader"),

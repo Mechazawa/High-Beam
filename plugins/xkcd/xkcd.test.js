@@ -31,8 +31,8 @@ function httpResponse({ status = 200, body = '' } = {}) {
         headers: {},
         body,
         ok: status >= 200 && status < 300,
-        json() { return JSON.parse(body); },
-        text() { return body; },
+        async json() { return JSON.parse(body); },
+        async text() { return body; },
     };
 }
 
@@ -53,16 +53,15 @@ async function collect(iter) {
 // Each test gets its own plugin instance (module-level cache resets too).
 async function loadPlugin() {
     vi.resetModules();
-    const http = await import('highbeam:http');
     const fs = await import('highbeam:fs');
-    vi.mocked(http.get).mockReset();
     vi.mocked(fs.readCache).mockReset();
     vi.mocked(fs.writeCache).mockReset();
-    vi.mocked(http.get).mockResolvedValue(httpResponse());
+    const fetchMock = vi.fn(async () => httpResponse());
+    vi.stubGlobal('fetch', fetchMock);
     vi.mocked(fs.readCache).mockResolvedValue(null);
     vi.mocked(fs.writeCache).mockResolvedValue(undefined);
     const plugin = await import('./plugin.js');
-    return { plugin, http, fs };
+    return { plugin, fetchMock, fs };
 }
 
 beforeEach(() => {
@@ -72,28 +71,28 @@ beforeEach(() => {
 
 describe('xkcd plugin', () => {
     test('non-trigger input yields nothing and skips network', async () => {
-        const { plugin, http } = await loadPlugin();
+        const { plugin, fetchMock } = await loadPlugin();
         const results = await collect(
             plugin.query('hello', { aborted: false }),
         );
         expect(results).toEqual([]);
-        expect(http.get).not.toHaveBeenCalled();
+        expect(fetchMock).not.toHaveBeenCalled();
     });
 
     test('empty `xkcd ` yields no results', async () => {
-        const { plugin, http } = await loadPlugin();
+        const { plugin, fetchMock } = await loadPlugin();
         const a = await collect(plugin.query('xkcd', { aborted: false }));
         const b = await collect(plugin.query('xkcd ', { aborted: false }));
         const c = await collect(plugin.query('xkcd   ', { aborted: false }));
         expect(a).toEqual([]);
         expect(b).toEqual([]);
         expect(c).toEqual([]);
-        expect(http.get).not.toHaveBeenCalled();
+        expect(fetchMock).not.toHaveBeenCalled();
     });
 
     test('`xkcd latest` hits info.0.json and yields one result', async () => {
-        const { plugin, http } = await loadPlugin();
-        vi.mocked(http.get).mockResolvedValueOnce(okJson(LATEST));
+        const { plugin, fetchMock } = await loadPlugin();
+        fetchMock.mockResolvedValueOnce(okJson(LATEST));
         const results = await collect(
             plugin.query('xkcd latest', { aborted: false }),
         );
@@ -107,15 +106,15 @@ describe('xkcd plugin', () => {
             kind: 'openUrl',
             url: `https://xkcd.com/${LATEST_NUM}/`,
         });
-        expect(http.get).toHaveBeenCalledWith(
+        expect(fetchMock).toHaveBeenCalledWith(
             'https://xkcd.com/info.0.json',
             expect.any(Object),
         );
     });
 
     test('`xkcd 614` fetches that specific comic', async () => {
-        const { plugin, http } = await loadPlugin();
-        vi.mocked(http.get).mockResolvedValueOnce(okJson(SPECIFIC));
+        const { plugin, fetchMock } = await loadPlugin();
+        fetchMock.mockResolvedValueOnce(okJson(SPECIFIC));
         const results = await collect(
             plugin.query('xkcd 614', { aborted: false }),
         );
@@ -126,33 +125,33 @@ describe('xkcd plugin', () => {
             kind: 'openUrl',
             url: 'https://xkcd.com/614/',
         });
-        expect(http.get).toHaveBeenCalledWith(
+        expect(fetchMock).toHaveBeenCalledWith(
             'https://xkcd.com/614/info.0.json',
             expect.any(Object),
         );
     });
 
     test('`xkcd 9999999` returns 0 results when the comic is missing', async () => {
-        const { plugin, http } = await loadPlugin();
-        vi.mocked(http.get).mockResolvedValueOnce(notFound());
+        const { plugin, fetchMock } = await loadPlugin();
+        fetchMock.mockResolvedValueOnce(notFound());
         const results = await collect(
             plugin.query('xkcd 9999999', { aborted: false }),
         );
         expect(results).toEqual([]);
-        expect(http.get).toHaveBeenCalledWith(
+        expect(fetchMock).toHaveBeenCalledWith(
             'https://xkcd.com/9999999/info.0.json',
             expect.any(Object),
         );
     });
 
     test('`xkcd random` resolves to some comic (latest = 10 fixture)', async () => {
-        const { plugin, http } = await loadPlugin();
+        const { plugin, fetchMock } = await loadPlugin();
         // First call: latest metadata to discover the highest number.
         // Subsequent call: the specific N picked at random. We return the
         // latest comic to both so the result is well-defined regardless of
         // which N Math.random picked.
         const latestTen = comic(10, 'Ten', 'alt-ten');
-        vi.mocked(http.get).mockImplementation(async (url) => {
+        fetchMock.mockImplementation(async (url) => {
             if (url === 'https://xkcd.com/info.0.json') return okJson(latestTen);
             return okJson(latestTen);
         });
@@ -167,7 +166,7 @@ describe('xkcd plugin', () => {
     });
 
     test('text search uses cached index without hitting the network', async () => {
-        const { plugin, http, fs } = await loadPlugin();
+        const { plugin, fetchMock, fs } = await loadPlugin();
         const cached = {
             last_updated: Date.now(),
             comics: [
@@ -213,11 +212,11 @@ describe('xkcd plugin', () => {
             url: 'https://xkcd.com/1422/',
         });
         // No network round-trips when the cache is fresh.
-        expect(http.get).not.toHaveBeenCalled();
+        expect(fetchMock).not.toHaveBeenCalled();
     });
 
     test('text search with no cache fetches a small index and matches', async () => {
-        const { plugin, http, fs } = await loadPlugin();
+        const { plugin, fetchMock, fs } = await loadPlugin();
         // No cache on disk — readCache returns null (set in loadPlugin).
         // Five-comic fixture; one of them (#4) has "Raptor" in its title.
         const latest = comic(5, 'Newest', 'newest alt');
@@ -228,7 +227,7 @@ describe('xkcd plugin', () => {
             4: comic(4, 'Raptor Identification', 'velociraptors!'),
             5: latest,
         };
-        vi.mocked(http.get).mockImplementation(async (url) => {
+        fetchMock.mockImplementation(async (url) => {
             if (url === 'https://xkcd.com/info.0.json') return okJson(latest);
             const m = /xkcd\.com\/(\d+)\/info\.0\.json$/.exec(url);
             if (m) {

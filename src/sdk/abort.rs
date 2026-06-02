@@ -1,61 +1,52 @@
-//! Web-spec `AbortController`/`AbortSignal` polyfill for plugins.
+//! Host-side handle over the native `AbortController`/`AbortSignal` classes
+//! from `llrt_abort`.
 //!
-//! Plugins receive a real `AbortSignal`-shaped JS object as the second arg
-//! to `query(input, signal)`. [`Abort::cancel`] fires both the JS-side
-//! listeners and the Rust [`CancellationToken`] that gates in-flight I/O.
+//! Plugins receive a spec-shaped `AbortSignal` as the second arg to
+//! `query(input, signal)`. [`Abort::cancel`] fires the JS-side listeners
+//! (via the native controller) and the Rust [`CancellationToken`] in one
+//! call. `highbeam:fs` / `highbeam:system` accept a signal from plugin code
+//! and turn it back into a token via [`token_from_js_signal`] — that works
+//! against any spec-shaped signal because it attaches through
+//! `addEventListener`, which the native class exposes via its
+//! `EventTarget` prototype.
 //!
-//! Pure-JS polyfill (see [`install_global_controller`]) avoids per-property
-//! rquickjs binding overhead. The host wraps it with [`Abort`] which holds
-//! a [`tokio_util::sync::CancellationToken`]. `highbeam:http` accepts a
-//! signal from plugin code and turns it back into a token via
-//! [`token_from_js_signal`].
-//!
-//! `AbortSignal.timeout(ms)` / `AbortSignal.any([…])` are post-v1.
+//! Unlike the old JS polyfill there is no host-side controller registry:
+//! the controller is a GC-managed class instance, so there is no `release`
+//! step and nothing to leak on the natural-completion path.
 
-use rquickjs::function::This;
-use rquickjs::{CatchResultExt, Ctx, Error as JsError, Function, Object};
+use llrt_abort::AbortController;
+use rquickjs::class::Class;
+use rquickjs::function::{Opt, This};
+use rquickjs::{Ctx, Error as JsError, Function, Object};
 use tokio_util::sync::CancellationToken;
 
-/// AbortController/AbortSignal polyfill. Idempotent.
-const ABORT_CONTROLLER_JS: &str = include_str!("js/abort_controller.js");
-
-const ABORT_CREATE_JS: &str = include_str!("js/abort_create.js");
-
-const ABORT_FIRE_JS: &str = include_str!("js/abort_fire.js");
-
-const ABORT_RELEASE_JS: &str = include_str!("js/abort_release.js");
-
-/// Host handle for one signal. Owns a [`CancellationToken`] mirrored by the
-/// JS controller's abort state plus an opaque controller id used by
-/// [`Abort::cancel`] to flip the JS side from Rust.
-///
-/// The JS-side controller stays in the global registry until either
-/// [`Abort::cancel`] (cancel path) or [`Abort::release`] (success path) is
-/// called. Failing to call one of them leaves the registry entry alive for
-/// the remainder of the plugin context's lifetime — a slow leak, not UB,
-/// but worth avoiding.
-pub struct Abort {
+/// Host handle for one controller+signal pair. Lifetime-bound to the JS
+/// context it was created in — create, cancel, and drop all happen inside
+/// the same `async_with` scope.
+pub struct Abort<'js> {
+    controller: Class<'js, AbortController<'js>>,
     token: CancellationToken,
-    controller_id: i64,
 }
 
-impl Abort {
+impl<'js> Abort<'js> {
     /// Build a fresh controller+signal pair inside the active JS context.
     /// Returns the Rust handle and the JS-side `controller.signal` object.
     ///
     /// # Errors
     ///
-    /// Propagates JS errors from the bootstrap script.
-    pub fn create<'js>(ctx: &Ctx<'js>) -> Result<(Self, Object<'js>), JsError> {
-        install_global_controller(ctx)?;
+    /// Propagates JS errors from constructing the native controller.
+    pub fn create(ctx: &Ctx<'js>) -> Result<(Self, Object<'js>), JsError> {
+        let controller = Class::instance(ctx.clone(), AbortController::new(ctx.clone())?)?;
+        let signal = controller.borrow().signal();
+        let signal_obj: Object<'js> = signal.into_inner();
 
-        let make: Function<'js> = ctx.eval(ABORT_CREATE_JS)?;
-        let pair: Object<'js> = make.call(())?;
-        let controller_id: i64 = pair.get("id")?;
-        let signal: Object<'js> = pair.get("signal")?;
-        let token = CancellationToken::new();
-
-        Ok((Self { token, controller_id }, signal))
+        Ok((
+            Self {
+                controller,
+                token: CancellationToken::new(),
+            },
+            signal_obj,
+        ))
     }
 
     /// The Rust-side token. Host I/O futures race this against their work.
@@ -69,57 +60,39 @@ impl Abort {
         self.token.is_cancelled()
     }
 
-    /// Flip the abort flag and drop the JS registry entry. Fires JS-side
-    /// listeners AND the Rust-side token. Idempotent. Must be called from
-    /// inside an `async_with!` block.
+    /// Abort the controller: fires JS-side listeners (with a spec
+    /// `DOMException` `AbortError` reason) AND the Rust-side token.
+    /// Idempotent. Must be called from inside an `async_with` block on the
+    /// owning context.
     ///
     /// # Errors
     ///
-    /// Propagates errors from invoking the JS-side controller's `abort()`.
-    pub fn cancel(&self, ctx: &Ctx<'_>) -> Result<(), JsError> {
+    /// Propagates errors from the native controller's `abort()`.
+    pub fn cancel(&self, ctx: &Ctx<'js>) -> Result<(), JsError> {
         if self.token.is_cancelled() {
-            // Cancellation is idempotent, but `release` isn't — only call it
-            // on the first cancel so a repeat call doesn't double-evaluate
-            // the JS snippet.
             return Ok(());
         }
         self.token.cancel();
-        let fire: Function<'_> = ctx.eval(ABORT_FIRE_JS)?;
-        fire.call::<_, ()>((self.controller_id,))
-            .catch(ctx)
-            .map_err(|err| JsError::new_loading_message("abort", format!("fire listeners: {err}")))?;
-        self.release(ctx)?;
-        Ok(())
-    }
-
-    /// Drop the JS registry entry without firing listeners. The success-path
-    /// counterpart to [`Self::cancel`]: when work completes naturally, the
-    /// plugin doesn't need to observe an abort, but we still want the
-    /// controller out of the registry so memory doesn't grow with query
-    /// count over the plugin's lifetime.
-    ///
-    /// # Errors
-    ///
-    /// Propagates errors from the JS-side `delete`.
-    pub fn release(&self, ctx: &Ctx<'_>) -> Result<(), JsError> {
-        let release: Function<'_> = ctx.eval(ABORT_RELEASE_JS)?;
-        release
-            .call::<_, ()>((self.controller_id,))
-            .catch(ctx)
-            .map_err(|err| JsError::new_loading_message("abort", format!("release controller: {err}")))?;
-        Ok(())
+        AbortController::abort(ctx.clone(), This(self.controller.clone()), Opt(None))
     }
 }
 
-/// Build the JS-side `AbortController` polyfill and the controller registry.
-/// Idempotent.
+/// Replaces the native `AbortSignal.timeout` with a setTimeout-based impl —
+/// see the comment in the script for why the native one is unsound here.
+const ABORT_TIMEOUT_PATCH_JS: &str = include_str!("js/abort_timeout_patch.js");
+
+/// Install the native `AbortController`/`AbortSignal` classes plus the
+/// `DOMException` class their abort reasons are constructed from.
+/// Idempotent. The host's `setTimeout` (see [`crate::sdk::timers`]) must be
+/// installed in the same context for `AbortSignal.timeout` to work.
 ///
 /// # Errors
 ///
-/// Propagates JS errors from the bootstrap eval.
-pub fn install_global_controller(ctx: &Ctx<'_>) -> Result<(), JsError> {
-    ctx.eval::<(), _>(ABORT_CONTROLLER_JS)?;
-    Ok(())
+/// Propagates JS errors from the class registration.
+pub fn install(ctx: &Ctx<'_>) -> Result<(), JsError> {
+    llrt_exceptions::init(ctx)?;
+    llrt_abort::init(ctx)?;
+    ctx.eval::<(), _>(ABORT_TIMEOUT_PATCH_JS)
 }
 
 /// Build a Rust [`CancellationToken`] that flips when the given JS-side
@@ -165,8 +138,8 @@ mod tests {
             let async_rt = AsyncRuntime::new().expect("rt");
             let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
             ctx.async_with(async move |ctx| {
-                install_global_controller(&ctx).expect("first");
-                install_global_controller(&ctx).expect("second");
+                install(&ctx).expect("first");
+                install(&ctx).expect("second");
                 let has: bool = ctx.eval("typeof AbortController === 'function'").expect("eval");
                 assert!(has);
             })
@@ -181,7 +154,7 @@ mod tests {
             let async_rt = AsyncRuntime::new().expect("rt");
             let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
             ctx.async_with(async move |ctx| {
-                install_global_controller(&ctx).expect("install");
+                install(&ctx).expect("install");
                 let fired: bool = ctx
                     .eval(
                         r"
@@ -208,6 +181,7 @@ mod tests {
             let async_rt = AsyncRuntime::new().expect("rt");
             let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
             ctx.async_with(async move |ctx| {
+                install(&ctx).expect("install");
                 let (abort, signal) = Abort::create(&ctx).expect("create");
                 let attach: Function<'_> = ctx
                     .eval(
@@ -231,32 +205,22 @@ mod tests {
     }
 
     #[test]
-    fn release_drops_controller_from_registry() {
-        // Memory hygiene: every Abort::create registers a controller in the
-        // JS-side global map. Without release (or cancel, which also
-        // releases), the registry grows unboundedly over a plugin context's
-        // lifetime. Build two abort handles, release one, assert the
-        // registry contains only the other.
+    fn host_abort_reason_is_dom_exception_abort_error() {
+        // The native classes give plugins spec-correct reasons — pin that
+        // (the old polyfill had no `reason` at all).
         let runtime = rt();
         runtime.block_on(async {
             let async_rt = AsyncRuntime::new().expect("rt");
             let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
             ctx.async_with(async move |ctx| {
-                let (keep, _signal_keep) = Abort::create(&ctx).expect("create keep");
-                let (drop_, _signal_drop) = Abort::create(&ctx).expect("create drop");
-                let size_before: i32 = ctx
-                    .eval("globalThis.__highbeam_abort_registry.controllers.size")
-                    .expect("eval");
-                assert_eq!(size_before, 2);
-                drop_.release(&ctx).expect("release");
-                let size_after: i32 = ctx
-                    .eval("globalThis.__highbeam_abort_registry.controllers.size")
-                    .expect("eval");
-                assert_eq!(size_after, 1, "release should drop one entry");
-                // `keep` is intentionally not released — without that, the
-                // registry-shrink assertion above wouldn't discriminate
-                // between "release worked" and "create never ran".
-                drop(keep);
+                install(&ctx).expect("install");
+                let (abort, signal) = Abort::create(&ctx).expect("create");
+                abort.cancel(&ctx).expect("cancel");
+                let probe: Function<'_> = ctx
+                    .eval("((sig) => sig.reason instanceof DOMException && sig.reason.name)")
+                    .expect("eval probe");
+                let name: String = probe.call((signal,)).expect("probe call");
+                assert_eq!(name, "AbortError");
             })
             .await;
         });
@@ -269,7 +233,7 @@ mod tests {
             let async_rt = AsyncRuntime::new().expect("rt");
             let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
             ctx.async_with(async move |ctx| {
-                install_global_controller(&ctx).expect("install");
+                install(&ctx).expect("install");
                 let pair: Object<'_> = ctx
                     .eval(
                         r"(() => {
@@ -285,6 +249,25 @@ mod tests {
                 let abort_fn: Function<'_> = controller.get("abort").expect("abort fn");
                 abort_fn.call::<_, ()>((This(controller.clone()),)).expect("call abort");
                 assert!(token.is_cancelled(), "token should flip when JS calls abort()");
+            })
+            .await;
+        });
+    }
+
+    #[test]
+    fn signal_timeout_static_exists() {
+        // AbortSignal.timeout comes from the sleep-tokio feature; a missing
+        // sleep backend would compile but leave the static absent.
+        let runtime = rt();
+        runtime.block_on(async {
+            let async_rt = AsyncRuntime::new().expect("rt");
+            let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
+            ctx.async_with(async move |ctx| {
+                install(&ctx).expect("install");
+                let has: bool = ctx
+                    .eval("typeof AbortSignal.timeout === 'function' && typeof AbortSignal.any === 'function'")
+                    .expect("eval");
+                assert!(has, "AbortSignal.timeout / .any statics missing");
             })
             .await;
         });

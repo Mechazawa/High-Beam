@@ -12,7 +12,6 @@
 // and subsequent loads refresh incrementally.
 
 import { openUrl, showView } from "highbeam:actions";
-import { get } from "highbeam:http";
 import { readCache, writeCache } from "highbeam:fs";
 import { fuzzy } from "highbeam:match";
 import { Heading, Text, ProgressBar, Spinner } from "highbeam:view";
@@ -38,7 +37,7 @@ const KNOWN_MISSING = new Set([404]);
 let cachedIndex = null;
 
 async function fetchLatest(signal) {
-    const res = await get(LATEST_URL, { signal });
+    const res = await fetch(LATEST_URL, { signal });
     if (!res.ok) {
         throw new Error(`xkcd latest fetched HTTP ${res.status}`);
     }
@@ -47,7 +46,7 @@ async function fetchLatest(signal) {
 }
 
 async function fetchComic(num, signal) {
-    const res = await get(COMIC_URL(num), { signal });
+    const res = await fetch(COMIC_URL(num), { signal });
     if (res.status === 404) return null;
     if (!res.ok) {
         throw new Error(`xkcd ${num} fetched HTTP ${res.status}`);

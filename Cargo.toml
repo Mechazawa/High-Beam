@@ -171,14 +171,27 @@ rquickjs = { version = "0.12", features = ["loader", "futures", "macro", "parall
 
 # LLRT modules (AWS) supply the Node/Web API surface for the plugin
 # runtime: node:path, node:fs, URL/URLSearchParams, Buffer, TextEncoder/
-# TextDecoder, AbortController, timers, fetch. Not published to crates.io;
-# pinned to a rev of the llrt monorepo.
+# TextDecoder, AbortController/AbortSignal, DOMException, streams, fetch.
+# Not published to crates.io; pinned to a rev of the llrt monorepo — keep
+# every crate on the SAME rev (they share types across workspace-internal
+# deps). llrt_timers is deliberately absent: its process-global timer table
+# is keyed by raw runtime pointer and never deregistered, which leaks and
+# aliases under our one-runtime-per-plugin + reload model.
+#
+# llrt_abort: its AbortSignal.timeout backend is forced to `sleep-timers`
+# by feature unification (llrt_fetch depends on it with defaults), which
+# routes into llrt_timers' unsound global table — the host replaces the
+# static with a setTimeout-based impl at install (sdk/js/abort_timeout_patch.js).
+# llrt_fetch: `compression-rust` instead of the default C codecs (no C
+# toolchain dep); `tls-ring` matches the rustls provider reqwest already
+# links so the process has one CryptoProvider.
 llrt_abort = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
 llrt_buffer = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
-llrt_fetch = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
+llrt_exceptions = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
+llrt_fetch = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05", default-features = false, features = ["http1", "http2", "compression-rust", "webpki-roots", "tls-ring"] }
 llrt_fs = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
 llrt_path = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
-llrt_timers = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
+llrt_stream_web = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
 llrt_url = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
 llrt_util = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
 

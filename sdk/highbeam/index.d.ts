@@ -6,10 +6,6 @@ declare module 'highbeam:actions' {
     export * from './actions';
 }
 
-declare module 'highbeam:http' {
-    export * from './http';
-}
-
 declare module 'highbeam:clipboard' {
     export * from './clipboard';
 }

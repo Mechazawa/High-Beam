@@ -8,7 +8,6 @@ use rquickjs::{AsyncContext, AsyncRuntime, Ctx, Error as JsError, Module, Object
 use high_beam::sdk::actions::ActionsModule;
 use high_beam::sdk::clipboard::ClipboardModule;
 use high_beam::sdk::fs::FsModule;
-use high_beam::sdk::http::HttpModule;
 use high_beam::sdk::icons::IconsModule;
 use high_beam::sdk::r#match::MatchModule;
 use high_beam::sdk::platform::PlatformModule;
@@ -20,7 +19,6 @@ use high_beam::sdk::view::ViewModule;
 fn expected_for(name: &str) -> &'static [&'static str] {
     match name {
         "highbeam:actions" => &["openUrl", "copy", "exec", "reveal", "showView", "closeView"],
-        "highbeam:http" => &["get", "post", "put", "patch", "delete"],
         "highbeam:clipboard" => &["read", "write"],
         "highbeam:fs" => &["readDir", "readFile", "readText", "readCache", "writeCache", "basename"],
         "highbeam:icons" => &["forPath"],
@@ -28,6 +26,57 @@ fn expected_for(name: &str) -> &'static [&'static str] {
         "highbeam:system" => &["exec", "applescript"],
         "highbeam:platform" => &["os", "arch", "version", "isMacOS", "isLinux"],
         "highbeam:settings" => &["get", "getString", "getBool", "getInt"],
+        "node:path" => &[
+            "default",
+            "basename",
+            "dirname",
+            "extname",
+            "format",
+            "parse",
+            "join",
+            "resolve",
+            "relative",
+            "normalize",
+            "isAbsolute",
+            "delimiter",
+            "sep",
+        ],
+        "node:fs" => &[
+            "default",
+            "promises",
+            "accessSync",
+            "mkdirSync",
+            "mkdtempSync",
+            "readdirSync",
+            "readFileSync",
+            "rmdirSync",
+            "rmSync",
+            "statSync",
+            "lstatSync",
+            "writeFileSync",
+            "constants",
+            "chmodSync",
+            "renameSync",
+            "symlinkSync",
+        ],
+        "node:fs/promises" => &[
+            "default",
+            "access",
+            "open",
+            "readFile",
+            "writeFile",
+            "rename",
+            "readdir",
+            "mkdir",
+            "mkdtemp",
+            "rm",
+            "rmdir",
+            "stat",
+            "lstat",
+            "constants",
+            "chmod",
+            "symlink",
+        ],
         "highbeam:view" => &[
             "Stack",
             "Divider",
@@ -70,7 +119,6 @@ impl Resolver for OneShotResolver {
 
 enum OneShotLoader {
     Actions,
-    Http,
     Clipboard,
     Fs,
     Icons,
@@ -79,6 +127,9 @@ enum OneShotLoader {
     Platform,
     Settings,
     View,
+    NodePath,
+    NodeFs,
+    NodeFsPromises,
 }
 
 impl Loader for OneShotLoader {
@@ -90,7 +141,6 @@ impl Loader for OneShotLoader {
     ) -> Result<Module<'js>, JsError> {
         match self {
             Self::Actions => Module::declare_def::<ActionsModule, _>(ctx.clone(), name),
-            Self::Http => Module::declare_def::<HttpModule, _>(ctx.clone(), name),
             Self::Clipboard => Module::declare_def::<ClipboardModule, _>(ctx.clone(), name),
             Self::Fs => Module::declare_def::<FsModule, _>(ctx.clone(), name),
             Self::Icons => Module::declare_def::<IconsModule, _>(ctx.clone(), name),
@@ -99,6 +149,9 @@ impl Loader for OneShotLoader {
             Self::Platform => Module::declare_def::<PlatformModule, _>(ctx.clone(), name),
             Self::Settings => Module::declare_def::<SettingsModule, _>(ctx.clone(), name),
             Self::View => Module::declare_def::<ViewModule, _>(ctx.clone(), name),
+            Self::NodePath => Module::declare_def::<llrt_path::PathModule, _>(ctx.clone(), name),
+            Self::NodeFs => Module::declare_def::<llrt_fs::FsModule, _>(ctx.clone(), name),
+            Self::NodeFsPromises => Module::declare_def::<llrt_fs::FsPromisesModule, _>(ctx.clone(), name),
         }
     }
 }
@@ -152,11 +205,6 @@ fn actions_module_exports_match_dts() {
 }
 
 #[test]
-fn http_module_exports_match_dts() {
-    assert_module_exports("highbeam:http", OneShotLoader::Http);
-}
-
-#[test]
 fn clipboard_module_exports_match_dts() {
     assert_module_exports("highbeam:clipboard", OneShotLoader::Clipboard);
 }
@@ -194,4 +242,19 @@ fn settings_module_exports_match_dts() {
 #[test]
 fn view_module_exports_match_dts() {
     assert_module_exports("highbeam:view", OneShotLoader::View);
+}
+
+#[test]
+fn node_path_module_exports_match_docs() {
+    assert_module_exports("node:path", OneShotLoader::NodePath);
+}
+
+#[test]
+fn node_fs_module_exports_match_docs() {
+    assert_module_exports("node:fs", OneShotLoader::NodeFs);
+}
+
+#[test]
+fn node_fs_promises_module_exports_match_docs() {
+    assert_module_exports("node:fs/promises", OneShotLoader::NodeFsPromises);
 }
