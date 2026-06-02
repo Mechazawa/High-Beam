@@ -2,7 +2,7 @@
 //! in-process cache.
 
 use rquickjs::loader::{ImportAttributes, Loader, Resolver};
-use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Error as JsError, Module, async_with};
+use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Error as JsError, Module};
 
 use high_beam::sdk::icons::{IconsModule, install};
 
@@ -49,7 +49,7 @@ fn for_path_without_cap_throws() {
         let async_rt = AsyncRuntime::new().expect("rt");
         async_rt.set_loader(OnlyIcons, OnlyIcons).await;
         let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
-        async_with!(ctx => |ctx| {
+        ctx.async_with(async move |ctx| {
             install(&ctx, false).catch(&ctx).expect("install");
             let src = br"
                 import { forPath } from 'highbeam:icons';
@@ -59,7 +59,8 @@ fn for_path_without_cap_throws() {
                 })();
             ";
             let declared = Module::declare(ctx.clone(), "test:harness", src.to_vec())
-                .catch(&ctx).expect("declare");
+                .catch(&ctx)
+                .expect("declare");
             let (_m, eval) = declared.eval().catch(&ctx).expect("eval");
             eval.into_future::<()>().await.catch(&ctx).expect("await eval");
             let promise: rquickjs::Promise<'_> = ctx.globals().get("__test").expect("read __test");
@@ -82,7 +83,7 @@ fn for_path_with_cap_returns_data_uri_even_for_missing_path() {
         let async_rt = AsyncRuntime::new().expect("rt");
         async_rt.set_loader(OnlyIcons, OnlyIcons).await;
         let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
-        async_with!(ctx => |ctx| {
+        ctx.async_with(async move |ctx| {
             install(&ctx, true).catch(&ctx).expect("install");
             let src = br"
                 import { forPath } from 'highbeam:icons';
@@ -92,7 +93,8 @@ fn for_path_with_cap_returns_data_uri_even_for_missing_path() {
                 })();
             ";
             let declared = Module::declare(ctx.clone(), "test:harness", src.to_vec())
-                .catch(&ctx).expect("declare");
+                .catch(&ctx)
+                .expect("declare");
             let (_m, eval) = declared.eval().catch(&ctx).expect("eval");
             eval.into_future::<()>().await.catch(&ctx).expect("await eval");
             let promise: rquickjs::Promise<'_> = ctx.globals().get("__test").expect("read __test");
@@ -110,7 +112,7 @@ fn for_path_returns_same_uri_on_cache_hit() {
         let async_rt = AsyncRuntime::new().expect("rt");
         async_rt.set_loader(OnlyIcons, OnlyIcons).await;
         let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
-        async_with!(ctx => |ctx| {
+        ctx.async_with(async move |ctx| {
             install(&ctx, true).catch(&ctx).expect("install");
             let src = br"
                 import { forPath } from 'highbeam:icons';
@@ -121,7 +123,8 @@ fn for_path_returns_same_uri_on_cache_hit() {
                 })();
             ";
             let declared = Module::declare(ctx.clone(), "test:harness", src.to_vec())
-                .catch(&ctx).expect("declare");
+                .catch(&ctx)
+                .expect("declare");
             let (_m, eval) = declared.eval().catch(&ctx).expect("eval");
             eval.into_future::<()>().await.catch(&ctx).expect("await eval");
             let promise: rquickjs::Promise<'_> = ctx.globals().get("__test").expect("read __test");

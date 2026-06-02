@@ -3,7 +3,7 @@
 //! test rather than as cryptic plugin-author errors at runtime.
 
 use rquickjs::loader::{ImportAttributes, Loader, Resolver};
-use rquickjs::{AsyncContext, AsyncRuntime, Ctx, Error as JsError, Module, Object, async_with};
+use rquickjs::{AsyncContext, AsyncRuntime, Ctx, Error as JsError, Module, Object};
 
 use high_beam::sdk::actions::ActionsModule;
 use high_beam::sdk::clipboard::ClipboardModule;
@@ -113,7 +113,7 @@ fn assert_module_exports(specifier: &'static str, loader: OneShotLoader) {
         let async_rt = AsyncRuntime::new().expect("rt");
         async_rt.set_loader(OneShotResolver(specifier), loader).await;
         let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
-        async_with!(ctx => |ctx| {
+        ctx.async_with(async move |ctx| {
             // Tiny entry module imports the SDK module and stashes its
             // namespace on globalThis so we can introspect.
             let src = format!(
@@ -122,23 +122,19 @@ fn assert_module_exports(specifier: &'static str, loader: OneShotLoader) {
                 globalThis.__ns = ns;
                 "#
             );
-            let declared = Module::declare(ctx.clone(), "shape:test", src.into_bytes())
-                .expect("declare");
+            let declared = Module::declare(ctx.clone(), "shape:test", src.into_bytes()).expect("declare");
             let (_module, eval_promise) = declared.eval().expect("eval");
             eval_promise.into_future::<()>().await.expect("await eval");
 
             let ns: Object<'_> = ctx.globals().get("__ns").expect("read __ns");
-            let mut found: Vec<String> = ns
-                .keys::<String>()
-                .filter_map(Result::ok)
-                .collect();
+            let mut found: Vec<String> = ns.keys::<String>().filter_map(Result::ok).collect();
             found.sort();
-            let mut expected_sorted: Vec<String> =
-                expected.iter().map(|s| (*s).to_string()).collect();
+            let mut expected_sorted: Vec<String> = expected.iter().map(|s| (*s).to_string()).collect();
             expected_sorted.sort();
 
             assert_eq!(
-                found, expected_sorted,
+                found,
+                expected_sorted,
                 "{specifier}: runtime exports do not match the .d.ts list.\n\
                  expected: {expected_sorted:?}\n\
                  got:      {found:?}\n\

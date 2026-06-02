@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use rquickjs::loader::{ImportAttributes, Loader, Resolver};
-use rquickjs::{AsyncContext, AsyncRuntime, Ctx, Error as JsError, Module, async_with};
+use rquickjs::{AsyncContext, AsyncRuntime, Ctx, Error as JsError, Module};
 use serde_json::Value as JsonValue;
 use serde_json::json;
 
@@ -53,22 +53,20 @@ async fn run_with_options(options: HashMap<String, JsonValue>, script: &str) -> 
     let captured = Arc::new(std::sync::Mutex::new(String::new()));
     let captured_for_async = Arc::clone(&captured);
     let script_owned = script.to_string();
-    async_with!(ctx => |ctx| {
+    ctx.async_with(async move |ctx| {
         settings::install(&ctx, &options).expect("install");
         // Plugin under test stashes its observation on globalThis.__out so the
         // host can read it back as a single string.
-        let src = format!(r#"
+        let src = format!(
+            r#"
             import {{ get, getString, getBool, getInt }} from "highbeam:settings";
             {script_owned}
-        "#);
-        let declared = Module::declare(ctx.clone(), "settings:test", src.into_bytes())
-            .expect("declare");
+        "#
+        );
+        let declared = Module::declare(ctx.clone(), "settings:test", src.into_bytes()).expect("declare");
         let (_module, eval_promise) = declared.eval().expect("eval");
         eval_promise.into_future::<()>().await.expect("await eval");
-        let out: String = ctx
-            .globals()
-            .get::<_, String>("__out")
-            .unwrap_or_default();
+        let out: String = ctx.globals().get::<_, String>("__out").unwrap_or_default();
         *captured_for_async.lock().unwrap() = out;
     })
     .await;

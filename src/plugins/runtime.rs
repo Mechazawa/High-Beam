@@ -22,8 +22,7 @@ use rquickjs::function::This;
 use rquickjs::loader::{ImportAttributes, Loader, Resolver};
 use rquickjs::module::Evaluated;
 use rquickjs::{
-    AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Error as JsError, Function, IntoJs, Module, Object, Promise,
-    Value, async_with,
+    AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Error as JsError, Function, IntoJs, Module, Object, Promise, Value,
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -66,7 +65,7 @@ const VIEW_MODULE: &str = "highbeam:view";
 /// Slot on `globalThis` for the plugin's `query` export. We can't carry a
 /// `Module<'js>` across iterator `.await` points, and
 /// `Persistent<Function<'static>>` holds a raw `!Send` pointer that can't
-/// cross `async_with!` under rquickjs's `parallel` feature.
+/// cross `async_with` under rquickjs's `parallel` feature.
 const QUERY_GLOBAL: &str = "__highbeam_query";
 /// Slots for the optional lifecycle hooks. Same reasoning as `QUERY_GLOBAL` —
 /// the JS Function handle can't escape its evaluating context.
@@ -283,47 +282,51 @@ impl LoadedPlugin {
         let plugin_caps = manifest.capabilities.clone();
         let plugin_dir_owned = plugin_dir.to_path_buf();
         let log_for_ctx = Arc::clone(&log);
-        let exports = async_with!(context => |ctx| {
-            install_host_globals(
-                &ctx,
-                &log_for_ctx,
-                &plugin_caps,
-                cache_dir.clone(),
-                plugin_dir_owned.clone(),
-                &merged_options,
-            )?;
+        let exports = context
+            .async_with(async move |ctx| {
+                install_host_globals(
+                    &ctx,
+                    &log_for_ctx,
+                    &plugin_caps,
+                    cache_dir.clone(),
+                    plugin_dir_owned.clone(),
+                    &merged_options,
+                )?;
 
-            let declared = Module::declare(ctx.clone(), "plugin:main", source_bytes)
-                .catch(&ctx)
-                .map_err(|err| PluginError::Js(format!("declare {entry_path_str}: {err}")))?;
-            let (module, eval_promise) = declared
-                .eval()
-                .catch(&ctx)
-                .map_err(|err| PluginError::Js(format!("eval {entry_path_str}: {err}")))?;
-            eval_promise
-                .into_future::<()>()
-                .await
-                .catch(&ctx)
-                .map_err(|err| PluginError::Js(format!("await eval {entry_path_str}: {err}")))?;
+                let declared = Module::declare(ctx.clone(), "plugin:main", source_bytes)
+                    .catch(&ctx)
+                    .map_err(|err| PluginError::Js(format!("declare {entry_path_str}: {err}")))?;
+                let (module, eval_promise) = declared
+                    .eval()
+                    .catch(&ctx)
+                    .map_err(|err| PluginError::Js(format!("eval {entry_path_str}: {err}")))?;
+                eval_promise
+                    .into_future::<()>()
+                    .await
+                    .catch(&ctx)
+                    .map_err(|err| PluginError::Js(format!("await eval {entry_path_str}: {err}")))?;
 
-            let query: Function<'_> = module
-                .get("query")
-                .catch(&ctx)
-                .map_err(|err| PluginError::Js(format!("missing `query` export: {err}")))?;
-            ctx.globals()
-                .set(QUERY_GLOBAL, query)
-                .catch(&ctx)
-                .map_err(|err| PluginError::Js(format!("stash query global: {err}")))?;
+                let query: Function<'_> = module
+                    .get("query")
+                    .catch(&ctx)
+                    .map_err(|err| PluginError::Js(format!("missing `query` export: {err}")))?;
+                ctx.globals()
+                    .set(QUERY_GLOBAL, query)
+                    .catch(&ctx)
+                    .map_err(|err| PluginError::Js(format!("stash query global: {err}")))?;
 
-            // onEnable / onDisable are optional — a `module.get` for a
-            // missing export raises, so swallow that into a `None` rather
-            // than treating it as a hard error.
-            let has_on_enable = stash_optional_hook(&ctx, &module, "onEnable", ON_ENABLE_GLOBAL)?;
-            let has_on_disable = stash_optional_hook(&ctx, &module, "onDisable", ON_DISABLE_GLOBAL)?;
+                // onEnable / onDisable are optional — a `module.get` for a
+                // missing export raises, so swallow that into a `None` rather
+                // than treating it as a hard error.
+                let has_on_enable = stash_optional_hook(&ctx, &module, "onEnable", ON_ENABLE_GLOBAL)?;
+                let has_on_disable = stash_optional_hook(&ctx, &module, "onDisable", ON_DISABLE_GLOBAL)?;
 
-            Ok::<_, PluginError>(ExportFlags { has_on_enable, has_on_disable })
-        })
-        .await?;
+                Ok::<_, PluginError>(ExportFlags {
+                    has_on_enable,
+                    has_on_disable,
+                })
+            })
+            .await?;
 
         let timeout = Duration::from_millis(manifest.timeout_ms);
         Ok(Self {
@@ -389,10 +392,9 @@ impl LoadedPlugin {
         let memory_mb = self.manifest.memory_mb;
         tokio::spawn(async move {
             let input_for_stream = input_owned.clone();
-            let outcome: Result<(), PluginError> = async_with!(context => |ctx| {
-                stream_query(ctx, &input_for_stream, &tx, &cancel).await
-            })
-            .await;
+            let outcome: Result<(), PluginError> = context
+                .async_with(async move |ctx| stream_query(ctx, &input_for_stream, &tx, &cancel).await)
+                .await;
             log_query_outcome(
                 &log_for_task,
                 &outcome,
@@ -433,60 +435,61 @@ impl LoadedPlugin {
         let close_signal = bridge.close_signal.clone();
 
         tokio::spawn(async move {
-            async_with!(context => |ctx| {
-                if let Err(err) = crate::sdk::view::install_runtime(&ctx, Arc::clone(&bridge)).catch(&ctx) {
-                    tracing::error!(plugin = %plugin_name, handle, %err, "views: install runtime failed");
-                    // Ask the host to pop the frame + drop the
-                    // close-signal entry; otherwise view_close_signals
-                    // would keep a stale token until session end.
-                    (bridge.close_request)(handle);
-                    return;
-                }
+            context
+                .async_with(async move |ctx| {
+                    if let Err(err) = crate::sdk::view::install_runtime(&ctx, Arc::clone(&bridge)).catch(&ctx) {
+                        tracing::error!(plugin = %plugin_name, handle, %err, "views: install runtime failed");
+                        // Ask the host to pop the frame + drop the
+                        // close-signal entry; otherwise view_close_signals
+                        // would keep a stale token until session end.
+                        (bridge.close_request)(handle);
+                        return;
+                    }
 
-                if let Err(err) = crate::sdk::view::invoke_init(&ctx, handle, &props_json).catch(&ctx) {
-                    tracing::error!(plugin = %plugin_name, handle, %err, "views: init failed");
-                    (bridge.close_request)(handle);
-                    return;
-                }
+                    if let Err(err) = crate::sdk::view::invoke_init(&ctx, handle, &props_json).catch(&ctx) {
+                        tracing::error!(plugin = %plugin_name, handle, %err, "views: init failed");
+                        (bridge.close_request)(handle);
+                        return;
+                    }
 
-                // Drive events + close in the same async_with! the
-                // init ran in. The runtime polls pending JS jobs while
-                // we're parked in select!, so `mounted`'s `setTimeout`
-                // continuations and downstream re-renders fire even
-                // when no user input has arrived.
-                loop {
-                    tokio::select! {
-                        biased;
-                        () = close_signal.cancelled() => break,
-                        maybe_ev = event_rx.recv() => {
-                            let Some(ev) = maybe_ev else {
-                                // Sender dropped — host has finished
-                                // tearing down this view's bookkeeping;
-                                // fall back to waiting on close_signal.
-                                close_signal.cancelled().await;
-                                break;
-                            };
-                            let value_json = ev.value.to_string();
-                            if let Err(err) = crate::sdk::view::invoke_event(
-                                &ctx, handle, ev.callback_id, &value_json,
-                            ).catch(&ctx) {
-                                tracing::error!(
-                                    plugin = %plugin_name,
-                                    handle,
-                                    callback_id = ev.callback_id,
-                                    %err,
-                                    "views: event failed",
-                                );
+                    // Drive events + close in the same async_with! the
+                    // init ran in. The runtime polls pending JS jobs while
+                    // we're parked in select!, so `mounted`'s `setTimeout`
+                    // continuations and downstream re-renders fire even
+                    // when no user input has arrived.
+                    loop {
+                        tokio::select! {
+                            biased;
+                            () = close_signal.cancelled() => break,
+                            maybe_ev = event_rx.recv() => {
+                                let Some(ev) = maybe_ev else {
+                                    // Sender dropped — host has finished
+                                    // tearing down this view's bookkeeping;
+                                    // fall back to waiting on close_signal.
+                                    close_signal.cancelled().await;
+                                    break;
+                                };
+                                let value_json = ev.value.to_string();
+                                if let Err(err) = crate::sdk::view::invoke_event(
+                                    &ctx, handle, ev.callback_id, &value_json,
+                                ).catch(&ctx) {
+                                    tracing::error!(
+                                        plugin = %plugin_name,
+                                        handle,
+                                        callback_id = ev.callback_id,
+                                        %err,
+                                        "views: event failed",
+                                    );
+                                }
                             }
                         }
                     }
-                }
 
-                if let Err(err) = crate::sdk::view::invoke_close(&ctx, handle).catch(&ctx) {
-                    tracing::error!(plugin = %plugin_name, handle, %err, "views: close failed");
-                }
-            })
-            .await;
+                    if let Err(err) = crate::sdk::view::invoke_close(&ctx, handle).catch(&ctx) {
+                        tracing::error!(plugin = %plugin_name, handle, %err, "views: close failed");
+                    }
+                })
+                .await;
         });
     }
 
@@ -517,10 +520,9 @@ impl LoadedPlugin {
         let plugin_name = self.manifest.name.clone();
         tokio::spawn(async move {
             let started = std::time::Instant::now();
-            let outcome: Result<(), PluginError> = async_with!(context => |ctx| {
-                run_hook(&ctx, kind, reason, &shutdown).await
-            })
-            .await;
+            let outcome: Result<(), PluginError> = context
+                .async_with(async move |ctx| run_hook(&ctx, kind, reason, &shutdown).await)
+                .await;
             log_hook_outcome(&log, &plugin_name, kind, reason, &outcome, started.elapsed());
         })
     }

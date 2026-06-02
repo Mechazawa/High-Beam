@@ -1,6 +1,6 @@
 //! Behavioural tests for the UTF-8 `TextEncoder` / `TextDecoder` polyfill.
 
-use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, async_with};
+use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt};
 
 fn rt() -> tokio::runtime::Runtime {
     tokio::runtime::Builder::new_current_thread()
@@ -14,7 +14,7 @@ fn eval_str(script: &str) -> String {
     rt.block_on(async {
         let async_rt = AsyncRuntime::new().expect("rt");
         let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
-        async_with!(ctx => |ctx| {
+        ctx.async_with(async move |ctx| {
             high_beam::sdk::text_codec::install(&ctx).catch(&ctx).expect("install");
             ctx.eval::<String, _>(script).catch(&ctx).expect("eval")
         })
@@ -99,11 +99,19 @@ fn install_is_idempotent() {
     let out = rt.block_on(async {
         let async_rt = AsyncRuntime::new().expect("rt");
         let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
-        async_with!(ctx => |ctx| {
-            high_beam::sdk::text_codec::install(&ctx).catch(&ctx).expect("first install");
-            ctx.eval::<(), _>("globalThis.__probe = TextDecoder").catch(&ctx).expect("stash");
-            high_beam::sdk::text_codec::install(&ctx).catch(&ctx).expect("second install");
-            ctx.eval::<bool, _>("globalThis.__probe === TextDecoder").catch(&ctx).expect("compare")
+        ctx.async_with(async move |ctx| {
+            high_beam::sdk::text_codec::install(&ctx)
+                .catch(&ctx)
+                .expect("first install");
+            ctx.eval::<(), _>("globalThis.__probe = TextDecoder")
+                .catch(&ctx)
+                .expect("stash");
+            high_beam::sdk::text_codec::install(&ctx)
+                .catch(&ctx)
+                .expect("second install");
+            ctx.eval::<bool, _>("globalThis.__probe === TextDecoder")
+                .catch(&ctx)
+                .expect("compare")
         })
         .await
     });

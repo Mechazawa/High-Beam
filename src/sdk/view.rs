@@ -248,7 +248,7 @@ pub fn invoke_close(ctx: &Ctx<'_>, handle: u64) -> JsResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rquickjs::{AsyncContext, AsyncRuntime, async_with};
+    use rquickjs::{AsyncContext, AsyncRuntime};
 
     fn rt() -> tokio::runtime::Runtime {
         tokio::runtime::Builder::new_current_thread()
@@ -277,7 +277,7 @@ mod tests {
         runtime.block_on(async {
             let async_rt = AsyncRuntime::new().expect("rt");
             let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
-            async_with!(ctx => |ctx| {
+            ctx.async_with(async move |ctx| {
                 install_runtime(&ctx, test_bridge("test-plugin")).expect("install");
                 install_runtime(&ctx, test_bridge("test-plugin")).expect("re-install");
                 let has_views: bool = ctx
@@ -297,7 +297,7 @@ mod tests {
         runtime.block_on(async {
             let async_rt = AsyncRuntime::new().expect("rt");
             let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
-            async_with!(ctx => |ctx| {
+            ctx.async_with(async move |ctx| {
                 // Bootstrap AbortController so the runtime's `new AbortController()`
                 // in init() resolves.
                 crate::sdk::abort::install_global_controller(&ctx).expect("abort");
@@ -351,7 +351,7 @@ mod tests {
         runtime.block_on(async {
             let async_rt = AsyncRuntime::new().expect("rt");
             let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
-            async_with!(ctx => |ctx| {
+            ctx.async_with(async move |ctx| {
                 crate::sdk::abort::install_global_controller(&ctx).expect("abort");
                 install_runtime(&ctx, test_bridge("t")).expect("install");
                 // Override the stub paint hooks with recorders so we can assert.
@@ -395,7 +395,7 @@ mod tests {
         runtime.block_on(async {
             let async_rt = AsyncRuntime::new().expect("rt");
             let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
-            async_with!(ctx => |ctx| {
+            ctx.async_with(async move |ctx| {
                 crate::sdk::abort::install_global_controller(&ctx).expect("abort");
                 install_runtime(&ctx, test_bridge("t")).expect("install");
 
@@ -431,9 +431,7 @@ mod tests {
 
                 invoke_init(&ctx, 9, "{}").expect("init");
 
-                let first_tree: String = ctx
-                    .eval("__paint_calls[0][1]")
-                    .expect("read tree");
+                let first_tree: String = ctx.eval("__paint_calls[0][1]").expect("read tree");
                 let callback_id: u64 = extract_first_callback_id(&first_tree);
                 invoke_event(&ctx, 9, callback_id, "null").expect("event");
 

@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use rquickjs::loader::{ImportAttributes, Loader, Resolver};
-use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Error as JsError, Module, async_with};
+use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Error as JsError, Module};
 
 use high_beam::sdk::fs::{FsModule, install};
 
@@ -52,10 +52,13 @@ async fn run_script(can_read: bool, can_cache: bool, cache_dir: PathBuf, src: Ve
     async_rt.set_loader(OnlyFs, OnlyFs).await;
     let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
     let plugin_dir = std::env::temp_dir();
-    async_with!(ctx => |ctx| {
-        install(&ctx, can_read, can_cache, cache_dir, plugin_dir).catch(&ctx).expect("install");
+    ctx.async_with(async move |ctx| {
+        install(&ctx, can_read, can_cache, cache_dir, plugin_dir)
+            .catch(&ctx)
+            .expect("install");
         let declared = Module::declare(ctx.clone(), "test:harness", src)
-            .catch(&ctx).expect("declare");
+            .catch(&ctx)
+            .expect("declare");
         let (_m, eval) = declared.eval().catch(&ctx).expect("eval");
         eval.into_future::<()>().await.catch(&ctx).expect("await eval");
         let promise: rquickjs::Promise<'_> = ctx.globals().get("__test").expect("read __test");

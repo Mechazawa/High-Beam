@@ -169,6 +169,19 @@ serde_json = "1"
 #   * `parallel` — required by `futures` for Send-able runtime handles
 rquickjs = { version = "0.12", features = ["loader", "futures", "macro", "parallel"] }
 
+# LLRT modules (AWS) supply the Node/Web API surface for the plugin
+# runtime: node:path, node:fs, URL/URLSearchParams, Buffer, TextEncoder/
+# TextDecoder, AbortController, timers, fetch. Not published to crates.io;
+# pinned to a rev of the llrt monorepo.
+llrt_abort = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
+llrt_buffer = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
+llrt_fetch = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
+llrt_fs = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
+llrt_path = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
+llrt_timers = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
+llrt_url = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
+llrt_util = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
+
 # Single-threaded tokio drives the AsyncRuntime per query.
 tokio = { version = "1", features = ["rt", "macros", "time", "sync", "process", "io-util"] }
 

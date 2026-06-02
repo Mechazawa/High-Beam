@@ -149,7 +149,7 @@ pub fn token_from_js_signal<'js>(ctx: &Ctx<'js>, signal: &Object<'js>) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rquickjs::{AsyncContext, AsyncRuntime, async_with};
+    use rquickjs::{AsyncContext, AsyncRuntime};
 
     fn rt() -> tokio::runtime::Runtime {
         tokio::runtime::Builder::new_current_thread()
@@ -164,7 +164,7 @@ mod tests {
         runtime.block_on(async {
             let async_rt = AsyncRuntime::new().expect("rt");
             let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
-            async_with!(ctx => |ctx| {
+            ctx.async_with(async move |ctx| {
                 install_global_controller(&ctx).expect("first");
                 install_global_controller(&ctx).expect("second");
                 let has: bool = ctx.eval("typeof AbortController === 'function'").expect("eval");
@@ -180,9 +180,11 @@ mod tests {
         runtime.block_on(async {
             let async_rt = AsyncRuntime::new().expect("rt");
             let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
-            async_with!(ctx => |ctx| {
+            ctx.async_with(async move |ctx| {
                 install_global_controller(&ctx).expect("install");
-                let fired: bool = ctx.eval(r"
+                let fired: bool = ctx
+                    .eval(
+                        r"
                     (() => {
                         const c = new AbortController();
                         let fired = false;
@@ -190,7 +192,9 @@ mod tests {
                         c.abort();
                         return fired && c.signal.aborted;
                     })()
-                ").expect("eval");
+                ",
+                    )
+                    .expect("eval");
                 assert!(fired);
             })
             .await;
@@ -203,12 +207,16 @@ mod tests {
         runtime.block_on(async {
             let async_rt = AsyncRuntime::new().expect("rt");
             let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
-            async_with!(ctx => |ctx| {
+            ctx.async_with(async move |ctx| {
                 let (abort, signal) = Abort::create(&ctx).expect("create");
-                let attach: Function<'_> = ctx.eval(r"((sig) => {
+                let attach: Function<'_> = ctx
+                    .eval(
+                        r"((sig) => {
                     sig._observed = false;
                     sig.addEventListener('abort', () => { sig._observed = true; });
-                })").expect("eval attach");
+                })",
+                    )
+                    .expect("eval attach");
                 attach.call::<_, ()>((signal.clone(),)).expect("attach call");
                 assert!(!abort.is_aborted());
                 abort.cancel(&ctx).expect("cancel");
@@ -233,13 +241,17 @@ mod tests {
         runtime.block_on(async {
             let async_rt = AsyncRuntime::new().expect("rt");
             let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
-            async_with!(ctx => |ctx| {
+            ctx.async_with(async move |ctx| {
                 let (keep, _signal_keep) = Abort::create(&ctx).expect("create keep");
                 let (drop_, _signal_drop) = Abort::create(&ctx).expect("create drop");
-                let size_before: i32 = ctx.eval("globalThis.__highbeam_abort_registry.controllers.size").expect("eval");
+                let size_before: i32 = ctx
+                    .eval("globalThis.__highbeam_abort_registry.controllers.size")
+                    .expect("eval");
                 assert_eq!(size_before, 2);
                 drop_.release(&ctx).expect("release");
-                let size_after: i32 = ctx.eval("globalThis.__highbeam_abort_registry.controllers.size").expect("eval");
+                let size_after: i32 = ctx
+                    .eval("globalThis.__highbeam_abort_registry.controllers.size")
+                    .expect("eval");
                 assert_eq!(size_after, 1, "release should drop one entry");
                 // `keep` is intentionally not released — without that, the
                 // registry-shrink assertion above wouldn't discriminate
@@ -256,12 +268,16 @@ mod tests {
         runtime.block_on(async {
             let async_rt = AsyncRuntime::new().expect("rt");
             let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
-            async_with!(ctx => |ctx| {
+            ctx.async_with(async move |ctx| {
                 install_global_controller(&ctx).expect("install");
-                let pair: Object<'_> = ctx.eval(r"(() => {
+                let pair: Object<'_> = ctx
+                    .eval(
+                        r"(() => {
                     const c = new AbortController();
                     return { c, s: c.signal };
-                })()").expect("eval pair");
+                })()",
+                    )
+                    .expect("eval pair");
                 let signal: Object<'_> = pair.get("s").expect("get s");
                 let token = token_from_js_signal(&ctx, &signal).expect("token");
                 assert!(!token.is_cancelled());
