@@ -63,7 +63,7 @@ impl FrecencyDb {
             )
         })?;
         let mut conn = Connection::open(path)?;
-        MIGRATIONS.to_latest(&mut conn).map_err(|err| migration_failed(&err))?;
+        MIGRATIONS.to_latest(&mut conn).map_err(migration_failed)?;
         Ok(Self {
             inner: Arc::new(Mutex::new(conn)),
         })
@@ -77,7 +77,7 @@ impl FrecencyDb {
     #[cfg(test)]
     pub(crate) fn open_in_memory() -> rusqlite::Result<Self> {
         let mut conn = Connection::open_in_memory()?;
-        MIGRATIONS.to_latest(&mut conn).map_err(|err| migration_failed(&err))?;
+        MIGRATIONS.to_latest(&mut conn).map_err(migration_failed)?;
         Ok(Self {
             inner: Arc::new(Mutex::new(conn)),
         })
@@ -184,7 +184,7 @@ impl FrecencyDb {
 
 /// Fold a migration failure into `rusqlite`'s error type so `open` keeps a
 /// single `rusqlite::Result` surface for its caller.
-fn migration_failed(err: &rusqlite_migration::Error) -> rusqlite::Error {
+fn migration_failed(err: rusqlite_migration::Error) -> rusqlite::Error {
     rusqlite::Error::SqliteFailure(
         rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
         Some(format!("frecency schema migration failed: {err}")),
