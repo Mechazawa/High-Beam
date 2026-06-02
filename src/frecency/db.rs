@@ -1,31 +1,37 @@
 //! `SQLite` storage for the `picks` frecency table.
 //!
-//! `CREATE TABLE IF NOT EXISTS` is the whole migration system — no history
-//! to evolve yet. TODO: switch to `rusqlite_migration` the first time the
-//! schema actually changes.
+//! The schema is versioned through `rusqlite_migration`: [`MIGRATIONS`] is the
+//! ordered list and `to_latest` brings any opened connection up to the newest.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(test)]
 use rusqlite::OptionalExtension;
 use rusqlite::{Connection, params};
+use rusqlite_migration::{M, Migrations};
 
 use crate::paths::ensure_parent_dir;
 
 // Composite PRIMARY KEY generates an implicit unique index used for both
 // lookups and upserts — no additional index needed.
-const SCHEMA_SQL: &str = "\
-CREATE TABLE IF NOT EXISTS picks (
+//
+// v1 keeps `IF NOT EXISTS`: databases written before migrations existed
+// already hold this table at `user_version` 0, so v1 must no-op against them
+// while still creating the table on a fresh file.
+static MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
+    Migrations::new(vec![M::up(
+        "CREATE TABLE IF NOT EXISTS picks (
     plugin_name      TEXT    NOT NULL,
     result_key       TEXT    NOT NULL,
     picks            INTEGER NOT NULL DEFAULT 1,
     last_picked_at   INTEGER NOT NULL,
     PRIMARY KEY (plugin_name, result_key)
-);
-";
+);",
+    )])
+});
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PickRow {
@@ -56,8 +62,8 @@ impl FrecencyDb {
                 Some(format!("create parent dir for {}: {err}", path.display())),
             )
         })?;
-        let conn = Connection::open(path)?;
-        conn.execute_batch(SCHEMA_SQL)?;
+        let mut conn = Connection::open(path)?;
+        MIGRATIONS.to_latest(&mut conn).map_err(|err| migration_failed(&err))?;
         Ok(Self {
             inner: Arc::new(Mutex::new(conn)),
         })
@@ -70,8 +76,8 @@ impl FrecencyDb {
     /// Returns the same SQL error set as [`Self::open`].
     #[cfg(test)]
     pub(crate) fn open_in_memory() -> rusqlite::Result<Self> {
-        let conn = Connection::open_in_memory()?;
-        conn.execute_batch(SCHEMA_SQL)?;
+        let mut conn = Connection::open_in_memory()?;
+        MIGRATIONS.to_latest(&mut conn).map_err(|err| migration_failed(&err))?;
         Ok(Self {
             inner: Arc::new(Mutex::new(conn)),
         })
@@ -176,6 +182,15 @@ impl FrecencyDb {
     }
 }
 
+/// Fold a migration failure into `rusqlite`'s error type so `open` keeps a
+/// single `rusqlite::Result` surface for its caller.
+fn migration_failed(err: &rusqlite_migration::Error) -> rusqlite::Error {
+    rusqlite::Error::SqliteFailure(
+        rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
+        Some(format!("frecency schema migration failed: {err}")),
+    )
+}
+
 /// Wall-clock seconds since Unix epoch. Saturates to 0 on pre-epoch clocks
 /// rather than panicking.
 #[must_use]
@@ -225,6 +240,43 @@ pub(crate) fn default_db_path() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn migrations_are_valid() {
+        MIGRATIONS.validate().expect("migration set is well-formed");
+    }
+
+    #[test]
+    fn migrates_legacy_db_left_at_version_zero() {
+        // Reproduce a database written before migrations existed: the table is
+        // already present and `user_version` is still 0. v1 must adopt it
+        // without error and without dropping rows.
+        let mut conn = Connection::open_in_memory().expect("open");
+        conn.execute_batch(
+            "CREATE TABLE picks (
+                plugin_name    TEXT    NOT NULL,
+                result_key     TEXT    NOT NULL,
+                picks          INTEGER NOT NULL DEFAULT 1,
+                last_picked_at INTEGER NOT NULL,
+                PRIMARY KEY (plugin_name, result_key)
+            );
+            INSERT INTO picks VALUES ('demo', 'alpha', 3, 1700000000);",
+        )
+        .expect("seed legacy schema");
+
+        MIGRATIONS.to_latest(&mut conn).expect("adopt legacy db");
+
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .expect("user_version");
+        let picks: u32 = conn
+            .query_row("SELECT picks FROM picks WHERE plugin_name = 'demo'", [], |row| {
+                row.get(0)
+            })
+            .expect("legacy row survives");
+        assert_eq!(version, 1);
+        assert_eq!(picks, 3);
+    }
 
     #[test]
     fn open_in_memory_creates_schema() {
