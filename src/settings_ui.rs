@@ -8,7 +8,7 @@
 //! state is independent of the query/results state.
 
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex, OnceLock, RwLock, Weak};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, RwLock, Weak};
 use std::thread;
 
 use serde_json::Value as JsonValue;
@@ -67,6 +67,17 @@ struct Inner {
     /// Mutators send `()` here; the writer thread drains the queue and
     /// flushes once per burst.
     dirty_tx: mpsc::Sender<()>,
+}
+
+impl Inner {
+    /// Lock the settings mutex, recovering the guard if a previous holder
+    /// panicked. Poisoning only happens on a panic mid-write, which this
+    /// otherwise panic-free path shouldn't hit — but recovering the (plain,
+    /// still-structurally-valid) `Settings` beats taking the daemon down
+    /// mid-interaction over a lock we can simply re-acquire.
+    fn lock_settings(&self) -> MutexGuard<'_, Settings> {
+        self.settings.lock().unwrap_or_else(PoisonError::into_inner)
+    }
 }
 
 impl SettingsController {
@@ -251,7 +262,7 @@ impl SettingsController {
         // Theme dropdown is refreshed separately (`refresh_themes`) to keep its
         // disk scan off every global mutation.
         let (hotkey, alt_mod, theme_mode) = {
-            let settings = self.inner.settings.lock().expect("settings lock");
+            let settings = self.inner.lock_settings();
             (
                 settings.global().hotkey.clone(),
                 settings.alt_action_modifier().to_owned(),
@@ -291,7 +302,7 @@ impl SettingsController {
 
     fn set_hotkey(&self, value: &str) {
         {
-            let mut settings = self.inner.settings.lock().expect("settings lock");
+            let mut settings = self.inner.lock_settings();
             settings.set_hotkey(value);
         }
 
@@ -300,7 +311,7 @@ impl SettingsController {
 
     fn set_alt_action_modifier(&self, value: &str) {
         {
-            let mut settings = self.inner.settings.lock().expect("settings lock");
+            let mut settings = self.inner.lock_settings();
             settings.set_alt_action_modifier(value);
         }
 
@@ -353,31 +364,22 @@ impl SettingsController {
     /// Replace the shared active theme with the user's current selection,
     /// re-read from disk. Used by both the selector (after the settings write)
     /// and the reload button.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the theme lock is poisoned — a previous panic while holding
-    /// it corrupted the shared state and continuing risks painting garbage.
     fn swap_active_theme(&self, theme: &Arc<RwLock<Theme>>) {
         let loaded = Theme::load_named(&self.theme());
-        *theme.write().expect("theme lock") = loaded;
+        *theme.write().unwrap_or_else(PoisonError::into_inner) = loaded;
     }
 
     /// Paint the active theme's variant for `mode` against the current system
     /// appearance. Reads the shared theme under a read lock; the borrow can't
     /// escape the guard, so the apply happens inside the locked scope.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the theme lock is poisoned. See [`Self::swap_active_theme`].
     fn apply_active_theme(window: &QueryWindow, theme: &Arc<RwLock<Theme>>, mode: ThemeMode) {
-        let guard = theme.read().expect("theme lock");
+        let guard = theme.read().unwrap_or_else(PoisonError::into_inner);
         window::apply_theme(window, guard.variant_for(mode, os_appearance::current()));
     }
 
     fn set_theme_mode(&self, value: &str) {
         {
-            let mut settings = self.inner.settings.lock().expect("settings lock");
+            let mut settings = self.inner.lock_settings();
             settings.set_theme_mode(value);
         }
 
@@ -386,7 +388,7 @@ impl SettingsController {
 
     fn set_theme(&self, value: &str) {
         {
-            let mut settings = self.inner.settings.lock().expect("settings lock");
+            let mut settings = self.inner.lock_settings();
             settings.set_theme(value);
         }
 
@@ -395,26 +397,15 @@ impl SettingsController {
 
     /// The user's currently selected theme name (file stem or the reserved
     /// default). Read when swapping / reloading the active theme.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the settings mutex is poisoned. See
-    /// [`Self::launcher_position`] for the rationale.
     fn theme(&self) -> String {
-        self.inner.settings.lock().expect("settings lock").theme().to_owned()
+        self.inner.lock_settings().theme().to_owned()
     }
 
     /// Last saved launcher window origin, or `None` if the user has never
     /// dragged the window (or just cleared it via Recenter).
-    ///
-    /// # Panics
-    ///
-    /// Panics if the settings mutex is poisoned — a previous panic while
-    /// holding the lock corrupted the shared state and continuing risks
-    /// writing the corruption to disk.
     #[must_use]
     pub fn launcher_position(&self) -> Option<WindowPosition> {
-        let settings = self.inner.settings.lock().expect("settings lock");
+        let settings = self.inner.lock_settings();
         settings.global().launcher_position
     }
 
@@ -426,14 +417,9 @@ impl SettingsController {
     ///
     /// Resolves the platform-specific Slint Cmd↔Ctrl swap (the same one
     /// the hotkey formatter has to handle).
-    ///
-    /// # Panics
-    ///
-    /// Panics if the settings mutex is poisoned. See
-    /// [`Self::launcher_position`] for the rationale.
     #[must_use]
     pub fn alt_modifier_held(&self, mods: u8) -> bool {
-        let settings = self.inner.settings.lock().expect("settings lock");
+        let settings = self.inner.lock_settings();
 
         match settings.alt_action_modifier() {
             "Alt" => mods & MOD_ALT != 0,
@@ -466,14 +452,9 @@ impl SettingsController {
 
     /// Current `query_history.max_entries` setting. Read on every history
     /// push so the cap takes effect without a daemon restart.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the settings mutex is poisoned. See
-    /// [`Self::launcher_position`] for the rationale.
     #[must_use]
     pub fn query_history_max_entries(&self) -> usize {
-        let settings = self.inner.settings.lock().expect("settings lock");
+        let settings = self.inner.lock_settings();
         settings.query_history_max_entries()
     }
 
@@ -481,27 +462,17 @@ impl SettingsController {
     /// plugin loader, dispatcher). Persist via the controller's own
     /// `set_*` / `record_loaded_versions` methods rather than mutating the
     /// snapshot — modifications to the returned `Settings` are discarded.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the settings mutex is poisoned. See
-    /// [`Self::launcher_position`] for the rationale.
     #[must_use]
     pub fn snapshot(&self) -> Settings {
-        self.inner.settings.lock().expect("settings lock").clone()
+        self.inner.lock_settings().clone()
     }
 
     /// Current `theme_mode` setting. Read by the OS-appearance watcher on
     /// every tick so toggling between `Auto` / `Dark` / `Light` in a
     /// future settings-UI surface takes effect without a daemon restart.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the settings mutex is poisoned. See
-    /// [`Self::launcher_position`] for the rationale.
     #[must_use]
     pub fn theme_mode(&self) -> ThemeMode {
-        self.inner.settings.lock().expect("settings lock").theme_mode()
+        self.inner.lock_settings().theme_mode()
     }
 
     /// Record the manifest version each `(plugin, Some(version))` pair was
@@ -509,18 +480,13 @@ impl SettingsController {
     /// this so a crash mid-hook can't replay the work on the next boot.
     /// Empty input is a no-op. A `version` of `None` clears the slot
     /// (e.g. on uninstall).
-    ///
-    /// # Panics
-    ///
-    /// Panics if the settings mutex is poisoned. See
-    /// [`Self::launcher_position`] for the rationale.
     pub fn record_loaded_versions(&self, entries: &[(String, Option<String>)]) {
         if entries.is_empty() {
             return;
         }
 
         {
-            let mut s = self.inner.settings.lock().expect("settings lock");
+            let mut s = self.inner.lock_settings();
 
             for (name, version) in entries {
                 s.set_last_loaded_version(name, version.clone());
@@ -531,14 +497,9 @@ impl SettingsController {
     }
 
     /// Record a new launcher window origin and queue a disk flush.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the settings mutex is poisoned. See
-    /// [`Self::launcher_position`] for the rationale.
     pub fn set_launcher_position(&self, position: WindowPosition) {
         {
-            let mut settings = self.inner.settings.lock().expect("settings lock");
+            let mut settings = self.inner.lock_settings();
             settings.set_launcher_position(position);
         }
 
@@ -547,14 +508,9 @@ impl SettingsController {
 
     /// Forget the saved launcher position. The next show recenters via the
     /// existing focused-display math.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the settings mutex is poisoned. See
-    /// [`Self::launcher_position`] for the rationale.
     pub fn clear_launcher_position(&self) {
         {
-            let mut settings = self.inner.settings.lock().expect("settings lock");
+            let mut settings = self.inner.lock_settings();
             settings.clear_launcher_position();
         }
 
@@ -562,7 +518,7 @@ impl SettingsController {
     }
 
     fn refresh_slots(&self, window: &QueryWindow) {
-        let settings = self.inner.settings.lock().expect("settings lock");
+        let settings = self.inner.lock_settings();
         let slots: Vec<PluginSlot> = self
             .inner
             .manifests
@@ -598,7 +554,7 @@ impl SettingsController {
         window.set_selected_plugin_description(SharedString::from(meta.description.as_deref().unwrap_or_default()));
 
         let defs = &manifest.parsed_options().defs;
-        let settings = self.inner.settings.lock().expect("settings lock");
+        let settings = self.inner.lock_settings();
         let user_opts = settings.plugin_options(&manifest.name);
         let options: Vec<PluginOption> = defs
             .iter()
@@ -610,7 +566,7 @@ impl SettingsController {
 
     fn set_enabled(&self, plugin: &str, enabled: bool) {
         {
-            let mut settings = self.inner.settings.lock().expect("settings lock");
+            let mut settings = self.inner.lock_settings();
             settings.set_plugin_enabled(plugin, enabled);
         }
 
@@ -619,7 +575,7 @@ impl SettingsController {
 
     fn set_option(&self, plugin: &str, key: &str, value: JsonValue) {
         {
-            let mut settings = self.inner.settings.lock().expect("settings lock");
+            let mut settings = self.inner.lock_settings();
             settings.set_plugin_option(plugin, key, value);
         }
 
@@ -660,7 +616,7 @@ impl SettingsController {
             // choices; we pick the next one after the current value.
             OptionKind::Enum { default, choices } => {
                 let current = {
-                    let settings = self.inner.settings.lock().expect("settings lock");
+                    let settings = self.inner.lock_settings();
                     settings
                         .plugin_options(plugin)
                         .get(key)
@@ -688,13 +644,8 @@ impl SettingsController {
 
     /// Synchronously save settings to disk, bypassing the writer thread.
     /// For tests that assert on-disk state right after a mutation.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the settings mutex is poisoned. See
-    /// [`Self::launcher_position`] for the rationale.
     pub fn flush(&self) {
-        let settings = self.inner.settings.lock().expect("settings lock");
+        let settings = self.inner.lock_settings();
         settings.save().log_warn("settings: flush failed");
     }
 }
@@ -712,13 +663,7 @@ fn spawn_writer_thread(weak_inner: Weak<Inner>, rx: mpsc::Receiver<()>) {
                 let Some(inner) = weak_inner.upgrade() else {
                     break;
                 };
-                let snapshot = match inner.settings.lock() {
-                    Ok(g) => g.clone(),
-                    Err(err) => {
-                        tracing::error!(?err, "settings: writer saw poisoned lock");
-                        break;
-                    }
-                };
+                let snapshot = inner.lock_settings().clone();
                 drop(inner);
                 snapshot.save().log_warn("settings: writer save failed");
             }
