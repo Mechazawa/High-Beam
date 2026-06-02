@@ -22,7 +22,6 @@ const DEFAULT_DEFAULT_ENABLED: bool = true;
 /// at gating time.
 const KNOWN_PLATFORMS: &[&str] = &["macos", "linux"];
 
-/// Plugin metadata as it appears on disk.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Manifest {
@@ -247,7 +246,6 @@ impl Manifest {
         serde_json::from_slice(bytes)
     }
 
-    /// Resolve the plugin entry point relative to its directory.
     #[must_use]
     pub fn entry_path(&self, plugin_dir: &Path) -> PathBuf {
         plugin_dir.join(&self.entry)

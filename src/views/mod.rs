@@ -19,7 +19,6 @@ use tokio_util::sync::CancellationToken;
 /// plugin can't grow the stack without bound.
 pub const STACK_CAP: usize = 16;
 
-/// One pushed view frame.
 #[derive(Debug)]
 pub struct ViewFrame {
     /// Producing plugin name. Used to route render/event messages back to
@@ -39,7 +38,6 @@ pub struct ViewFrame {
 }
 
 impl ViewFrame {
-    /// Build a frame with a fresh cancellation token.
     #[must_use]
     pub fn new(plugin_name: String, handle: u64, props: Value) -> Self {
         Self {
@@ -51,7 +49,6 @@ impl ViewFrame {
     }
 }
 
-/// LIFO stack of [`ViewFrame`]s.
 #[derive(Debug, Default)]
 pub struct ViewStack {
     frames: Vec<ViewFrame>,
@@ -116,13 +113,11 @@ impl ViewStack {
         popped
     }
 
-    /// Number of frames on the stack right now.
     #[must_use]
     pub fn depth(&self) -> usize {
         self.frames.len()
     }
 
-    /// Borrow the topmost frame, if any.
     #[must_use]
     pub fn top(&self) -> Option<&ViewFrame> {
         self.frames.last()

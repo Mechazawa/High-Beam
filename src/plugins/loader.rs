@@ -29,7 +29,6 @@ pub struct LoadOutcome {
     pub reason: Option<LifecycleReason>,
 }
 
-/// Where to look for plugins.
 #[derive(Debug, Clone)]
 pub struct LoaderOptions {
     pub plugins_dir: PathBuf,

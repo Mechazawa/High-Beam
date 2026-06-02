@@ -13,7 +13,6 @@
 import { ResultRow } from "types.slint";
 
 export component LauncherView {
-    // Data
     in-out property <[ResultRow]> results: [];
     in-out property <int> selected-index: 0;
     in-out property <int> max-rows: 9;
@@ -24,7 +23,6 @@ export component LauncherView {
     // modifier will trigger right now.
     in property <bool> alt-modifier-active: false;
 
-    // Theme tokens
     in property <color> foreground-color;
     in property <color> muted-color;
     in property <color> selection-color;
@@ -68,7 +66,6 @@ export component LauncherView {
     }
 
     VerticalLayout {
-        // Input area
         Rectangle {
             height: 80px;
             input := TextInput {
@@ -179,13 +176,11 @@ export component LauncherView {
             }
         }
 
-        // Separator line — only visible when there are results.
         Rectangle {
             height: results.length > 0 ? 1px : 0;
             background: root.border-color;
         }
 
-        // Result rows
         Rectangle {
             height: rows-height;
             clip: true;

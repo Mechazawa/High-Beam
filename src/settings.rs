@@ -64,7 +64,6 @@ pub struct Settings {
     plugins: HashMap<String, PluginSettings>,
 }
 
-/// Global launcher settings — anything that isn't per-plugin.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GlobalSettings {
     /// Accelerator string parsed by `global_hotkey::HotKey::from_str`
@@ -136,7 +135,6 @@ pub fn normalize_alt_action_modifier(raw: &str) -> String {
         .map_or_else(|| DEFAULT_ALT_ACTION_MODIFIER.to_owned(), |c| (*c).to_owned())
 }
 
-/// Per-plugin settings as we store them.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PluginSettings {
     pub enabled: bool,
@@ -423,7 +421,6 @@ impl Settings {
         slot.enabled = enabled;
     }
 
-    /// Last manifest version recorded for this plugin, if any.
     #[must_use]
     pub fn last_loaded_version(&self, name: &str) -> Option<&str> {
         self.plugins.get(name).and_then(|s| s.last_loaded_version.as_deref())
@@ -439,8 +436,6 @@ impl Settings {
         slot.last_loaded_version = version;
     }
 
-    /// Set one option value for one plugin. Other plugins' option bags are
-    /// untouched — scoping is per-plugin.
     pub fn set_plugin_option(&mut self, plugin: &str, key: &str, value: JsonValue) {
         let slot = self
             .plugins
@@ -458,13 +453,11 @@ impl Settings {
         out
     }
 
-    /// Read-only view of the global settings block.
     #[must_use]
     pub fn global(&self) -> &GlobalSettings {
         &self.global
     }
 
-    /// The configured maximum query-history entry count.
     #[must_use]
     pub fn query_history_max_entries(&self) -> usize {
         self.global.query_history_max_entries

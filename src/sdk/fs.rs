@@ -30,6 +30,7 @@ impl ModuleDef for FsModule {
         decl.declare("readText")?;
         decl.declare("readCache")?;
         decl.declare("writeCache")?;
+        decl.declare("basename")?;
         Ok(())
     }
 
@@ -53,8 +54,21 @@ impl ModuleDef for FsModule {
                 exports.export(export_name, cap_error_thrower(ctx, cap)?)?;
             }
         }
+
+        // Pure string helper — no I/O, so no per-function cap gate beyond
+        // the module-level fs.* requirement.
+        let basename_fn = Function::new(ctx.clone(), |path: String| basename(&path).to_owned())?;
+        exports.export("basename", basename_fn)?;
         Ok(())
     }
+}
+
+/// Final component of `path` after stripping trailing slashes. Empty string
+/// for the root and the empty path; `.` / `..` pass through as-is (matching
+/// Node's `path.posix.basename`).
+fn basename(path: &str) -> &str {
+    let trimmed = path.trim_end_matches('/');
+    trimmed.rfind('/').map_or(trimmed, |i| &trimmed[i + 1..])
 }
 
 /// Install per-plugin bindings. Must run BEFORE the plugin's entry module

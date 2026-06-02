@@ -12,6 +12,8 @@ export interface Result {
     key: string;
     title: string;
     subtitle?: string;
+    /** `data:image/...;base64,...` URI. Pre-resolve paths via `highbeam:icons`. */
+    icon?: string;
     /** Plugin's self-assessed score, 0..100. */
     weight?: number;
     /** Bypass frecency; sort to the top among other pinned results by weight. */
@@ -42,7 +44,9 @@ export type Action =
     | { kind: 'exec'; cmd: string; args: readonly string[] }
     | { kind: 'reveal'; path: string }
     | { kind: 'showView'; view: ViewDef; props: object; reset: boolean }
-    | { kind: 'closeView' };
+    | { kind: 'closeView' }
+    /** Inert row — Enter dismisses the launcher without doing anything. */
+    | { kind: 'noop' };
 
 /**
  * A view definition — passed to `showView()` from `highbeam:actions`.

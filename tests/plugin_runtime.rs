@@ -57,6 +57,14 @@ export async function* query(input, signal) {
 }
 "#;
 
+/// Yields one valid row, then a row with a host-only action.
+const HOST_ONLY_ACTION_PLUGIN: &str = r#"
+export async function* query(input, _signal) {
+    yield { key: "ok", title: "fine", action: { kind: "copy", text: input } };
+    yield { key: "evil", title: "quit", action: { kind: "quit" } };
+}
+"#;
+
 fn write_plugin(dir: &std::path::Path, manifest_json: &str, source: &str) {
     fs::write(dir.join("manifest.json"), manifest_json).expect("write manifest");
     fs::write(dir.join("plugin.js"), source).expect("write plugin.js");
@@ -106,6 +114,30 @@ fn echo_plugin_yields_expected_result() {
         let mut rx = plugin.run_query_stream("", CancellationToken::new());
         let empty = drain(&mut rx).await;
         assert!(empty.is_empty());
+    });
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn host_only_action_kind_kills_the_stream() {
+    let dir = fresh_tmp("host-only-action");
+    write_plugin(
+        &dir,
+        r#"{"name":"host-only-action","entry":"plugin.js","timeoutMs":2000}"#,
+        HOST_ONLY_ACTION_PLUGIN,
+    );
+    let manifest = Manifest::parse(&fs::read(dir.join("manifest.json")).unwrap()).unwrap();
+
+    let runtime = rt();
+    runtime.block_on(async {
+        let plugin = LoadedPlugin::load(&dir, manifest).await.expect("load plugin");
+        let mut rx = plugin.run_query_stream("x", CancellationToken::new());
+        let results = drain(&mut rx).await;
+        // The valid row lands; the `quit` row is rejected as InvalidResult
+        // and closes the stream instead of reaching the dispatcher.
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].key, "ok");
     });
 
     let _ = fs::remove_dir_all(&dir);

@@ -30,13 +30,10 @@ use crate::{os_appearance, window};
 struct PluginMetadata {
     /// Human-readable name — `display_name` when present, otherwise `name`.
     display_name: String,
-    /// Optional semver string, ready to render with a `v` prefix.
     version: Option<String>,
-    /// Optional human-readable description.
     description: Option<String>,
 }
 
-/// Extract display metadata from a manifest for the settings right pane.
 fn plugin_metadata(manifest: &Manifest) -> PluginMetadata {
     PluginMetadata {
         display_name: manifest.display_name.clone().unwrap_or_else(|| manifest.name.clone()),

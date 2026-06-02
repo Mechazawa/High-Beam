@@ -46,13 +46,17 @@ interface Result {
 }
 
 // Actions plugin code can construct. Host-only variants (quit,
-// openSettings, reloadPlugin, installPlugin, updatePlugins, noop) are
-// produced by the Core built-in only — never by JS plugins.
+// openSettings, reloadPlugin, installPlugin, updatePlugins) are produced
+// by the Core built-in only; the host rejects them in plugin-yielded
+// results and view dispatches.
 type Action =
     | { kind: 'openUrl'; url: string }
     | { kind: 'copy'; text: string }
     | { kind: 'exec'; cmd: string; args: readonly string[] }
-    | { kind: 'reveal'; path: string };
+    | { kind: 'reveal'; path: string }
+    | { kind: 'showView'; view: ViewDef; props: object; reset: boolean }
+    | { kind: 'closeView' }
+    | { kind: 'noop' };       // inert row — Enter just dismisses the launcher
 
 interface HttpResponse {
     status: number;
@@ -93,13 +97,12 @@ Notes:
 
 - `Result.key` is the frecency key for `(plugin_name, key)`. Don't fold the
   user's current input into it — that defeats frecency.
-- `Result.icon` is supported by the host wire shape (a
-  `data:image/<type>;base64,...` URI) but is not in the `Result` interface
-  exported from `types.d.ts`. Set it as a property anyway — the host reads
-  it. `plugins/app-launcher` does this.
+- `Result.icon` must be a `data:image/<type>;base64,...` URI. Bare
+  filesystem paths are treated as missing — pre-resolve via
+  `highbeam:icons.forPath(...)`.
 - `Action` has host-only variants (`quit`, `openSettings`, `reloadPlugin`,
-  `installPlugin`, `updatePlugins`, `noop`) emitted by the Core built-in.
-  Plugins don't construct them.
+  `installPlugin`, `updatePlugins`) emitted by the Core built-in. The host
+  rejects them in plugin-yielded results and view dispatches.
 
 ## `highbeam:actions`
 
@@ -284,11 +287,12 @@ want a side effect during `query()` (rare).
 Read files, walk directories, and use a plugin-scoped cache.
 
 ```js
-import { readDir, readFile, readText, readCache, writeCache } from 'highbeam:fs';
+import { readDir, readFile, readText, readCache, writeCache, basename } from 'highbeam:fs';
 ```
 
 **Capabilities:** `fs.read` for the file readers, `fs.cache` for the cache
-helpers. Both can be declared independently.
+helpers. Both can be declared independently. `basename` is a pure string
+helper available with either.
 
 Relative paths passed to `readDir` / `readFile` / `readText` resolve against
 the plugin's own directory, so `readText('./bundled.json')` works regardless
@@ -381,6 +385,19 @@ missing. Same naming rules as `readCache`. **Capability:** `fs.cache`.
 
 See `plugins/xkcd` for cache-backed iteration (build an index on
 first miss, serve subsequent queries from cache, refresh on TTL).
+
+### `basename(path: string): string`
+
+```js
+basename('/Applications/Firefox.app');  // 'Firefox.app'
+basename('/foo/bar/');                  // 'bar'
+basename('/');                          // ''
+```
+
+Final component of `path` after stripping trailing slashes. Empty string for
+the root and the empty path; `.` / `..` pass through as-is (matching Node's
+`path.posix.basename`). Pure string helper — works with either `fs.*`
+capability, no I/O.
 
 ## `highbeam:icons`
 
