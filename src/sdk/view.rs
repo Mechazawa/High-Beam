@@ -39,7 +39,7 @@ pub struct RuntimeBridge {
     /// Fires when the host wants the view's tokio task to exit. The
     /// per-view `view_init` task awaits this; `view_close` triggers it.
     /// Driving the task this way (rather than calling `invoke_close`
-    /// from a separate `async_with!`) avoids two contexts contending
+    /// from a separate `async_with`) avoids two contexts contending
     /// for the same `QuickJS` engine and keeps `setTimeout`/microtask
     /// continuations alive for the view's whole lifetime.
     pub close_signal: tokio_util::sync::CancellationToken,

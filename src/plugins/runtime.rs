@@ -420,7 +420,7 @@ impl LoadedPlugin {
     ///   1. Installs the JS runtime + bridge globals.
     ///   2. Calls `init(handle, props)` — setup → first render → mounted.
     ///   3. Loops on `select!` between the host's close signal and the
-    ///      per-view event channel, keeping `async_with!` alive so
+    ///      per-view event channel, keeping `async_with` alive so
     ///      pending `QuickJS` jobs (microtask flushes, `setTimeout`
     ///      continuations, etc.) actually run.
     ///   4. Calls `close(handle)` — runs `unmounted`, fires the abort
@@ -458,7 +458,7 @@ impl LoadedPlugin {
                         return;
                     }
 
-                    // Drive events + close in the same async_with! the
+                    // Drive events + close in the same async_with the
                     // init ran in. The runtime polls pending JS jobs while
                     // we're parked in select!, so `mounted`'s `setTimeout`
                     // continuations and downstream re-renders fire even
@@ -811,7 +811,7 @@ async fn stream_query<'js>(
         .map_err(|err| PluginError::Js(format!("build signal: {err}")))?;
 
     // The JS-side abort is fired inline from the select! below — spawning a
-    // side task would need its own `async_with!` context to call back into
+    // side task would need its own `async_with` context to call back into
     // JS, which gets awkward under single-threaded rquickjs.
 
     let input_js = input

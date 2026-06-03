@@ -73,7 +73,7 @@ pub(super) enum HostMessage {
     },
     /// User interaction with a rendered block fired a callback. Routed
     /// to the per-view spawn task (via `view_event_senders`) which calls
-    /// `invoke_event` inside its `async_with!`.
+    /// `invoke_event` inside its `async_with`.
     ViewEvent {
         plugin: String,
         handle: u64,
@@ -209,7 +209,7 @@ fn spawn_runtime_thread(
                 > = std::collections::HashMap::new();
                 // Per-view event senders. The receiver lives in the
                 // spawn_view task's select! loop so events arrive
-                // serialised through the same async_with! that owns the
+                // serialised through the same async_with that owns the
                 // plugin's QuickJS context.
                 let mut view_event_senders: std::collections::HashMap<
                     (String, u64),
@@ -342,7 +342,7 @@ fn spawn_runtime_thread(
                         HostMessage::ViewClose { plugin, handle } => {
                             // Fire the bridge's close_signal — the per-view
                             // tokio task awaits it, runs `unmounted` inside
-                            // its own async_with!, and exits. Drop the
+                            // its own async_with, and exits. Drop the
                             // event sender so future events for this
                             // handle log + bail instead of queueing into a
                             // closed task.

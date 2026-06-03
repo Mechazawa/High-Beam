@@ -30,7 +30,7 @@ fire-and-forget housekeeping.
   run here; other threads route through `slint::invoke_from_event_loop`.
 - **`highbeam-plugin-runtime`**: single-threaded tokio runtime that
   owns every loaded `LoadedPlugin` (rquickjs `AsyncContext`). Plugins
-  live here because rquickjs futures are `!Send` across `async_with!`
+  live here because rquickjs futures are `!Send` across `async_with`
   under the `parallel` feature, so they can't cross threads.
 - **`highbeam-ipc`**: blocks on the unix socket; hops back to the
   Slint thread to show the window.
