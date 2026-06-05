@@ -55,6 +55,10 @@ const CAPABILITIES: &[Capability] = &[
         explanation: "FULL filesystem access — read and write any file your user can",
     },
     Capability {
+        name: "subprocess",
+        explanation: "run and spawn arbitrary programs, and read or change the launcher's environment",
+    },
+    Capability {
         name: "system.exec",
         explanation: "run shell commands and capture their output",
     },
@@ -90,6 +94,10 @@ pub(crate) const MODULES: &[ModuleCap] = &[
     ModuleCap {
         specifier: "node:fs/promises",
         any_of: &["fs"],
+    },
+    ModuleCap {
+        specifier: "node:child_process",
+        any_of: &["subprocess"],
     },
     ModuleCap {
         specifier: "highbeam:icons",

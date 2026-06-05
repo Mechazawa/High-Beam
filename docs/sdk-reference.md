@@ -773,6 +773,36 @@ const text = d.write(chunk1) + d.write(chunk2) + d.end();
 
 **Capability:** none. Exports: `StringDecoder`.
 
+## `node:child_process` + the `process` global
+
+Spawn programs and read the launcher's process state. Both are gated on the
+**`subprocess`** capability, whose user-facing meaning is "run and spawn
+arbitrary programs, and read or change the launcher's environment". This is
+a broad grant: a plugin holding it can run anything the user can.
+
+```js
+import { spawn } from 'node:child_process';
+
+const child = spawn('/bin/sh', ['-c', 'printf hi']);
+let out = '';
+child.stdout.on('data', (c) => { out += c.toString(); });
+await new Promise((res) => child.on('close', res));
+// out === 'hi'
+```
+
+`node:child_process` exports `spawn` only (no `exec` / `execFile` / `fork`).
+The returned child exposes `stdin` / `stdout` / `stderr` streams, `pid`, and
+`error` / `close` events.
+
+The `process` global (same capability, no import) exposes `env` (a live
+proxy over the daemon's **real** environment, readable and writable),
+`argv`, `argv0`, `cwd()`, `platform`, `arch`, `version`, `versions`,
+`hrtime`, `id`, and on Unix `getuid` / `getgid` / `setuid` / `setgid`.
+
+`process.exit(code)` is inert: it records `code` but does not terminate the
+daemon (the host does not act on it). Spawning a process and reading its
+environment are the real powers behind this capability, not exit.
+
 ## Capabilities table
 
 | Capability             | Grants                                              |
@@ -784,6 +814,7 @@ const text = d.write(chunk1) + d.write(chunk2) + d.end();
 | `fs.read`              | `highbeam:fs.readDir` / `.readFile` / `.readText`   |
 | `fs.cache`             | `highbeam:fs.readCache` / `.writeCache`             |
 | `fs`                   | `node:fs` / `node:fs/promises` + all `highbeam:fs.*` |
+| `subprocess`           | `node:child_process` + the `process` global         |
 | `icons`                | `highbeam:icons.forPath`                            |
 | `system.exec`          | `highbeam:system.exec`                              |
 | `system.applescript`   | `highbeam:system.applescript`                       |

@@ -84,6 +84,7 @@ fn node_expected_for(name: &str) -> &'static [&'static str] {
             "chmod",
             "symlink",
         ],
+        "node:child_process" => &["default", "spawn"],
         other => node_misc_expected_for(other),
     }
 }
@@ -198,6 +199,7 @@ enum OneShotLoader {
     NodeOs,
     NodeStringDecoder,
     NodeZlib,
+    NodeChildProcess,
 }
 
 impl Loader for OneShotLoader {
@@ -225,6 +227,9 @@ impl Loader for OneShotLoader {
                 Module::declare_def::<llrt_string_decoder::StringDecoderModule, _>(ctx.clone(), name)
             }
             Self::NodeZlib => Module::declare_def::<llrt_zlib::ZlibModule, _>(ctx.clone(), name),
+            Self::NodeChildProcess => {
+                Module::declare_def::<llrt_child_process::ChildProcessModule, _>(ctx.clone(), name)
+            }
         }
     }
 }
@@ -290,6 +295,11 @@ fn node_string_decoder_module_exports_match_docs() {
 #[test]
 fn node_zlib_module_exports_match_docs() {
     assert_module_exports("node:zlib", OneShotLoader::NodeZlib);
+}
+
+#[test]
+fn node_child_process_module_exports_match_docs() {
+    assert_module_exports("node:child_process", OneShotLoader::NodeChildProcess);
 }
 
 #[test]

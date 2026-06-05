@@ -152,6 +152,7 @@ time.
 | `fs.read`              | `highbeam:fs.readDir` / `.readFile` / `.readText`   |
 | `fs.cache`             | `highbeam:fs.readCache` / `.writeCache`             |
 | `fs`                   | full filesystem: `node:fs` / `node:fs/promises` + all `highbeam:fs.*` |
+| `subprocess`           | spawn programs (`node:child_process`) + the `process` global |
 | `icons`                | `highbeam:icons.forPath`                            |
 | `system.exec`          | `highbeam:system.exec`                              |
 | `system.applescript`   | `highbeam:system.applescript`                       |
@@ -188,9 +189,10 @@ import:
   `NumberFormat` / `Collator`.
 
 `fetch` (with `Headers` / `Request` / `Response` / `FormData`) is gated on
-the `http` capability rather than always-on. The `node:path`, `node:os`,
-`node:zlib`, `node:string_decoder`, `node:fs`, and `node:fs/promises`
-modules are imported, not globals (see
+the `http` capability rather than always-on, and the `process` global is
+gated on `subprocess`. The `node:path`, `node:os`, `node:zlib`,
+`node:string_decoder`, `node:fs`, `node:fs/promises`, and
+`node:child_process` modules are imported, not globals (see
 [sdk-reference.md](./sdk-reference.md#nodepath)).
 
 ## Console + logging

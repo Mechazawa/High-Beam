@@ -173,6 +173,88 @@ export async function* query(_input, _signal) {
 }
 
 #[test]
+fn process_global_gated_on_subprocess_capability() {
+    let without = probe(
+        "process-nocap",
+        r#"{"name":"process-nocap","entry":"plugin.js","timeoutMs":2000}"#,
+        r#"
+export async function* query(_input, _signal) {
+    yield { key: "k", title: "t", subtitle: typeof process, action: { kind: "noop" } };
+}
+"#,
+    );
+    assert_eq!(without, "undefined", "process must be absent without the cap");
+
+    let with = probe(
+        "process-cap",
+        r#"{"name":"process-cap","entry":"plugin.js","timeoutMs":2000,"capabilities":["subprocess"]}"#,
+        r#"
+export async function* query(_input, _signal) {
+    const report = `${typeof process}|${typeof process.env}|${Array.isArray(process.argv)}|${typeof process.platform}`;
+    yield { key: "k", title: "t", subtitle: report, action: { kind: "noop" } };
+}
+"#,
+    );
+    assert_eq!(with, "object|object|true|string");
+}
+
+#[test]
+fn node_child_process_rejected_without_subprocess_capability() {
+    let dir = fresh_tmp("cp-nocap");
+    fs::write(
+        dir.join("manifest.json"),
+        r#"{"name":"cp-nocap","entry":"plugin.js","timeoutMs":2000}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("plugin.js"),
+        r#"
+import { spawn } from "node:child_process";
+export async function* query(input, _signal) {
+    const _ = spawn;
+    yield { key: "k", title: input, action: { kind: "noop" } };
+}
+"#,
+    )
+    .unwrap();
+    let manifest = Manifest::parse(&fs::read(dir.join("manifest.json")).unwrap()).unwrap();
+    let runtime = rt();
+    runtime.block_on(async {
+        let err = LoadedPlugin::load(&dir, manifest).await.err();
+        let msg = err.map(|e| e.to_string()).unwrap_or_default();
+        assert!(
+            msg.contains("missing capability") && msg.contains("node:child_process"),
+            "expected capability rejection, got: {msg}"
+        );
+    });
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn node_child_process_spawns_a_real_process() {
+    // Spawns `printf hi` and reads it back through the stdout stream, end to
+    // end: confirms the llrt_stream-backed stdio works under our runtime.
+    let report = probe(
+        "cp-spawn",
+        r#"{"name":"cp-spawn","entry":"plugin.js","timeoutMs":4000,"capabilities":["subprocess"]}"#,
+        r#"
+import { spawn } from "node:child_process";
+export async function* query(_input, _signal) {
+    const out = await new Promise((resolve, reject) => {
+        const child = spawn("/bin/sh", ["-c", "printf hi"]);
+        let buf = "";
+        child.stdout.on("data", (chunk) => { buf += chunk.toString(); });
+        child.on("close", () => resolve(buf));
+        child.on("error", reject);
+    });
+    yield { key: "k", title: "t", subtitle: out, action: { kind: "noop" } };
+}
+"#,
+    );
+    assert_eq!(report, "hi");
+}
+
+#[test]
 fn fetch_present_with_http_capability() {
     let report = probe(
         "globals-http",

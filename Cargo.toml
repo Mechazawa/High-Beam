@@ -188,6 +188,10 @@ rquickjs = { version = "0.12", features = ["loader", "futures", "macro", "parall
 # CryptoProvider.
 llrt_abort = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
 llrt_buffer = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
+# Gated behind the `subprocess` capability. child_process builds its stdio
+# on llrt_stream's Rust stream constructors directly (no node:stream needed)
+# and uses the Buffer global; process reads the daemon's real environment.
+llrt_child_process = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
 llrt_crypto = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
 llrt_exceptions = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
 llrt_fetch = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05", default-features = false, features = ["http1", "http2", "compression-rust", "webpki-roots", "tls-ring"] }
@@ -195,6 +199,7 @@ llrt_fs = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7
 llrt_intl = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
 llrt_os = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
 llrt_path = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
+llrt_process = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
 llrt_stream_web = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
 llrt_string_decoder = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }
 llrt_temporal = { git = "https://github.com/awslabs/llrt", rev = "5af6d48ee7258cb222d7b3081276d297606afc05" }

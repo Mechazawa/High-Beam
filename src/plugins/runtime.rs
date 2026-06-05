@@ -66,6 +66,7 @@ const NODE_FS_PROMISES_MODULE: &str = "node:fs/promises";
 const NODE_OS_MODULE: &str = "node:os";
 const NODE_STRING_DECODER_MODULE: &str = "node:string_decoder";
 const NODE_ZLIB_MODULE: &str = "node:zlib";
+const NODE_CHILD_PROCESS_MODULE: &str = "node:child_process";
 
 /// Wraps the llrt `fetch` global so every request carries a default
 /// timeout — `llrt_fetch` has none of its own, and an unbounded request
@@ -641,6 +642,17 @@ fn install_host_globals<S: std::hash::BuildHasher>(
             .map_err(|err| PluginError::Js(format!("install fetch guard: {err}")))?;
     }
 
+    // `process` global is gated on `subprocess`: its `env` is a live proxy
+    // over the daemon's real environment (read AND write). The matching
+    // `node:child_process` module is gated through the capability table.
+    // `process.exit` only sets an `__exitCode` global the host doesn't read,
+    // so a plugin cannot terminate the daemon through it.
+    if capability::grants_any(plugin_caps, &["subprocess"]) {
+        llrt_process::init(ctx)
+            .catch(ctx)
+            .map_err(|err| PluginError::Js(format!("install process: {err}")))?;
+    }
+
     // Per-plugin options bag; populated even when the plugin declared no
     // options so `get('anything')` is always callable and returns undefined.
     settings::install(ctx, merged_options)
@@ -1025,6 +1037,9 @@ impl Loader for HighbeamLoader {
                 Module::declare_def::<llrt_string_decoder::StringDecoderModule, _>(ctx.clone(), name)
             }
             NODE_ZLIB_MODULE => Module::declare_def::<llrt_zlib::ZlibModule, _>(ctx.clone(), name),
+            NODE_CHILD_PROCESS_MODULE => {
+                Module::declare_def::<llrt_child_process::ChildProcessModule, _>(ctx.clone(), name)
+            }
             other => Err(JsError::new_loading_message(
                 name,
                 format!("`{other}` is registered in the capability table but not in the loader"),
