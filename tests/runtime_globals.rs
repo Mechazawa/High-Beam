@@ -65,6 +65,9 @@ export async function* query(_input, _signal) {
         typeof AbortController,
         typeof DOMException,
         typeof ReadableStream,
+        typeof crypto,
+        typeof Intl,
+        typeof Temporal,
         typeof fetch,
     ].join("|");
     yield { key: "k", title: "t", subtitle: report, action: { kind: "noop" } };
@@ -74,8 +77,99 @@ export async function* query(_input, _signal) {
     // Everything pure-compute is present; fetch is absent without `http`.
     assert_eq!(
         report,
-        "function|function|function|function|function|function|function|function|function|undefined"
+        "function|function|function|function|function|function|function|function|function|object|object|object|undefined"
     );
+}
+
+#[test]
+fn crypto_random_uuid_and_get_random_values_work() {
+    let report = probe(
+        "crypto-probe",
+        r#"{"name":"crypto-probe","entry":"plugin.js","timeoutMs":2000}"#,
+        r#"
+export async function* query(_input, _signal) {
+    const uuid = crypto.randomUUID();
+    const buf = new Uint8Array(8);
+    crypto.getRandomValues(buf);
+    const uuidOk = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(uuid);
+    const filled = buf.some((b) => b !== 0);
+    yield { key: "k", title: "t", subtitle: `${uuidOk}|${filled}`, action: { kind: "noop" } };
+}
+"#,
+    );
+    assert_eq!(report, "true|true");
+}
+
+#[test]
+fn intl_and_temporal_compute() {
+    // llrt's Intl is partial: DateTimeFormat + supportedValuesOf only (no
+    // NumberFormat/Collator). Temporal is full.
+    let report = probe(
+        "intl-temporal",
+        r#"{"name":"intl-temporal","entry":"plugin.js","timeoutMs":2000}"#,
+        r#"
+export async function* query(_input, _signal) {
+    const dtf = typeof Intl.DateTimeFormat === "function";
+    const d = Temporal.PlainDate.from("2026-01-02");
+    yield { key: "k", title: "t", subtitle: `${dtf}|${d.month}`, action: { kind: "noop" } };
+}
+"#,
+    );
+    assert_eq!(report, "true|1");
+}
+
+#[test]
+fn node_os_imports_without_capability() {
+    let report = probe(
+        "node-os",
+        r#"{"name":"node-os","entry":"plugin.js","timeoutMs":2000}"#,
+        r#"
+import os from "node:os";
+export async function* query(_input, _signal) {
+    // platform() is Node-style ("darwin"/"linux"); just confirm it's a
+    // non-empty string and arch() too.
+    const ok = typeof os.platform() === "string" && os.platform().length > 0
+        && typeof os.arch() === "string";
+    yield { key: "k", title: "t", subtitle: String(ok), action: { kind: "noop" } };
+}
+"#,
+    );
+    assert_eq!(report, "true");
+}
+
+#[test]
+fn node_zlib_round_trips_through_buffer() {
+    // Exercises the Buffer dependency: zlib sync fns take and return Buffers.
+    let report = probe(
+        "node-zlib",
+        r#"{"name":"node-zlib","entry":"plugin.js","timeoutMs":2000}"#,
+        r#"
+import { gzipSync, gunzipSync } from "node:zlib";
+export async function* query(_input, _signal) {
+    const original = "hello zlib hello zlib hello zlib";
+    const round = gunzipSync(gzipSync(Buffer.from(original))).toString("utf-8");
+    yield { key: "k", title: "t", subtitle: String(round === original), action: { kind: "noop" } };
+}
+"#,
+    );
+    assert_eq!(report, "true");
+}
+
+#[test]
+fn node_string_decoder_decodes_chunks() {
+    let report = probe(
+        "node-string-decoder",
+        r#"{"name":"node-string-decoder","entry":"plugin.js","timeoutMs":2000}"#,
+        r#"
+import { StringDecoder } from "node:string_decoder";
+export async function* query(_input, _signal) {
+    const d = new StringDecoder("utf8");
+    const out = d.write(Buffer.from("héllo")) + d.end();
+    yield { key: "k", title: "t", subtitle: out, action: { kind: "noop" } };
+}
+"#,
+    );
+    assert_eq!(report, "héllo");
 }
 
 #[test]

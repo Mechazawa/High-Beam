@@ -26,21 +26,28 @@ fn expected_for(name: &str) -> &'static [&'static str] {
         "highbeam:system" => &["exec", "applescript"],
         "highbeam:platform" => &["os", "arch", "version", "isMacOS", "isLinux"],
         "highbeam:settings" => &["get", "getString", "getBool", "getInt"],
-        "node:path" => &[
-            "default",
-            "basename",
-            "dirname",
-            "extname",
-            "format",
-            "parse",
-            "join",
-            "resolve",
-            "relative",
-            "normalize",
-            "isAbsolute",
-            "delimiter",
-            "sep",
+        "highbeam:view" => &[
+            "Stack",
+            "Divider",
+            "Heading",
+            "Text",
+            "Spinner",
+            "ProgressBar",
+            "Button",
+            "Input",
+            "TextArea",
+            "Image",
+            "Row",
         ],
+        other => node_expected_for(other),
+    }
+}
+
+/// `node:*` module export lists, split out so `expected_for` stays under
+/// clippy's function-length bar. The fs family lives here; the rest in
+/// [`node_misc_expected_for`].
+fn node_expected_for(name: &str) -> &'static [&'static str] {
+    match name {
         "node:fs" => &[
             "default",
             "promises",
@@ -77,18 +84,76 @@ fn expected_for(name: &str) -> &'static [&'static str] {
             "chmod",
             "symlink",
         ],
-        "highbeam:view" => &[
-            "Stack",
-            "Divider",
-            "Heading",
-            "Text",
-            "Spinner",
-            "ProgressBar",
-            "Button",
-            "Input",
-            "TextArea",
-            "Image",
-            "Row",
+        other => node_misc_expected_for(other),
+    }
+}
+
+/// `node:path`, `node:os`, `node:zlib`, `node:string_decoder` exports.
+fn node_misc_expected_for(name: &str) -> &'static [&'static str] {
+    match name {
+        "node:path" => &[
+            "default",
+            "basename",
+            "dirname",
+            "extname",
+            "format",
+            "parse",
+            "join",
+            "resolve",
+            "relative",
+            "normalize",
+            "isAbsolute",
+            "delimiter",
+            "sep",
+        ],
+        "node:os" => &[
+            "default",
+            "arch",
+            "availableParallelism",
+            "devNull",
+            "endianness",
+            "EOL",
+            "getPriority",
+            "homedir",
+            "platform",
+            "release",
+            "setPriority",
+            "tmpdir",
+            "type",
+            "userInfo",
+            "version",
+            "networkInterfaces",
+            "cpus",
+            "freemem",
+            "totalmem",
+            "hostname",
+            "loadavg",
+            "machine",
+            "uptime",
+        ],
+        "node:string_decoder" => &["default", "StringDecoder"],
+        "node:zlib" => &[
+            "default",
+            "deflate",
+            "deflateSync",
+            "deflateRaw",
+            "deflateRawSync",
+            "gzip",
+            "gzipSync",
+            "inflate",
+            "inflateSync",
+            "inflateRaw",
+            "inflateRawSync",
+            "gunzip",
+            "gunzipSync",
+            "brotliCompress",
+            "brotliCompressSync",
+            "brotliDecompress",
+            "brotliDecompressSync",
+            "zstdCompress",
+            "zstdCompressSync",
+            "zstdDecompress",
+            "zstdDecompressSync",
         ],
         other => {
             panic!("expected_for({other}): no expected list — keep this in sync with sdk/highbeam")
@@ -130,6 +195,9 @@ enum OneShotLoader {
     NodePath,
     NodeFs,
     NodeFsPromises,
+    NodeOs,
+    NodeStringDecoder,
+    NodeZlib,
 }
 
 impl Loader for OneShotLoader {
@@ -152,6 +220,11 @@ impl Loader for OneShotLoader {
             Self::NodePath => Module::declare_def::<llrt_path::PathModule, _>(ctx.clone(), name),
             Self::NodeFs => Module::declare_def::<llrt_fs::FsModule, _>(ctx.clone(), name),
             Self::NodeFsPromises => Module::declare_def::<llrt_fs::FsPromisesModule, _>(ctx.clone(), name),
+            Self::NodeOs => Module::declare_def::<llrt_os::OsModule, _>(ctx.clone(), name),
+            Self::NodeStringDecoder => {
+                Module::declare_def::<llrt_string_decoder::StringDecoderModule, _>(ctx.clone(), name)
+            }
+            Self::NodeZlib => Module::declare_def::<llrt_zlib::ZlibModule, _>(ctx.clone(), name),
         }
     }
 }
@@ -202,6 +275,21 @@ fn assert_module_exports(specifier: &'static str, loader: OneShotLoader) {
 #[test]
 fn actions_module_exports_match_dts() {
     assert_module_exports("highbeam:actions", OneShotLoader::Actions);
+}
+
+#[test]
+fn node_os_module_exports_match_docs() {
+    assert_module_exports("node:os", OneShotLoader::NodeOs);
+}
+
+#[test]
+fn node_string_decoder_module_exports_match_docs() {
+    assert_module_exports("node:string_decoder", OneShotLoader::NodeStringDecoder);
+}
+
+#[test]
+fn node_zlib_module_exports_match_docs() {
+    assert_module_exports("node:zlib", OneShotLoader::NodeZlib);
 }
 
 #[test]

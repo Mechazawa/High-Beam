@@ -63,6 +63,9 @@ const VIEW_MODULE: &str = "highbeam:view";
 const NODE_PATH_MODULE: &str = "node:path";
 const NODE_FS_MODULE: &str = "node:fs";
 const NODE_FS_PROMISES_MODULE: &str = "node:fs/promises";
+const NODE_OS_MODULE: &str = "node:os";
+const NODE_STRING_DECODER_MODULE: &str = "node:string_decoder";
+const NODE_ZLIB_MODULE: &str = "node:zlib";
 
 /// Wraps the llrt `fetch` global so every request carries a default
 /// timeout — `llrt_fetch` has none of its own, and an unbounded request
@@ -614,6 +617,15 @@ fn install_host_globals<S: std::hash::BuildHasher>(
     llrt_stream_web::init(ctx)
         .catch(ctx)
         .map_err(|err| PluginError::Js(format!("install web streams: {err}")))?;
+    llrt_crypto::init(ctx)
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("install crypto: {err}")))?;
+    llrt_intl::init(ctx)
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("install Intl: {err}")))?;
+    llrt_temporal::init(ctx)
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("install Temporal: {err}")))?;
 
     // `fetch` is the one global behind a capability — network egress.
     // llrt_fetch ships no request timeout, so a guard wrapper injects
@@ -1008,6 +1020,11 @@ impl Loader for HighbeamLoader {
             NODE_PATH_MODULE => Module::declare_def::<llrt_path::PathModule, _>(ctx.clone(), name),
             NODE_FS_MODULE => Module::declare_def::<llrt_fs::FsModule, _>(ctx.clone(), name),
             NODE_FS_PROMISES_MODULE => Module::declare_def::<llrt_fs::FsPromisesModule, _>(ctx.clone(), name),
+            NODE_OS_MODULE => Module::declare_def::<llrt_os::OsModule, _>(ctx.clone(), name),
+            NODE_STRING_DECODER_MODULE => {
+                Module::declare_def::<llrt_string_decoder::StringDecoderModule, _>(ctx.clone(), name)
+            }
+            NODE_ZLIB_MODULE => Module::declare_def::<llrt_zlib::ZlibModule, _>(ctx.clone(), name),
             other => Err(JsError::new_loading_message(
                 name,
                 format!("`{other}` is registered in the capability table but not in the loader"),

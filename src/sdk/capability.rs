@@ -107,6 +107,9 @@ const UNCAPPED_MODULES: &[&str] = &[
     "highbeam:settings",
     "highbeam:view",
     "node:path",
+    "node:os",
+    "node:string_decoder",
+    "node:zlib",
 ];
 
 #[must_use]

@@ -156,11 +156,12 @@ time.
 | `system.exec`          | `highbeam:system.exec`                              |
 | `system.applescript`   | `highbeam:system.applescript`                       |
 
-`highbeam:match`, `highbeam:platform`, `highbeam:settings`, and `node:path`
-are uncapped — no declaration required. `fs` is the broad "read and write
-any file your user can" grant; prefer the scoped `fs.read` / `fs.cache` when
-they suffice. See [sdk-reference.md](./sdk-reference.md) for per-function
-behavior, signatures, and examples.
+`highbeam:match`, `highbeam:platform`, `highbeam:settings`, `node:path`,
+`node:os`, `node:string_decoder`, and `node:zlib` are uncapped — no
+declaration required. `fs` is the broad "read and write any file your user
+can" grant; prefer the scoped `fs.read` / `fs.cache` when they suffice. See
+[sdk-reference.md](./sdk-reference.md) for per-function behavior, signatures,
+and examples.
 
 ## Runtime globals
 
@@ -180,10 +181,16 @@ import:
   `AbortSignal.timeout(ms)`, `AbortSignal.any([...])`,
   `AbortSignal.abort(reason)` all work; `signal.reason` is a `DOMException`
   and `signal.throwIfAborted()` throws it.
+- `crypto`: WebCrypto (`getRandomValues`, `randomUUID`, `subtle.*`) plus the
+  node-style `randomBytes` / `createHash` / `createHmac` helpers.
+- `Temporal`: the full Temporal surface (`Now`, `PlainDate`, `Instant`, …).
+- `Intl`: partial — `DateTimeFormat` and `supportedValuesOf` only, no
+  `NumberFormat` / `Collator`.
 
 `fetch` (with `Headers` / `Request` / `Response` / `FormData`) is gated on
-the `http` capability rather than always-on. The `node:path`, `node:fs`, and
-`node:fs/promises` modules are imported, not globals (see
+the `http` capability rather than always-on. The `node:path`, `node:os`,
+`node:zlib`, `node:string_decoder`, `node:fs`, and `node:fs/promises`
+modules are imported, not globals (see
 [sdk-reference.md](./sdk-reference.md#nodepath)).
 
 ## Console + logging

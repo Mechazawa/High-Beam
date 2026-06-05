@@ -648,6 +648,16 @@ and no import. They come from the llrt module crates layered on QuickJS:
 - `AbortController` / `AbortSignal`, including `AbortSignal.timeout(ms)`,
   `AbortSignal.any([...])`, `AbortSignal.abort(reason)`, and on a signal
   `signal.reason` (a `DOMException`) and `signal.throwIfAborted()`.
+- `crypto`: `getRandomValues`, `randomUUID`, `randomBytes`, `randomInt`,
+  `randomFill`/`randomFillSync`, `createHash`, `createHmac`, and
+  `crypto.subtle` (the async WebCrypto surface: `digest`, `encrypt`,
+  `decrypt`, `sign`, `verify`, `generateKey`, `importKey`/`exportKey`,
+  `deriveKey`/`deriveBits`, `wrapKey`).
+- `Temporal`: `Now`, `Instant`, `Duration`, `PlainDate`, `PlainDateTime`,
+  `PlainTime`, `ZonedDateTime`.
+- `Intl`: partial. `DateTimeFormat` and `supportedValuesOf` only (plus a
+  patched `Date.prototype.toLocaleString`). There is no `NumberFormat` or
+  `Collator`.
 
 `fetch` and its companions (`Headers`, `Request`, `Response`, `FormData`)
 are not in this list: they need the `http` capability (see [`fetch`](#fetch)).
@@ -709,6 +719,59 @@ const text = await readFile('/etc/hosts', 'utf-8');
 Prefer scoped `highbeam:fs` (relative-to-plugin reads, plugin-keyed cache)
 when that covers the need. Reach for `node:fs` only when a plugin genuinely
 needs to touch arbitrary user paths.
+
+## `node:os`
+
+System metadata, importable by every plugin, no capability.
+
+```js
+import os from 'node:os';
+os.platform();   // 'darwin' | 'linux' (Node-style, NOT 'macos')
+os.homedir();    // reveals the user's home path + name
+```
+
+**Capability:** none.
+
+Exports: `arch`, `availableParallelism`, `devNull`, `endianness`, `EOL`,
+`getPriority`, `homedir`, `platform`, `release`, `setPriority`, `tmpdir`,
+`type`, `userInfo`, `version`, `networkInterfaces`, `cpus`, `freemem`,
+`totalmem`, `hostname`, `loadavg`, `machine`, `uptime`.
+
+`os.platform()` returns Node values (`'darwin'`, `'linux'`), unlike the
+removed `highbeam:platform` which returned `'macos'`. Derive the old
+booleans with `os.platform() === 'darwin'` / `=== 'linux'`.
+
+## `node:zlib`
+
+Compression, importable by every plugin, no capability. Sync and async
+(callback) variants; takes and returns `Buffer`.
+
+```js
+import { gzipSync, gunzipSync } from 'node:zlib';
+const packed = gzipSync(Buffer.from('payload'));
+const back = gunzipSync(packed).toString('utf-8');
+```
+
+**Capability:** none.
+
+Exports: `deflate`/`deflateSync`, `deflateRaw`/`deflateRawSync`,
+`gzip`/`gzipSync`, `inflate`/`inflateSync`, `inflateRaw`/`inflateRawSync`,
+`gunzip`/`gunzipSync`, `brotliCompress`/`brotliCompressSync`,
+`brotliDecompress`/`brotliDecompressSync`, `zstdCompress`/`zstdCompressSync`,
+`zstdDecompress`/`zstdDecompressSync`.
+
+## `node:string_decoder`
+
+Chunk-safe UTF-8/UTF-16 decoding (does not split multi-byte sequences across
+`write` boundaries), importable by every plugin, no capability.
+
+```js
+import { StringDecoder } from 'node:string_decoder';
+const d = new StringDecoder('utf8');
+const text = d.write(chunk1) + d.write(chunk2) + d.end();
+```
+
+**Capability:** none. Exports: `StringDecoder`.
 
 ## Capabilities table
 
