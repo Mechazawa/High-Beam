@@ -1,14 +1,11 @@
 import { describe, expect, test, vi } from 'vitest';
 
-// `platform` exports plain consts/funcs (no vi.fn()s) — replace the module
-// outright so we can flip OS per test without touching real process.platform.
-vi.mock('highbeam:platform', () => ({
-    isMacOS: vi.fn(() => true),
-    isLinux: vi.fn(() => false),
-    os: 'macos',
-    arch: 'x86_64',
-    version: 'test',
-}));
+// plugin.js reads os.platform() via the default import — replace node:os so we
+// can flip the reported OS per test without touching the real platform.
+vi.mock('node:os', () => {
+    const platform = vi.fn(() => 'darwin');
+    return { default: { platform }, platform };
+});
 
 const ICON_SENTINEL = 'data:image/png;base64,SENTINEL';
 
@@ -19,17 +16,15 @@ async function collect(iter) {
 }
 
 // vi.resetModules() ensures each test re-imports plugin.js with the freshly
-// mocked highbeam:* modules; otherwise module-level platform checks would
-// stick on whatever the first test set.
+// mocked modules; otherwise module-level platform checks would stick on
+// whatever the first test set.
 async function loadPlugin({ platform = 'macos' } = {}) {
     vi.resetModules();
     const system = await import('highbeam:system');
     const icons = await import('highbeam:icons');
-    const platformMod = await import('highbeam:platform');
-    const isMac = platform === 'macos';
-    const isLin = platform === 'linux';
-    vi.mocked(platformMod.isMacOS).mockReturnValue(isMac);
-    vi.mocked(platformMod.isLinux).mockReturnValue(isLin);
+    const osMod = await import('node:os');
+    const osName = platform === 'linux' ? 'linux' : 'darwin';
+    vi.mocked(osMod.default.platform).mockReturnValue(osName);
     vi.mocked(icons.forPath).mockResolvedValue(ICON_SENTINEL);
     // Default exec mock: empty stdout, success. Tests override per-call.
     vi.mocked(system.exec).mockResolvedValue({
@@ -38,7 +33,7 @@ async function loadPlugin({ platform = 'macos' } = {}) {
         code: 0,
     });
     const plugin = await import('./plugin.js');
-    return { plugin, system, icons, platform: platformMod };
+    return { plugin, system, icons, os: osMod };
 }
 
 describe('file-search trigger', () => {

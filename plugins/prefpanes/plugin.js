@@ -2,7 +2,8 @@ import { exec } from "highbeam:actions";
 import { readDir } from "highbeam:fs";
 import { forPath } from "highbeam:icons";
 import { fuzzy } from "highbeam:match";
-import { isMacOS } from "highbeam:platform";
+import os from "node:os";
+const isMacOS = () => os.platform() === "darwin";
 
 const PREF_PANE_DIRECTORIES = [
     "/System/Library/PreferencePanes",

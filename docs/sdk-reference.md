@@ -13,8 +13,9 @@ build), [plugin-cookbook.md](./plugin-cookbook.md) (recipes),
 
 - Modules are imported under the `highbeam:` scheme, or the `node:` scheme
   for the supported Node built-ins (`node:path`, `node:fs`,
-  `node:fs/promises`). Anything else (`import 'fs'`, `import 'lodash'`,
-  even `import 'node:os'`) is rejected at load time.
+  `node:fs/promises`, `node:os`, `node:zlib`, `node:string_decoder`,
+  `node:child_process`). Anything else (`import 'fs'`, `import 'lodash'`,
+  `import 'node:net'`) is rejected at load time.
 - A module loads when the plugin declares *any* capability the module
   recognises. Functions within the module may gate themselves further — e.g.
   `highbeam:clipboard` loads on either `clipboard.read` or `clipboard.write`,
@@ -473,46 +474,6 @@ Notes:
 See `plugins/dnd` and `plugins/app-launcher` for typical
 usage (fuzzy-rank a bundled list and map scores onto `weight`).
 
-## `highbeam:platform`
-
-Host metadata. Always importable.
-
-```js
-import { os, arch, version, isMacOS, isLinux } from 'highbeam:platform';
-```
-
-**Capability:** none.
-
-### `os: 'macos' | 'linux'`
-
-OS identifier, matching the host's `std::env::consts::OS`.
-
-### `arch: string`
-
-CPU architecture. Common values: `x86_64`, `aarch64`.
-
-### `version: string`
-
-OS version. Best-effort:
-
-- macOS: `sw_vers -productVersion` (e.g. `14.4.1`).
-- Linux: `uname -r` (kernel release).
-
-Returns `"unknown"` if detection fails. Never throws.
-
-### `isMacOS(): boolean` / `isLinux(): boolean`
-
-```js
-if (isMacOS()) {
-    // mac-specific path
-} else if (isLinux()) {
-    // linux-specific path
-}
-```
-
-Convenience wrappers over `os === 'macos'` / `os === 'linux'`. Use these in
-preference to manual comparisons — the intent is clearer at the call site.
-
 ## `highbeam:settings`
 
 Read this plugin's own option values. The host scopes per plugin internally,
@@ -628,7 +589,7 @@ On macOS: runs via `osascript -e <script>` and resolves with the script's
 stdout (trailing newline trimmed).
 
 On every other platform: resolves with `null` immediately — plugins don't
-have to gate every call site behind `isMacOS()`. **Capability:**
+have to gate every call site behind a platform check. **Capability:**
 `system.applescript`.
 
 macOS may prompt for automation permission the first time the script tries
@@ -819,7 +780,7 @@ environment are the real powers behind this capability, not exit.
 | `system.exec`          | `highbeam:system.exec`                              |
 | `system.applescript`   | `highbeam:system.applescript`                       |
 
-`highbeam:match`, `highbeam:platform`, `highbeam:settings`, and `node:path`
+`highbeam:match`, `highbeam:settings`, and `node:path`
 are uncapped, as are the always-on globals.
 
 A module loads if the plugin declares *any* of its required caps. Within a

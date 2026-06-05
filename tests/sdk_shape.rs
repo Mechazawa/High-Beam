@@ -10,7 +10,6 @@ use high_beam::sdk::clipboard::ClipboardModule;
 use high_beam::sdk::fs::FsModule;
 use high_beam::sdk::icons::IconsModule;
 use high_beam::sdk::r#match::MatchModule;
-use high_beam::sdk::platform::PlatformModule;
 use high_beam::sdk::settings::SettingsModule;
 use high_beam::sdk::system::SystemModule;
 use high_beam::sdk::view::ViewModule;
@@ -24,7 +23,6 @@ fn expected_for(name: &str) -> &'static [&'static str] {
         "highbeam:icons" => &["forPath"],
         "highbeam:match" => &["fuzzy"],
         "highbeam:system" => &["exec", "applescript"],
-        "highbeam:platform" => &["os", "arch", "version", "isMacOS", "isLinux"],
         "highbeam:settings" => &["get", "getString", "getBool", "getInt"],
         "highbeam:view" => &[
             "Stack",
@@ -190,7 +188,6 @@ enum OneShotLoader {
     Icons,
     Match,
     System,
-    Platform,
     Settings,
     View,
     NodePath,
@@ -216,7 +213,6 @@ impl Loader for OneShotLoader {
             Self::Icons => Module::declare_def::<IconsModule, _>(ctx.clone(), name),
             Self::Match => Module::declare_def::<MatchModule, _>(ctx.clone(), name),
             Self::System => Module::declare_def::<SystemModule, _>(ctx.clone(), name),
-            Self::Platform => Module::declare_def::<PlatformModule, _>(ctx.clone(), name),
             Self::Settings => Module::declare_def::<SettingsModule, _>(ctx.clone(), name),
             Self::View => Module::declare_def::<ViewModule, _>(ctx.clone(), name),
             Self::NodePath => Module::declare_def::<llrt_path::PathModule, _>(ctx.clone(), name),
@@ -325,11 +321,6 @@ fn match_module_exports_match_dts() {
 #[test]
 fn system_module_exports_match_dts() {
     assert_module_exports("highbeam:system", OneShotLoader::System);
-}
-
-#[test]
-fn platform_module_exports_match_dts() {
-    assert_module_exports("highbeam:platform", OneShotLoader::Platform);
 }
 
 #[test]

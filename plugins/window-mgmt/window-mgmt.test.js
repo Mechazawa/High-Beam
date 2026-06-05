@@ -1,14 +1,11 @@
 import { describe, expect, test, vi } from "vitest";
 
-// Force macOS for every test. The platform stub exports plain consts/fns;
-// replacing the whole module gives us a vi.fn() we can override per case.
-vi.mock("highbeam:platform", () => ({
-    isMacOS: vi.fn(() => true),
-    isLinux: vi.fn(() => false),
-    os: "macos",
-    arch: "x86_64",
-    version: "test",
-}));
+// Force macOS for every test. The plugin derives isMacOS from os.platform();
+// mocking node:os with a vi.fn() lets us override the return per case.
+vi.mock("node:os", () => {
+    const platform = vi.fn(() => "darwin");
+    return { default: { platform }, platform };
+});
 
 async function collect(iter) {
     const out = [];
@@ -18,9 +15,7 @@ async function collect(iter) {
 
 async function loadPlugin({ macOS = true } = {}) {
     vi.resetModules();
-    const platformMod = await import("highbeam:platform");
-    vi.mocked(platformMod.isMacOS).mockReturnValue(macOS);
-    vi.mocked(platformMod.isLinux).mockReturnValue(!macOS);
+    vi.mocked((await import("node:os")).default.platform).mockReturnValue(macOS ? "darwin" : "linux");
     return import("./plugin.js");
 }
 

@@ -26,10 +26,6 @@ declare module 'highbeam:system' {
     export * from './system';
 }
 
-declare module 'highbeam:platform' {
-    export * from './platform';
-}
-
 declare module 'highbeam:settings' {
     export * from './settings';
 }

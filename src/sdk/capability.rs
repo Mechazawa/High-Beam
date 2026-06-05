@@ -6,8 +6,8 @@
 //! (e.g. `clipboard` imports on either read or write, but `write()` throws if
 //! the plugin only declared `clipboard.read`).
 //!
-//! `highbeam:match`, `highbeam:platform`, `highbeam:settings`, and
-//! `node:path` skip the gate entirely (pure compute, no I/O).
+//! `highbeam:match`, `highbeam:settings`, `node:path`, and the other
+//! pure-compute `node:*` modules skip the gate entirely (no I/O).
 
 pub(crate) struct ModuleCap {
     pub specifier: &'static str,
@@ -72,8 +72,9 @@ const CAPABILITIES: &[Capability] = &[
     },
 ];
 
-/// All cap-gated `highbeam:*` modules. `highbeam:match`, `highbeam:platform`,
-/// and `highbeam:settings` load unconditionally — see [`is_uncapped_module`].
+/// All cap-gated `highbeam:*` / `node:*` modules. `highbeam:match`,
+/// `highbeam:settings`, and the pure-compute `node:*` modules load
+/// unconditionally — see [`is_uncapped_module`].
 pub(crate) const MODULES: &[ModuleCap] = &[
     ModuleCap {
         specifier: "highbeam:actions",
@@ -111,7 +112,6 @@ pub(crate) const MODULES: &[ModuleCap] = &[
 
 const UNCAPPED_MODULES: &[&str] = &[
     "highbeam:match",
-    "highbeam:platform",
     "highbeam:settings",
     "highbeam:view",
     "node:path",

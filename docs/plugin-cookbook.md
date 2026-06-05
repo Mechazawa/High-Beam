@@ -288,11 +288,11 @@ Use this when the plugin's data sources differ between macOS and Linux —
 e.g. app discovery via `.app` bundles vs `.desktop` files.
 
 ```js
-import { isMacOS, isLinux } from 'highbeam:platform';
+import os from 'node:os';
 
 async function collectApps() {
-    if (isMacOS()) return collectMacApps();
-    if (isLinux()) return collectLinuxApps();
+    if (os.platform() === 'darwin') return collectMacApps();
+    if (os.platform() === 'linux') return collectLinuxApps();
     return [];
 }
 
@@ -312,7 +312,7 @@ immediately on non-macOS rather than throwing:
 ```js
 import { applescript } from 'highbeam:system';
 
-// Resolves to null on Linux; no isMacOS() check needed.
+// Resolves to null on Linux; no platform check needed.
 const result = await applescript('tell application "Finder" to get name');
 ```
 
@@ -329,8 +329,8 @@ where it can't work at all:
 The host won't even load it on Linux. `platforms` absent loads everywhere;
 empty `[]` shelves the plugin entirely (never loads).
 
-Real plugin: `plugins/app-launcher` (`isMacOS()` / `isLinux()` to
-branch between `.app` and `.desktop` discovery).
+Real plugin: `plugins/app-launcher` (`os.platform() === 'darwin'` /
+`=== 'linux'` to branch between `.app` and `.desktop` discovery).
 
 ## Read user-editable options via `highbeam:settings`
 
@@ -475,9 +475,18 @@ Notes:
 - `highbeam:actions` is not a mock — the stub returns the same plain
   objects the host does, so `expect(action).toEqual({ kind: 'copy', text:
   '...' })` works straight out.
-- `highbeam:platform` is real (reads `process.platform` and friends), so
-  `isMacOS()` reflects the test host. Stub it explicitly when you need
-  cross-platform coverage.
+- `node:os` is real, so `os.platform()` reflects the test host. Mock the
+  whole module to drive platform detection per test (ESM namespaces are
+  frozen, so replacing the module beats `spyOn`):
+
+  ```js
+  vi.mock('node:os', () => {
+      const platform = vi.fn(() => 'darwin');
+      return { default: { platform }, platform };
+  });
+  // later: vi.mocked((await import('node:os')).default.platform)
+  //     .mockReturnValue('linux');
+  ```
 - `highbeam:match` is a faithful port of the host matcher. Order and
   highlight ranges agree with `nucleo-matcher` on realistic input.
 - `vi.resetModules()` clears the plugin's module-level cache between

@@ -39,7 +39,6 @@ use crate::sdk::console;
 use crate::sdk::fs;
 use crate::sdk::icons;
 use crate::sdk::r#match::MatchModule;
-use crate::sdk::platform::PlatformModule;
 use crate::sdk::settings::{self, SettingsModule};
 use crate::sdk::system;
 use crate::sdk::timers;
@@ -57,7 +56,6 @@ const FS_MODULE: &str = "highbeam:fs";
 const ICONS_MODULE: &str = "highbeam:icons";
 const SYSTEM_MODULE: &str = "highbeam:system";
 const MATCH_MODULE: &str = "highbeam:match";
-const PLATFORM_MODULE: &str = "highbeam:platform";
 const SETTINGS_MODULE: &str = "highbeam:settings";
 const VIEW_MODULE: &str = "highbeam:view";
 const NODE_PATH_MODULE: &str = "node:path";
@@ -999,7 +997,7 @@ impl Loader for HighbeamLoader {
             ));
         }
 
-        // Modules marked uncapped (match, platform, node:path, …) skip the gate.
+        // Modules marked uncapped (match, settings, node:path, …) skip the gate.
         if !capability::is_uncapped_module(name) {
             let Some(module_cap) = capability::for_module(name) else {
                 return Err(JsError::new_loading_message(
@@ -1026,7 +1024,6 @@ impl Loader for HighbeamLoader {
             ICONS_MODULE => Module::declare_def::<icons::IconsModule, _>(ctx.clone(), name),
             SYSTEM_MODULE => Module::declare_def::<system::SystemModule, _>(ctx.clone(), name),
             MATCH_MODULE => Module::declare_def::<MatchModule, _>(ctx.clone(), name),
-            PLATFORM_MODULE => Module::declare_def::<PlatformModule, _>(ctx.clone(), name),
             SETTINGS_MODULE => Module::declare_def::<SettingsModule, _>(ctx.clone(), name),
             VIEW_MODULE => Module::declare_def::<ViewModule, _>(ctx.clone(), name),
             NODE_PATH_MODULE => Module::declare_def::<llrt_path::PathModule, _>(ctx.clone(), name),

@@ -52,7 +52,7 @@ files to know what those modules export at compile time; nothing from
 | `highbeam:icons`      | Native data-URI icons                                  | `icons`                                 |
 | `highbeam:match`      | Fuzzy ranking with highlight ranges                    | —                                       |
 | `highbeam:system`     | Subprocess + AppleScript escape hatches                | `system.exec` / `system.applescript`    |
-| `highbeam:platform`   | OS / arch / version metadata                           | —                                       |
+| `node:os`             | OS / arch / version metadata (llrt)                    | —                                       |
 | `node:path`           | Node-style path helpers (llrt)                         | —                                       |
 | `node:fs` (+`/promises`) | Full Node-style filesystem access (llrt)            | `fs`                                    |
 

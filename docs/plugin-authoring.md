@@ -137,8 +137,9 @@ type Result = {
 ```
 
 Plugins can `import` from the `highbeam:*` scheme and from the supported
-`node:*` built-ins (`node:path`, `node:fs`, `node:fs/promises`). Every other
-specifier (`import 'lodash'`, `import 'node:os'`, …) is rejected at load
+`node:*` built-ins (`node:path`, `node:fs`, `node:fs/promises`, `node:os`,
+`node:zlib`, `node:string_decoder`, `node:child_process`). Every other
+specifier (`import 'lodash'`, `import 'node:net'`, …) is rejected at load
 time.
 
 ## Capabilities at a glance
@@ -157,7 +158,7 @@ time.
 | `system.exec`          | `highbeam:system.exec`                              |
 | `system.applescript`   | `highbeam:system.applescript`                       |
 
-`highbeam:match`, `highbeam:platform`, `highbeam:settings`, `node:path`,
+`highbeam:match`, `highbeam:settings`, `node:path`,
 `node:os`, `node:string_decoder`, and `node:zlib` are uncapped — no
 declaration required. `fs` is the broad "read and write any file your user
 can" grant; prefer the scoped `fs.read` / `fs.cache` when they suffice. See

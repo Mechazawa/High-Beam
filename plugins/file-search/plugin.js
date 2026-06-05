@@ -6,8 +6,12 @@
 
 import { openUrl } from "highbeam:actions";
 import { forPath } from "highbeam:icons";
-import { isLinux, isMacOS } from "highbeam:platform";
 import { exec } from "highbeam:system";
+import os from "node:os";
+
+// node:os.platform() returns "darwin"/"linux"; wrap so call sites stay put.
+const isMacOS = () => os.platform() === "darwin";
+const isLinux = () => os.platform() === "linux";
 
 const RESULT_LIMIT = 20;
 // Below pinned things (which sit at 100) but above zero-weight stragglers,
