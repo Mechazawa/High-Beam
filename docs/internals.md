@@ -190,13 +190,18 @@ prevention kicks in). The window-event handler in `src/window.rs`
 debounces blurs by `BLUR_GRACE_MS` so the launcher doesn't auto-hide
 during the activation handoff.
 
-### Dock / Cmd-Tab hiding is still TODO
+### Dock / Cmd-Tab hiding
 
 `activate(ignoringOtherApps:)` + `makeKeyAndOrderFront:` only govern
-frontmost/key state. To hide from Dock / Cmd-Tab we'd need
-`NSApp.setActivationPolicy(.accessory)` or `LSUIElement=1` in
-`Info.plist` when we ship a real `.app`. Currently a no-op TODO in
-`src/window.rs`.
+frontmost/key state. To stay out of the Dock / Cmd-Tab the daemon runs
+as an accessory app: `daemon::run` calls `window::hide_from_dock`, which
+schedules `NSApp.setActivationPolicy(.accessory)` onto the event loop via
+`invoke_from_event_loop`. It is scheduled rather than called inline
+because winit's `applicationDidFinishLaunching` forces `.regular` for an
+unbundled `cargo run` and would clobber an earlier call. Packaged `.app`
+builds reach the same state through `background-app = true` (`LSUIElement`
+in `Info.plist`), which winit leaves untouched. Accessory apps still
+become key/frontmost, so the activation dance above is unaffected.
 
 ## Why not WASM for plugins
 
