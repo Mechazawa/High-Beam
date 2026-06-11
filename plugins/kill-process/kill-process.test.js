@@ -1,14 +1,11 @@
 import { describe, expect, test, vi } from 'vitest';
 
-// `platform` ships with no vi.fn()s, so we swap it wholesale and re-bind in
-// loadPlugin(). Mirrors the pattern used in app-launcher.test.js.
-vi.mock('highbeam:platform', () => ({
-    isMacOS: vi.fn(() => true),
-    isLinux: vi.fn(() => false),
-    os: 'macos',
-    arch: 'x86_64',
-    version: 'test',
-}));
+// `node:os` ships with no vi.fn()s, so we swap it wholesale and re-bind the
+// platform() return value in loadPlugin().
+vi.mock('node:os', () => {
+    const platform = vi.fn(() => 'darwin');
+    return { default: { platform }, platform };
+});
 
 // Realistic `ps -axo pid,comm` fixture. Column 1 is right-padded; column 2
 // is the binary name (or its full path on macOS). We include a leading
@@ -41,18 +38,16 @@ async function loadPlugin({
 } = {}) {
     vi.resetModules();
     const system = await import('highbeam:system');
-    const platformMod = await import('highbeam:platform');
-    const isMac = platform === 'macos';
-    const isLin = platform === 'linux';
-    vi.mocked(platformMod.isMacOS).mockReturnValue(isMac);
-    vi.mocked(platformMod.isLinux).mockReturnValue(isLin);
+    const osMod = await import('node:os');
+    const osPlatform = { macos: 'darwin', linux: 'linux' }[platform] ?? platform;
+    vi.mocked(osMod.default.platform).mockReturnValue(osPlatform);
     vi.mocked(system.exec).mockResolvedValue({
         stdout: psStdout,
         stderr: '',
         code: psCode,
     });
     const plugin = await import('./plugin.js');
-    return { plugin, system, platform: platformMod };
+    return { plugin, system, os: osMod };
 }
 
 describe('kill-process trigger', () => {
@@ -176,9 +171,8 @@ describe('kill-process ps invocation', () => {
     test('ps exec rejection is swallowed', async () => {
         vi.resetModules();
         const system = await import('highbeam:system');
-        const platformMod = await import('highbeam:platform');
-        vi.mocked(platformMod.isMacOS).mockReturnValue(true);
-        vi.mocked(platformMod.isLinux).mockReturnValue(false);
+        const osMod = await import('node:os');
+        vi.mocked(osMod.default.platform).mockReturnValue('darwin');
         vi.mocked(system.exec).mockRejectedValue(new Error('aborted'));
         const plugin = await import('./plugin.js');
         const results = await collect(plugin.query('kill saf', { aborted: false }));

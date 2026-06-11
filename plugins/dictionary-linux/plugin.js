@@ -7,7 +7,9 @@
 
 import { copy } from "highbeam:actions";
 import { exec } from "highbeam:system";
-import { isLinux } from "highbeam:platform";
+import os from "node:os";
+
+const isLinux = () => os.platform() === "linux";
 
 const TRIGGERS = ["define ", "dict "];
 const SUBTITLE_MAX = 80;

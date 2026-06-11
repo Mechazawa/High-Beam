@@ -18,10 +18,6 @@
             "types": "./clipboard.d.ts",
             "import": "./clipboard.js"
         },
-        "./http": {
-            "types": "./http.d.ts",
-            "import": "./http.js"
-        },
         "./fs": {
             "types": "./fs.d.ts",
             "import": "./fs.js"

@@ -221,14 +221,14 @@ Manifest:
 Real plugin: `plugins/xkcd` builds a title index lazily and
 refreshes on a 24h TTL.
 
-## HTTP request with timeout and abort
+## fetch with timeout and abort
 
-Use this when fetching from a remote API. Propagate the host's `signal` so
-the next keystroke cancels the in-flight request.
+Use this when fetching from a remote API. Compose the host's `signal` with a
+per-request timeout so the next keystroke cancels the in-flight request and a
+slow server can't hang the query.
 
 ```js
 import { openUrl } from 'highbeam:actions';
-import { get } from 'highbeam:http';
 
 const TRIGGER = /^pkg\s+(.+)$/i;
 
@@ -240,18 +240,18 @@ export async function* query(input, signal) {
 
     let res;
     try {
-        res = await get(
+        res = await fetch(
             `https://registry.example.com/search?q=${encodeURIComponent(term)}`,
-            { signal, timeoutMs: 3000 },
+            { signal: AbortSignal.any([signal, AbortSignal.timeout(3000)]) },
         );
     } catch (err) {
         // Aborted, timed out, or transport failure — render nothing.
-        if (err.name === 'AbortError') return;
+        if (err.name === 'AbortError' || err.name === 'TimeoutError') return;
         throw err;
     }
     if (!res.ok) return;
 
-    const body = res.json();
+    const body = await res.json();
     for (const pkg of body.results ?? []) {
         if (signal.aborted) return;
         yield {
@@ -266,18 +266,21 @@ export async function* query(input, signal) {
 
 Notes:
 
-- Pass `signal` into `get`/`post` so the abort cascades from "user typed
-  another keystroke" into the reqwest future.
-- `timeoutMs: 3000` overrides the 30 s default for this call. Pick
-  aggressively — autocomplete UI feels bad waiting 30 seconds for a
-  failing fetch.
-- Catch `AbortError` and return silently; that's the cancellation path.
+- `AbortSignal.any([signal, AbortSignal.timeout(3000)])` aborts on either the
+  keystroke signal or a 3 s timeout, whichever fires first. Without a timeout
+  signal, the host's 30 s default still applies. Pick aggressively;
+  autocomplete UI feels bad waiting 30 seconds for a failing fetch.
+- Pass the host `signal` so the abort cascades from "user typed another
+  keystroke" into the request.
+- Catch `AbortError` / `TimeoutError` and return silently; that's the
+  cancellation path.
+- `await res.json()` (the body readers are async).
 - Check `signal.aborted` between yields if you produce many rows after a
   slow await; otherwise the next keystroke's rows can interleave with this
   one's.
 - The plugin must declare the `http` capability.
 
-Real plugin: `plugins/xkcd` (HTTP + abort + cache).
+Real plugin: `plugins/xkcd` (fetch + abort + cache).
 
 ## Cross-platform behavior
 
@@ -285,11 +288,11 @@ Use this when the plugin's data sources differ between macOS and Linux —
 e.g. app discovery via `.app` bundles vs `.desktop` files.
 
 ```js
-import { isMacOS, isLinux } from 'highbeam:platform';
+import os from 'node:os';
 
 async function collectApps() {
-    if (isMacOS()) return collectMacApps();
-    if (isLinux()) return collectLinuxApps();
+    if (os.platform() === 'darwin') return collectMacApps();
+    if (os.platform() === 'linux') return collectLinuxApps();
     return [];
 }
 
@@ -309,7 +312,7 @@ immediately on non-macOS rather than throwing:
 ```js
 import { applescript } from 'highbeam:system';
 
-// Resolves to null on Linux; no isMacOS() check needed.
+// Resolves to null on Linux; no platform check needed.
 const result = await applescript('tell application "Finder" to get name');
 ```
 
@@ -326,8 +329,8 @@ where it can't work at all:
 The host won't even load it on Linux. `platforms` absent loads everywhere;
 empty `[]` shelves the plugin entirely (never loads).
 
-Real plugin: `plugins/app-launcher` (`isMacOS()` / `isLinux()` to
-branch between `.app` and `.desktop` discovery).
+Real plugin: `plugins/app-launcher` (`os.platform() === 'darwin'` /
+`=== 'linux'` to branch between `.app` and `.desktop` discovery).
 
 ## Read user-editable options via `highbeam:settings`
 
@@ -439,33 +442,31 @@ test('uses the user-set username', async () => {
 The SDK stubs are `vi.fn()`s that return `undefined` by default, so any
 unmocked `get*` call falls back to the plugin's `?? default` branch.
 
-Mocking `http.get` per-test:
+Mocking `fetch` per-test (it's a global, so stub `globalThis.fetch` rather
+than a module import):
 
 ```js
 import { vi } from 'vitest';
-import { get } from 'highbeam:http';
 
-vi.mocked(get).mockResolvedValueOnce({
-    status: 200,
-    statusText: 'OK',
-    headers: {},
-    body: JSON.stringify({ result: 'ok' }),
-    ok: true,
-    json() { return { result: 'ok' }; },
-    text() { return this.body; },
-});
+vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(
+    new Response(JSON.stringify({ result: 'ok' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+    }),
+));
 ```
+
+`Response` exists in Node 18+ (and under vitest), so the real class works in
+tests. Call `vi.unstubAllGlobals()` in `afterEach` to restore.
 
 Resetting a plugin's module-level cache between tests:
 
 ```js
 async function loadPlugin() {
     vi.resetModules();
-    const http = await import('highbeam:http');
-    vi.mocked(http.get).mockReset();
-    vi.mocked(http.get).mockResolvedValue(/* default */);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(/* default Response */));
     const plugin = await import('./plugin.js');
-    return { plugin, http };
+    return { plugin };
 }
 ```
 
@@ -474,9 +475,18 @@ Notes:
 - `highbeam:actions` is not a mock — the stub returns the same plain
   objects the host does, so `expect(action).toEqual({ kind: 'copy', text:
   '...' })` works straight out.
-- `highbeam:platform` is real (reads `process.platform` and friends), so
-  `isMacOS()` reflects the test host. Stub it explicitly when you need
-  cross-platform coverage.
+- `node:os` is real, so `os.platform()` reflects the test host. Mock the
+  whole module to drive platform detection per test (ESM namespaces are
+  frozen, so replacing the module beats `spyOn`):
+
+  ```js
+  vi.mock('node:os', () => {
+      const platform = vi.fn(() => 'darwin');
+      return { default: { platform }, platform };
+  });
+  // later: vi.mocked((await import('node:os')).default.platform)
+  //     .mockReturnValue('linux');
+  ```
 - `highbeam:match` is a faithful port of the host matcher. Order and
   highlight ranges agree with `nucleo-matcher` on realistic input.
 - `vi.resetModules()` clears the plugin's module-level cache between
@@ -485,7 +495,7 @@ Notes:
 
 Real test suites: `plugins/http-codes/http-codes.test.js`
 (mocking `fs.readText`), `plugins/xkcd/xkcd.test.js`
-(mocking `http.get` + `fs.readCache` + `vi.resetModules`).
+(stubbing `fetch` + mocking `fs.readCache` + `vi.resetModules`).
 
 ## Stream results vs return all at once
 
@@ -678,7 +688,8 @@ methods: {
         this.loadCtrl = new AbortController();
         this.loading = true;
         try {
-            this.data = await http.getJson(this.url, { signal: this.loadCtrl.signal });
+            const res = await fetch(this.url, { signal: this.loadCtrl.signal });
+            this.data = await res.json();
         } catch (err) {
             if (err.name !== 'AbortError') this.err = err;
         }
@@ -739,19 +750,20 @@ dropped (logged once at INFO in `plugin.log`).
 ## Show a remote image inside a view
 
 `Image({ src })` accepts a `data:` URI only — the same rule as
-`Result.icon`. Plugins fetch via `highbeam:http` and base64-encode the
-body themselves. Watch the size: a 5 MB JPEG base64-encodes to ~7 MB of
-JS string, which blows the default 32 MB `memoryMb` cap.
+`Result.icon`. Plugins fetch with `fetch` and base64-encode the body
+themselves (`Buffer` is an always-on global). Watch the size: a 5 MB JPEG
+base64-encodes to ~7 MB of JS string, which blows the default 32 MB
+`memoryMb` cap.
 
 ```js
-import { http } from 'highbeam:http';
 import { Heading, Image, Spinner } from 'highbeam:view';
 
 const Photo = {
     setup: (props) => ({ src: null, title: props.title }),
     async mounted({ signal }) {
-        const bytes = await http.getBytes(this.props.src, { signal });
-        this.src = `data:image/jpeg;base64,${bytes.base64}`;
+        const res = await fetch(this.props.src, { signal });
+        const base64 = Buffer.from(await res.arrayBuffer()).toString('base64');
+        this.src = `data:image/jpeg;base64,${base64}`;
     },
     render() {
         if (!this.src) return { body: [Spinner({ label: 'Loading image…' })] };

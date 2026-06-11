@@ -1,15 +1,12 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
-// Force-linux: the plugin gates on isLinux() so tests have to lie about the
-// host. The platform stub doesn't ship as a vi.fn(), so we replace the whole
-// module up front (same trick app-launcher uses).
-vi.mock('highbeam:platform', () => ({
-    isMacOS: vi.fn(() => false),
-    isLinux: vi.fn(() => true),
-    os: 'linux',
-    arch: 'x86_64',
-    version: 'test',
-}));
+// Force-linux: the plugin gates on isLinux() (os.platform() === 'linux') so
+// tests have to lie about the host. The plugin uses the default import plus
+// os.platform(), so mock node:os to report 'linux'.
+vi.mock('node:os', () => {
+    const platform = vi.fn(() => 'linux');
+    return { default: { platform }, platform };
+});
 
 import { exec } from 'highbeam:system';
 import { __resetForTests, query } from './plugin.js';

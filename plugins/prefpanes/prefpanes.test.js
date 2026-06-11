@@ -1,14 +1,11 @@
 import { describe, expect, test, vi } from 'vitest';
 
-// `platform` exports plain values (not vi.fn()s) and ESM namespaces are frozen;
-// replace the whole module so `isMacOS()` is reassignable per-test.
-vi.mock('highbeam:platform', () => ({
-    isMacOS: vi.fn(() => true),
-    isLinux: vi.fn(() => false),
-    os: 'macos',
-    arch: 'x86_64',
-    version: 'test',
-}));
+// The plugin derives the platform from `os.platform()`; mock node:os so the
+// return value is reassignable per-test ('darwin' = macOS, anything else = not).
+vi.mock('node:os', () => {
+    const platform = vi.fn(() => 'darwin');
+    return { default: { platform }, platform };
+});
 
 const ICON_SENTINEL = 'data:image/png;base64,PREFPANE';
 
@@ -61,9 +58,10 @@ async function loadPlugin({ platform = 'macos' } = {}) {
     vi.resetModules();
     const fs = await import('highbeam:fs');
     const icons = await import('highbeam:icons');
-    const platformMod = await import('highbeam:platform');
-    vi.mocked(platformMod.isMacOS).mockReturnValue(platform === 'macos');
-    vi.mocked(platformMod.isLinux).mockReturnValue(platform === 'linux');
+    const osMod = await import('node:os');
+    vi.mocked(osMod.default.platform).mockReturnValue(
+        platform === 'macos' ? 'darwin' : 'linux',
+    );
     vi.mocked(fs.readDir).mockImplementation((path) => {
         const entries = PANE_FIXTURES[path];
         if (entries === undefined) {
@@ -73,7 +71,7 @@ async function loadPlugin({ platform = 'macos' } = {}) {
     });
     vi.mocked(icons.forPath).mockResolvedValue(ICON_SENTINEL);
     const plugin = await import('./plugin.js');
-    return { plugin, fs, icons, platform: platformMod };
+    return { plugin, fs, icons, os: osMod };
 }
 
 describe('prefpanes macOS', () => {

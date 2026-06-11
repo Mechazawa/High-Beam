@@ -1,13 +1,13 @@
-//! Capability gating — central truth for which `highbeam:*` modules a plugin
-//! is allowed to import.
+//! Capability gating — central truth for which `highbeam:*` / `node:*`
+//! modules a plugin is allowed to import.
 //!
 //! A module is importable if the plugin's caps include any of the module's
 //! `any_of`. Functions inside the module can still gate themselves tighter
 //! (e.g. `clipboard` imports on either read or write, but `write()` throws if
 //! the plugin only declared `clipboard.read`).
 //!
-//! `highbeam:match`, `highbeam:platform`, and `highbeam:settings` skip the
-//! gate entirely.
+//! `highbeam:match`, `highbeam:settings`, `node:path`, and the other
+//! pure-compute `node:*` modules skip the gate entirely (no I/O).
 
 pub(crate) struct ModuleCap {
     pub specifier: &'static str,
@@ -32,7 +32,7 @@ const CAPABILITIES: &[Capability] = &[
     },
     Capability {
         name: "http",
-        explanation: "make outbound HTTP requests",
+        explanation: "make outbound HTTP requests (fetch)",
     },
     Capability {
         name: "clipboard.read",
@@ -51,6 +51,14 @@ const CAPABILITIES: &[Capability] = &[
         explanation: "read and write a per-plugin cache directory",
     },
     Capability {
+        name: "fs",
+        explanation: "FULL filesystem access — read and write any file your user can",
+    },
+    Capability {
+        name: "subprocess",
+        explanation: "run and spawn arbitrary programs, and read or change the launcher's environment",
+    },
+    Capability {
         name: "system.exec",
         explanation: "run shell commands and capture their output",
     },
@@ -64,16 +72,13 @@ const CAPABILITIES: &[Capability] = &[
     },
 ];
 
-/// All cap-gated `highbeam:*` modules. `highbeam:match`, `highbeam:platform`,
-/// and `highbeam:settings` load unconditionally — see [`is_uncapped_module`].
+/// All cap-gated `highbeam:*` / `node:*` modules. `highbeam:match`,
+/// `highbeam:settings`, and the pure-compute `node:*` modules load
+/// unconditionally — see [`is_uncapped_module`].
 pub(crate) const MODULES: &[ModuleCap] = &[
     ModuleCap {
         specifier: "highbeam:actions",
         any_of: &["actions"],
-    },
-    ModuleCap {
-        specifier: "highbeam:http",
-        any_of: &["http"],
     },
     ModuleCap {
         specifier: "highbeam:clipboard",
@@ -81,7 +86,19 @@ pub(crate) const MODULES: &[ModuleCap] = &[
     },
     ModuleCap {
         specifier: "highbeam:fs",
-        any_of: &["fs.read", "fs.cache"],
+        any_of: &["fs.read", "fs.cache", "fs"],
+    },
+    ModuleCap {
+        specifier: "node:fs",
+        any_of: &["fs"],
+    },
+    ModuleCap {
+        specifier: "node:fs/promises",
+        any_of: &["fs"],
+    },
+    ModuleCap {
+        specifier: "node:child_process",
+        any_of: &["subprocess"],
     },
     ModuleCap {
         specifier: "highbeam:icons",
@@ -95,9 +112,12 @@ pub(crate) const MODULES: &[ModuleCap] = &[
 
 const UNCAPPED_MODULES: &[&str] = &[
     "highbeam:match",
-    "highbeam:platform",
     "highbeam:settings",
     "highbeam:view",
+    "node:path",
+    "node:os",
+    "node:string_decoder",
+    "node:zlib",
 ];
 
 #[must_use]

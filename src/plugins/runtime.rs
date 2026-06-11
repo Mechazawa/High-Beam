@@ -19,11 +19,10 @@ use std::time::Duration;
 use serde_json::Value as JsonValue;
 
 use rquickjs::function::This;
-use rquickjs::loader::{Loader, Resolver};
+use rquickjs::loader::{ImportAttributes, Loader, Resolver};
 use rquickjs::module::Evaluated;
 use rquickjs::{
-    AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Error as JsError, Function, IntoJs, Module, Object, Promise,
-    Value, async_with,
+    AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Error as JsError, Function, IntoJs, Module, Object, Promise, Value,
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -32,19 +31,16 @@ use crate::logging::LogErr;
 use crate::plugins::log::{LogLevel, PluginLog};
 use crate::plugins::manifest::Manifest;
 use crate::plugins::result::{Action, PluginResult};
-use crate::sdk::abort::{Abort, install_global_controller};
+use crate::sdk::abort::{self, Abort};
 use crate::sdk::actions::ActionsModule;
 use crate::sdk::capability;
 use crate::sdk::clipboard;
 use crate::sdk::console;
 use crate::sdk::fs;
-use crate::sdk::http::HttpModule;
 use crate::sdk::icons;
 use crate::sdk::r#match::MatchModule;
-use crate::sdk::platform::PlatformModule;
 use crate::sdk::settings::{self, SettingsModule};
 use crate::sdk::system;
-use crate::sdk::text_codec;
 use crate::sdk::timers;
 use crate::sdk::view::ViewModule;
 
@@ -53,20 +49,31 @@ use crate::sdk::view::ViewModule;
 const ITERATOR_NORMALIZE_JS: &str = include_str!("../sdk/js/iterator_normalize.js");
 
 const HIGHBEAM_SCHEME: &str = "highbeam:";
+const NODE_SCHEME: &str = "node:";
 const ACTIONS_MODULE: &str = "highbeam:actions";
-const HTTP_MODULE: &str = "highbeam:http";
 const CLIPBOARD_MODULE: &str = "highbeam:clipboard";
 const FS_MODULE: &str = "highbeam:fs";
 const ICONS_MODULE: &str = "highbeam:icons";
 const SYSTEM_MODULE: &str = "highbeam:system";
 const MATCH_MODULE: &str = "highbeam:match";
-const PLATFORM_MODULE: &str = "highbeam:platform";
 const SETTINGS_MODULE: &str = "highbeam:settings";
 const VIEW_MODULE: &str = "highbeam:view";
+const NODE_PATH_MODULE: &str = "node:path";
+const NODE_FS_MODULE: &str = "node:fs";
+const NODE_FS_PROMISES_MODULE: &str = "node:fs/promises";
+const NODE_OS_MODULE: &str = "node:os";
+const NODE_STRING_DECODER_MODULE: &str = "node:string_decoder";
+const NODE_ZLIB_MODULE: &str = "node:zlib";
+const NODE_CHILD_PROCESS_MODULE: &str = "node:child_process";
+
+/// Wraps the llrt `fetch` global so every request carries a default
+/// timeout — `llrt_fetch` has none of its own, and an unbounded request
+/// would otherwise outlive the query that issued it.
+const FETCH_GUARD_JS: &str = include_str!("../sdk/js/fetch_guard.js");
 /// Slot on `globalThis` for the plugin's `query` export. We can't carry a
 /// `Module<'js>` across iterator `.await` points, and
 /// `Persistent<Function<'static>>` holds a raw `!Send` pointer that can't
-/// cross `async_with!` under rquickjs's `parallel` feature.
+/// cross `async_with` under rquickjs's `parallel` feature.
 const QUERY_GLOBAL: &str = "__highbeam_query";
 /// Slots for the optional lifecycle hooks. Same reasoning as `QUERY_GLOBAL` —
 /// the JS Function handle can't escape its evaluating context.
@@ -283,47 +290,51 @@ impl LoadedPlugin {
         let plugin_caps = manifest.capabilities.clone();
         let plugin_dir_owned = plugin_dir.to_path_buf();
         let log_for_ctx = Arc::clone(&log);
-        let exports = async_with!(context => |ctx| {
-            install_host_globals(
-                &ctx,
-                &log_for_ctx,
-                &plugin_caps,
-                cache_dir.clone(),
-                plugin_dir_owned.clone(),
-                &merged_options,
-            )?;
+        let exports = context
+            .async_with(async move |ctx| {
+                install_host_globals(
+                    &ctx,
+                    &log_for_ctx,
+                    &plugin_caps,
+                    cache_dir.clone(),
+                    plugin_dir_owned.clone(),
+                    &merged_options,
+                )?;
 
-            let declared = Module::declare(ctx.clone(), "plugin:main", source_bytes)
-                .catch(&ctx)
-                .map_err(|err| PluginError::Js(format!("declare {entry_path_str}: {err}")))?;
-            let (module, eval_promise) = declared
-                .eval()
-                .catch(&ctx)
-                .map_err(|err| PluginError::Js(format!("eval {entry_path_str}: {err}")))?;
-            eval_promise
-                .into_future::<()>()
-                .await
-                .catch(&ctx)
-                .map_err(|err| PluginError::Js(format!("await eval {entry_path_str}: {err}")))?;
+                let declared = Module::declare(ctx.clone(), "plugin:main", source_bytes)
+                    .catch(&ctx)
+                    .map_err(|err| PluginError::Js(format!("declare {entry_path_str}: {err}")))?;
+                let (module, eval_promise) = declared
+                    .eval()
+                    .catch(&ctx)
+                    .map_err(|err| PluginError::Js(format!("eval {entry_path_str}: {err}")))?;
+                eval_promise
+                    .into_future::<()>()
+                    .await
+                    .catch(&ctx)
+                    .map_err(|err| PluginError::Js(format!("await eval {entry_path_str}: {err}")))?;
 
-            let query: Function<'_> = module
-                .get("query")
-                .catch(&ctx)
-                .map_err(|err| PluginError::Js(format!("missing `query` export: {err}")))?;
-            ctx.globals()
-                .set(QUERY_GLOBAL, query)
-                .catch(&ctx)
-                .map_err(|err| PluginError::Js(format!("stash query global: {err}")))?;
+                let query: Function<'_> = module
+                    .get("query")
+                    .catch(&ctx)
+                    .map_err(|err| PluginError::Js(format!("missing `query` export: {err}")))?;
+                ctx.globals()
+                    .set(QUERY_GLOBAL, query)
+                    .catch(&ctx)
+                    .map_err(|err| PluginError::Js(format!("stash query global: {err}")))?;
 
-            // onEnable / onDisable are optional — a `module.get` for a
-            // missing export raises, so swallow that into a `None` rather
-            // than treating it as a hard error.
-            let has_on_enable = stash_optional_hook(&ctx, &module, "onEnable", ON_ENABLE_GLOBAL)?;
-            let has_on_disable = stash_optional_hook(&ctx, &module, "onDisable", ON_DISABLE_GLOBAL)?;
+                // onEnable / onDisable are optional — a `module.get` for a
+                // missing export raises, so swallow that into a `None` rather
+                // than treating it as a hard error.
+                let has_on_enable = stash_optional_hook(&ctx, &module, "onEnable", ON_ENABLE_GLOBAL)?;
+                let has_on_disable = stash_optional_hook(&ctx, &module, "onDisable", ON_DISABLE_GLOBAL)?;
 
-            Ok::<_, PluginError>(ExportFlags { has_on_enable, has_on_disable })
-        })
-        .await?;
+                Ok::<_, PluginError>(ExportFlags {
+                    has_on_enable,
+                    has_on_disable,
+                })
+            })
+            .await?;
 
         let timeout = Duration::from_millis(manifest.timeout_ms);
         Ok(Self {
@@ -389,10 +400,9 @@ impl LoadedPlugin {
         let memory_mb = self.manifest.memory_mb;
         tokio::spawn(async move {
             let input_for_stream = input_owned.clone();
-            let outcome: Result<(), PluginError> = async_with!(context => |ctx| {
-                stream_query(ctx, &input_for_stream, &tx, &cancel).await
-            })
-            .await;
+            let outcome: Result<(), PluginError> = context
+                .async_with(async move |ctx| stream_query(ctx, &input_for_stream, &tx, &cancel).await)
+                .await;
             log_query_outcome(
                 &log_for_task,
                 &outcome,
@@ -412,7 +422,7 @@ impl LoadedPlugin {
     ///   1. Installs the JS runtime + bridge globals.
     ///   2. Calls `init(handle, props)` — setup → first render → mounted.
     ///   3. Loops on `select!` between the host's close signal and the
-    ///      per-view event channel, keeping `async_with!` alive so
+    ///      per-view event channel, keeping `async_with` alive so
     ///      pending `QuickJS` jobs (microtask flushes, `setTimeout`
     ///      continuations, etc.) actually run.
     ///   4. Calls `close(handle)` — runs `unmounted`, fires the abort
@@ -433,60 +443,61 @@ impl LoadedPlugin {
         let close_signal = bridge.close_signal.clone();
 
         tokio::spawn(async move {
-            async_with!(context => |ctx| {
-                if let Err(err) = crate::sdk::view::install_runtime(&ctx, Arc::clone(&bridge)).catch(&ctx) {
-                    tracing::error!(plugin = %plugin_name, handle, %err, "views: install runtime failed");
-                    // Ask the host to pop the frame + drop the
-                    // close-signal entry; otherwise view_close_signals
-                    // would keep a stale token until session end.
-                    (bridge.close_request)(handle);
-                    return;
-                }
+            context
+                .async_with(async move |ctx| {
+                    if let Err(err) = crate::sdk::view::install_runtime(&ctx, Arc::clone(&bridge)).catch(&ctx) {
+                        tracing::error!(plugin = %plugin_name, handle, %err, "views: install runtime failed");
+                        // Ask the host to pop the frame + drop the
+                        // close-signal entry; otherwise view_close_signals
+                        // would keep a stale token until session end.
+                        (bridge.close_request)(handle);
+                        return;
+                    }
 
-                if let Err(err) = crate::sdk::view::invoke_init(&ctx, handle, &props_json).catch(&ctx) {
-                    tracing::error!(plugin = %plugin_name, handle, %err, "views: init failed");
-                    (bridge.close_request)(handle);
-                    return;
-                }
+                    if let Err(err) = crate::sdk::view::invoke_init(&ctx, handle, &props_json).catch(&ctx) {
+                        tracing::error!(plugin = %plugin_name, handle, %err, "views: init failed");
+                        (bridge.close_request)(handle);
+                        return;
+                    }
 
-                // Drive events + close in the same async_with! the
-                // init ran in. The runtime polls pending JS jobs while
-                // we're parked in select!, so `mounted`'s `setTimeout`
-                // continuations and downstream re-renders fire even
-                // when no user input has arrived.
-                loop {
-                    tokio::select! {
-                        biased;
-                        () = close_signal.cancelled() => break,
-                        maybe_ev = event_rx.recv() => {
-                            let Some(ev) = maybe_ev else {
-                                // Sender dropped — host has finished
-                                // tearing down this view's bookkeeping;
-                                // fall back to waiting on close_signal.
-                                close_signal.cancelled().await;
-                                break;
-                            };
-                            let value_json = ev.value.to_string();
-                            if let Err(err) = crate::sdk::view::invoke_event(
-                                &ctx, handle, ev.callback_id, &value_json,
-                            ).catch(&ctx) {
-                                tracing::error!(
-                                    plugin = %plugin_name,
-                                    handle,
-                                    callback_id = ev.callback_id,
-                                    %err,
-                                    "views: event failed",
-                                );
+                    // Drive events + close in the same async_with the
+                    // init ran in. The runtime polls pending JS jobs while
+                    // we're parked in select!, so `mounted`'s `setTimeout`
+                    // continuations and downstream re-renders fire even
+                    // when no user input has arrived.
+                    loop {
+                        tokio::select! {
+                            biased;
+                            () = close_signal.cancelled() => break,
+                            maybe_ev = event_rx.recv() => {
+                                let Some(ev) = maybe_ev else {
+                                    // Sender dropped — host has finished
+                                    // tearing down this view's bookkeeping;
+                                    // fall back to waiting on close_signal.
+                                    close_signal.cancelled().await;
+                                    break;
+                                };
+                                let value_json = ev.value.to_string();
+                                if let Err(err) = crate::sdk::view::invoke_event(
+                                    &ctx, handle, ev.callback_id, &value_json,
+                                ).catch(&ctx) {
+                                    tracing::error!(
+                                        plugin = %plugin_name,
+                                        handle,
+                                        callback_id = ev.callback_id,
+                                        %err,
+                                        "views: event failed",
+                                    );
+                                }
                             }
                         }
                     }
-                }
 
-                if let Err(err) = crate::sdk::view::invoke_close(&ctx, handle).catch(&ctx) {
-                    tracing::error!(plugin = %plugin_name, handle, %err, "views: close failed");
-                }
-            })
-            .await;
+                    if let Err(err) = crate::sdk::view::invoke_close(&ctx, handle).catch(&ctx) {
+                        tracing::error!(plugin = %plugin_name, handle, %err, "views: close failed");
+                    }
+                })
+                .await;
         });
     }
 
@@ -517,10 +528,9 @@ impl LoadedPlugin {
         let plugin_name = self.manifest.name.clone();
         tokio::spawn(async move {
             let started = std::time::Instant::now();
-            let outcome: Result<(), PluginError> = async_with!(context => |ctx| {
-                run_hook(&ctx, kind, reason, &shutdown).await
-            })
-            .await;
+            let outcome: Result<(), PluginError> = context
+                .async_with(async move |ctx| run_hook(&ctx, kind, reason, &shutdown).await)
+                .await;
             log_hook_outcome(&log, &plugin_name, kind, reason, &outcome, started.elapsed());
         })
     }
@@ -582,17 +592,64 @@ fn install_host_globals<S: std::hash::BuildHasher>(
         .catch(ctx)
         .map_err(|err| PluginError::Js(format!("install console: {err}")))?;
 
-    install_global_controller(ctx)
+    abort::install(ctx)
         .catch(ctx)
-        .map_err(|err| PluginError::Js(format!("install AbortController: {err}")))?;
+        .map_err(|err| PluginError::Js(format!("install AbortController/DOMException: {err}")))?;
 
     timers::install(ctx)
         .catch(ctx)
         .map_err(|err| PluginError::Js(format!("install setTimeout: {err}")))?;
 
-    text_codec::install(ctx)
+    // Web/Node globals from llrt, ungated — all pure compute, no I/O.
+    // Buffer must precede any `node:fs` import: the fs read paths construct
+    // Buffer instances through BufferPrimordials, which throws if
+    // `llrt_buffer::init` hasn't defined the global yet.
+    llrt_buffer::init(ctx)
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("install Buffer/Blob/File: {err}")))?;
+    llrt_url::init(ctx)
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("install URL/URLSearchParams: {err}")))?;
+    llrt_util::init(ctx)
         .catch(ctx)
         .map_err(|err| PluginError::Js(format!("install TextEncoder/TextDecoder: {err}")))?;
+    llrt_stream_web::init(ctx)
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("install web streams: {err}")))?;
+    llrt_crypto::init(ctx)
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("install crypto: {err}")))?;
+    llrt_intl::init(ctx)
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("install Intl: {err}")))?;
+    llrt_temporal::init(ctx)
+        .catch(ctx)
+        .map_err(|err| PluginError::Js(format!("install Temporal: {err}")))?;
+
+    // `fetch` is the one global behind a capability — network egress.
+    // llrt_fetch ships no request timeout, so a guard wrapper injects
+    // `AbortSignal.timeout` into every call (joined with the caller's
+    // signal via `AbortSignal.any`). Response size is bounded by the
+    // plugin's memory cap rather than a transfer limit.
+    if capability::grants_any(plugin_caps, &["http"]) {
+        llrt_fetch::init(ctx)
+            .catch(ctx)
+            .map_err(|err| PluginError::Js(format!("install fetch: {err}")))?;
+        ctx.eval::<(), _>(FETCH_GUARD_JS)
+            .catch(ctx)
+            .map_err(|err| PluginError::Js(format!("install fetch guard: {err}")))?;
+    }
+
+    // `process` global is gated on `subprocess`: its `env` is a live proxy
+    // over the daemon's real environment (read AND write). The matching
+    // `node:child_process` module is gated through the capability table.
+    // `process.exit` only sets an `__exitCode` global the host doesn't read,
+    // so a plugin cannot terminate the daemon through it.
+    if capability::grants_any(plugin_caps, &["subprocess"]) {
+        llrt_process::init(ctx)
+            .catch(ctx)
+            .map_err(|err| PluginError::Js(format!("install process: {err}")))?;
+    }
 
     // Per-plugin options bag; populated even when the plugin declared no
     // options so `get('anything')` is always callable and returns undefined.
@@ -608,8 +665,12 @@ fn install_host_globals<S: std::hash::BuildHasher>(
         .catch(ctx)
         .map_err(|err| PluginError::Js(format!("install clipboard: {err}")))?;
 
-    let can_fs_read = plugin_caps.iter().any(|c| c == "fs.read");
-    let can_fs_cache = plugin_caps.iter().any(|c| c == "fs.cache");
+    // The coarse `fs` cap (full node:fs access) implies the scoped
+    // highbeam:fs conveniences — a plugin that may touch the whole disk
+    // shouldn't have to declare the narrower caps separately. Same
+    // `any_of` semantics as the module gate in [`capability::MODULES`].
+    let can_fs_read = capability::grants_any(plugin_caps, &["fs.read", "fs"]);
+    let can_fs_cache = capability::grants_any(plugin_caps, &["fs.cache", "fs"]);
     fs::install(ctx, can_fs_read, can_fs_cache, cache_dir, plugin_dir)
         .catch(ctx)
         .map_err(|err| PluginError::Js(format!("install fs: {err}")))?;
@@ -705,7 +766,7 @@ async fn run_hook<'js>(
         .map_err(|err| PluginError::Js(format!("call {label}(): {err}", label = kind.label())))?;
     let fut = promise.into_future::<()>();
 
-    let result = tokio::select! {
+    tokio::select! {
         biased;
         () = shutdown.cancelled() => {
             abort.cancel(ctx).log_debug("plugin hook: fire abort listeners on shutdown");
@@ -714,17 +775,7 @@ async fn run_hook<'js>(
         res = fut => res
             .catch(ctx)
             .map_err(|err| PluginError::Js(format!("await {label}(): {err}", label = kind.label()))),
-    };
-
-    // Cancel paths already disposed via `abort.cancel`; release only on
-    // the natural-completion arm. Either way the JS controller is now out
-    // of the registry.
-    if result.is_ok() {
-        abort
-            .release(ctx)
-            .log_debug("plugin hook: release abort controller after success");
     }
-    result
 }
 
 fn log_hook_outcome(
@@ -782,7 +833,7 @@ async fn stream_query<'js>(
         .map_err(|err| PluginError::Js(format!("build signal: {err}")))?;
 
     // The JS-side abort is fired inline from the select! below — spawning a
-    // side task would need its own `async_with!` context to call back into
+    // side task would need its own `async_with` context to call back into
     // JS, which gets awkward under single-threaded rquickjs.
 
     let input_js = input
@@ -834,13 +885,6 @@ async fn stream_query<'js>(
             .map_err(|err| PluginError::Js(format!("read step.done: {err}")))?;
 
         if done {
-            // Natural completion: dispose the JS-side controller so the
-            // registry doesn't accumulate one entry per query over the
-            // plugin context's lifetime.
-            abort
-                .release(&ctx)
-                .log_debug("query stream: release abort controller on natural completion");
-
             return Ok(());
         }
 
@@ -904,25 +948,31 @@ pub(crate) fn default_cache_dir(plugin_name: &str) -> std::path::PathBuf {
         .join(plugin_name)
 }
 
-/// Resolves `highbeam:*` specifiers; rejects everything else.
+/// Resolves `highbeam:*` and `node:*` specifiers; rejects everything else.
 struct HighbeamResolver;
 
 impl Resolver for HighbeamResolver {
-    fn resolve(&mut self, _ctx: &Ctx<'_>, _base: &str, name: &str) -> Result<String, JsError> {
-        if name.starts_with(HIGHBEAM_SCHEME) || name == "plugin:main" {
+    fn resolve<'js>(
+        &mut self,
+        _ctx: &Ctx<'js>,
+        _base: &str,
+        name: &str,
+        _attributes: Option<ImportAttributes<'js>>,
+    ) -> Result<String, JsError> {
+        if name.starts_with(HIGHBEAM_SCHEME) || name.starts_with(NODE_SCHEME) || name == "plugin:main" {
             Ok(name.to_owned())
         } else {
             Err(JsError::new_resolving(
                 "<plugin>",
-                format!("high-beam plugins may only import from `highbeam:*` (got {name:?})"),
+                format!("high-beam plugins may only import from `highbeam:*` or `node:*` (got {name:?})"),
             ))
         }
     }
 }
 
-/// Loads exactly the `highbeam:*` modules the plugin's capabilities permit.
-/// Adding a module is a one-line table edit in [`crate::sdk::capability`]
-/// plus a loader arm below.
+/// Loads exactly the `highbeam:*` and `node:*` modules the plugin's
+/// capabilities permit. Adding a module is a one-line table edit in
+/// [`crate::sdk::capability`] plus a loader arm below.
 struct HighbeamLoader {
     capabilities: Vec<String>,
 }
@@ -934,20 +984,25 @@ impl HighbeamLoader {
 }
 
 impl Loader for HighbeamLoader {
-    fn load<'js>(&mut self, ctx: &Ctx<'js>, name: &str) -> Result<Module<'js>, JsError> {
-        if !name.starts_with(HIGHBEAM_SCHEME) {
+    fn load<'js>(
+        &mut self,
+        ctx: &Ctx<'js>,
+        name: &str,
+        _attributes: Option<ImportAttributes<'js>>,
+    ) -> Result<Module<'js, rquickjs::module::Declared>, JsError> {
+        if !name.starts_with(HIGHBEAM_SCHEME) && !name.starts_with(NODE_SCHEME) {
             return Err(JsError::new_loading_message(
                 name,
-                format!("`{name}` is not a recognised highbeam module"),
+                format!("`{name}` is not a recognised highbeam or node module"),
             ));
         }
 
-        // Modules marked uncapped (match, platform) skip the gate.
+        // Modules marked uncapped (match, settings, node:path, …) skip the gate.
         if !capability::is_uncapped_module(name) {
             let Some(module_cap) = capability::for_module(name) else {
                 return Err(JsError::new_loading_message(
                     name,
-                    format!("`{name}` is not a recognised highbeam module"),
+                    format!("`{name}` is not a recognised highbeam or node module"),
                 ));
             };
 
@@ -964,15 +1019,24 @@ impl Loader for HighbeamLoader {
 
         match name {
             ACTIONS_MODULE => Module::declare_def::<ActionsModule, _>(ctx.clone(), name),
-            HTTP_MODULE => Module::declare_def::<HttpModule, _>(ctx.clone(), name),
             CLIPBOARD_MODULE => Module::declare_def::<clipboard::ClipboardModule, _>(ctx.clone(), name),
             FS_MODULE => Module::declare_def::<fs::FsModule, _>(ctx.clone(), name),
             ICONS_MODULE => Module::declare_def::<icons::IconsModule, _>(ctx.clone(), name),
             SYSTEM_MODULE => Module::declare_def::<system::SystemModule, _>(ctx.clone(), name),
             MATCH_MODULE => Module::declare_def::<MatchModule, _>(ctx.clone(), name),
-            PLATFORM_MODULE => Module::declare_def::<PlatformModule, _>(ctx.clone(), name),
             SETTINGS_MODULE => Module::declare_def::<SettingsModule, _>(ctx.clone(), name),
             VIEW_MODULE => Module::declare_def::<ViewModule, _>(ctx.clone(), name),
+            NODE_PATH_MODULE => Module::declare_def::<llrt_path::PathModule, _>(ctx.clone(), name),
+            NODE_FS_MODULE => Module::declare_def::<llrt_fs::FsModule, _>(ctx.clone(), name),
+            NODE_FS_PROMISES_MODULE => Module::declare_def::<llrt_fs::FsPromisesModule, _>(ctx.clone(), name),
+            NODE_OS_MODULE => Module::declare_def::<llrt_os::OsModule, _>(ctx.clone(), name),
+            NODE_STRING_DECODER_MODULE => {
+                Module::declare_def::<llrt_string_decoder::StringDecoderModule, _>(ctx.clone(), name)
+            }
+            NODE_ZLIB_MODULE => Module::declare_def::<llrt_zlib::ZlibModule, _>(ctx.clone(), name),
+            NODE_CHILD_PROCESS_MODULE => {
+                Module::declare_def::<llrt_child_process::ChildProcessModule, _>(ctx.clone(), name)
+            }
             other => Err(JsError::new_loading_message(
                 name,
                 format!("`{other}` is registered in the capability table but not in the loader"),

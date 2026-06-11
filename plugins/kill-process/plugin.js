@@ -1,7 +1,10 @@
 import { exec as execAction } from "highbeam:actions";
 import { fuzzy } from "highbeam:match";
-import { isLinux, isMacOS } from "highbeam:platform";
 import { exec } from "highbeam:system";
+import os from "node:os";
+
+const isMacOS = () => os.platform() === "darwin";
+const isLinux = () => os.platform() === "linux";
 
 const TRIGGER = "kill";
 const RESULT_LIMIT = 10;

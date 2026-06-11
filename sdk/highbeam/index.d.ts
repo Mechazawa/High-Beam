@@ -6,10 +6,6 @@ declare module 'highbeam:actions' {
     export * from './actions';
 }
 
-declare module 'highbeam:http' {
-    export * from './http';
-}
-
 declare module 'highbeam:clipboard' {
     export * from './clipboard';
 }
@@ -28,10 +24,6 @@ declare module 'highbeam:match' {
 
 declare module 'highbeam:system' {
     export * from './system';
-}
-
-declare module 'highbeam:platform' {
-    export * from './platform';
 }
 
 declare module 'highbeam:settings' {

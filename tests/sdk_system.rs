@@ -1,15 +1,21 @@
 //! Behavioural tests for `highbeam:system` — capability gating and the
 //! cross-platform `applescript` contract (resolves `null` on non-macOS).
 
-use rquickjs::loader::{Loader, Resolver};
-use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Error as JsError, Module, async_with};
+use rquickjs::loader::{ImportAttributes, Loader, Resolver};
+use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Error as JsError, Module};
 
 use high_beam::sdk::system::{SystemModule, install};
 
 struct OnlySystem;
 
 impl Resolver for OnlySystem {
-    fn resolve(&mut self, _ctx: &Ctx<'_>, _base: &str, name: &str) -> Result<String, JsError> {
+    fn resolve<'js>(
+        &mut self,
+        _ctx: &Ctx<'js>,
+        _base: &str,
+        name: &str,
+        _attributes: Option<ImportAttributes<'js>>,
+    ) -> Result<String, JsError> {
         if name == "highbeam:system" || name == "test:harness" {
             Ok(name.to_owned())
         } else {
@@ -19,7 +25,12 @@ impl Resolver for OnlySystem {
 }
 
 impl Loader for OnlySystem {
-    fn load<'js>(&mut self, ctx: &Ctx<'js>, name: &str) -> Result<Module<'js>, JsError> {
+    fn load<'js>(
+        &mut self,
+        ctx: &Ctx<'js>,
+        name: &str,
+        _attributes: Option<ImportAttributes<'js>>,
+    ) -> Result<Module<'js>, JsError> {
         Module::declare_def::<SystemModule, _>(ctx.clone(), name)
     }
 }
@@ -42,7 +53,7 @@ fn applescript_returns_null_on_non_macos() {
             let async_rt = AsyncRuntime::new().expect("rt");
             async_rt.set_loader(OnlySystem, OnlySystem).await;
             let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
-            async_with!(ctx => |ctx| {
+            ctx.async_with(async move |ctx| {
                 install(&ctx, true, true).catch(&ctx).expect("install");
                 let src = br"
                     import { applescript } from 'highbeam:system';
@@ -52,7 +63,8 @@ fn applescript_returns_null_on_non_macos() {
                     })();
                 ";
                 let declared = Module::declare(ctx.clone(), "test:harness", src.to_vec())
-                    .catch(&ctx).expect("declare");
+                    .catch(&ctx)
+                    .expect("declare");
                 let (_m, eval) = declared.eval().catch(&ctx).expect("eval");
                 eval.into_future::<()>().await.catch(&ctx).expect("await eval");
                 // Drain microtasks.
@@ -72,25 +84,27 @@ fn applescript_returns_null_on_non_macos() {
             let async_rt = AsyncRuntime::new().expect("rt");
             async_rt.set_loader(OnlySystem, OnlySystem).await;
             let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
-            let result: String = async_with!(ctx => |ctx| {
-                install(&ctx, true, true).catch(&ctx).expect("install");
-                let src = br#"
+            let result: String = ctx
+                .async_with(async move |ctx| {
+                    install(&ctx, true, true).catch(&ctx).expect("install");
+                    let src = br#"
                     import { applescript } from 'highbeam:system';
                     globalThis.__test = (async () => {
                         const r = await applescript('return 42');
                         return r === null ? "null" : "got: " + r;
                     })();
                 "#;
-                let declared = Module::declare(ctx.clone(), "test:harness", src.to_vec())
-                    .catch(&ctx).expect("declare");
-                let (_m, eval) = declared.eval().catch(&ctx).expect("eval");
-                eval.into_future::<()>().await.catch(&ctx).expect("await eval");
+                    let declared = Module::declare(ctx.clone(), "test:harness", src.to_vec())
+                        .catch(&ctx)
+                        .expect("declare");
+                    let (_m, eval) = declared.eval().catch(&ctx).expect("eval");
+                    eval.into_future::<()>().await.catch(&ctx).expect("await eval");
 
-                let promise: rquickjs::Promise<'_> = ctx.globals().get("__test").expect("read __test");
-                let s: String = promise.into_future::<String>().await.expect("await promise");
-                s
-            })
-            .await;
+                    let promise: rquickjs::Promise<'_> = ctx.globals().get("__test").expect("read __test");
+                    let s: String = promise.into_future::<String>().await.expect("await promise");
+                    s
+                })
+                .await;
             assert_eq!(result, "null");
         });
     }
@@ -103,9 +117,10 @@ fn exec_without_cap_throws_capability_error() {
         let async_rt = AsyncRuntime::new().expect("rt");
         async_rt.set_loader(OnlySystem, OnlySystem).await;
         let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
-        let outcome: String = async_with!(ctx => |ctx| {
-            install(&ctx, false, false).catch(&ctx).expect("install");
-            let src = br"
+        let outcome: String = ctx
+            .async_with(async move |ctx| {
+                install(&ctx, false, false).catch(&ctx).expect("install");
+                let src = br"
                 import { exec } from 'highbeam:system';
                 globalThis.__test = (async () => {
                     try {
@@ -116,14 +131,15 @@ fn exec_without_cap_throws_capability_error() {
                     }
                 })();
             ";
-            let declared = Module::declare(ctx.clone(), "test:harness", src.to_vec())
-                .catch(&ctx).expect("declare");
-            let (_m, eval) = declared.eval().catch(&ctx).expect("eval");
-            eval.into_future::<()>().await.catch(&ctx).expect("await eval");
-            let promise: rquickjs::Promise<'_> = ctx.globals().get("__test").expect("read __test");
-            promise.into_future::<String>().await.expect("await promise")
-        })
-        .await;
+                let declared = Module::declare(ctx.clone(), "test:harness", src.to_vec())
+                    .catch(&ctx)
+                    .expect("declare");
+                let (_m, eval) = declared.eval().catch(&ctx).expect("eval");
+                eval.into_future::<()>().await.catch(&ctx).expect("await eval");
+                let promise: rquickjs::Promise<'_> = ctx.globals().get("__test").expect("read __test");
+                promise.into_future::<String>().await.expect("await promise")
+            })
+            .await;
         assert!(
             outcome.starts_with("CapabilityError"),
             "expected CapabilityError, got {outcome}"
@@ -138,9 +154,10 @@ fn applescript_without_cap_throws_capability_error() {
         let async_rt = AsyncRuntime::new().expect("rt");
         async_rt.set_loader(OnlySystem, OnlySystem).await;
         let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
-        let outcome: String = async_with!(ctx => |ctx| {
-            install(&ctx, false, false).catch(&ctx).expect("install");
-            let src = br"
+        let outcome: String = ctx
+            .async_with(async move |ctx| {
+                install(&ctx, false, false).catch(&ctx).expect("install");
+                let src = br"
                 import { applescript } from 'highbeam:system';
                 globalThis.__test = (async () => {
                     try {
@@ -151,14 +168,15 @@ fn applescript_without_cap_throws_capability_error() {
                     }
                 })();
             ";
-            let declared = Module::declare(ctx.clone(), "test:harness", src.to_vec())
-                .catch(&ctx).expect("declare");
-            let (_m, eval) = declared.eval().catch(&ctx).expect("eval");
-            eval.into_future::<()>().await.catch(&ctx).expect("await eval");
-            let promise: rquickjs::Promise<'_> = ctx.globals().get("__test").expect("read __test");
-            promise.into_future::<String>().await.expect("await promise")
-        })
-        .await;
+                let declared = Module::declare(ctx.clone(), "test:harness", src.to_vec())
+                    .catch(&ctx)
+                    .expect("declare");
+                let (_m, eval) = declared.eval().catch(&ctx).expect("eval");
+                eval.into_future::<()>().await.catch(&ctx).expect("await eval");
+                let promise: rquickjs::Promise<'_> = ctx.globals().get("__test").expect("read __test");
+                promise.into_future::<String>().await.expect("await promise")
+            })
+            .await;
         assert!(
             outcome.starts_with("CapabilityError"),
             "expected CapabilityError, got {outcome}"
@@ -174,23 +192,25 @@ fn exec_with_cap_captures_stdout() {
         let async_rt = AsyncRuntime::new().expect("rt");
         async_rt.set_loader(OnlySystem, OnlySystem).await;
         let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
-        let outcome: String = async_with!(ctx => |ctx| {
-            install(&ctx, true, false).catch(&ctx).expect("install");
-            let src = br"
+        let outcome: String = ctx
+            .async_with(async move |ctx| {
+                install(&ctx, true, false).catch(&ctx).expect("install");
+                let src = br"
                 import { exec } from 'highbeam:system';
                 globalThis.__test = (async () => {
                     const r = await exec('/bin/echo', ['hi']);
                     return r.stdout.trim() + ':' + r.code;
                 })();
             ";
-            let declared = Module::declare(ctx.clone(), "test:harness", src.to_vec())
-                .catch(&ctx).expect("declare");
-            let (_m, eval) = declared.eval().catch(&ctx).expect("eval");
-            eval.into_future::<()>().await.catch(&ctx).expect("await eval");
-            let promise: rquickjs::Promise<'_> = ctx.globals().get("__test").expect("read __test");
-            promise.into_future::<String>().await.expect("await promise")
-        })
-        .await;
+                let declared = Module::declare(ctx.clone(), "test:harness", src.to_vec())
+                    .catch(&ctx)
+                    .expect("declare");
+                let (_m, eval) = declared.eval().catch(&ctx).expect("eval");
+                eval.into_future::<()>().await.catch(&ctx).expect("await eval");
+                let promise: rquickjs::Promise<'_> = ctx.globals().get("__test").expect("read __test");
+                promise.into_future::<String>().await.expect("await promise")
+            })
+            .await;
         assert_eq!(outcome, "hi:0");
     });
 }

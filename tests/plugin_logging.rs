@@ -216,16 +216,16 @@ export async function* query(_input, _signal) {
 
 #[test]
 fn capability_violation_at_load_writes_to_plugin_log() {
-    // Plugin imports `highbeam:http` without declaring `http`. The loader
-    // must reject AND write the failure into plugin.log so users can debug.
+    // Plugin imports `node:fs` without declaring `fs`. The loader must
+    // reject AND write the failure into plugin.log so users can debug.
     let dir = fresh_tmp("capviolation");
     write_plugin(
         &dir,
         r#"{"name":"capviolation","entry":"plugin.js","timeoutMs":2000,"capabilities":[]}"#,
         r#"
-import { get } from "highbeam:http";
+import { readFileSync } from "node:fs";
 export async function* query(input, _signal) {
-    const _ = get;
+    const _ = readFileSync;
     yield { key: "k", title: input, action: { kind: "copy", text: input } };
 }
 "#,
@@ -246,13 +246,13 @@ export async function* query(input, _signal) {
     let runtime = rt();
     let settings = high_beam::settings::Settings::default();
     let plugins = runtime.block_on(high_beam::plugins::loader::load_all(&opts, &settings));
-    assert!(plugins.is_empty(), "plugin missing the http capability must not load");
+    assert!(plugins.is_empty(), "plugin missing the fs capability must not load");
 
     let body = read_log(&plugin_dir);
     assert_well_formed_lines(&body);
     assert!(body.contains("[ERROR] load failed"), "got:\n{body}");
     assert!(
-        body.contains("highbeam:http") || body.contains("capability"),
+        body.contains("node:fs") || body.contains("capability"),
         "log should mention the rejected module / capability: {body}",
     );
 

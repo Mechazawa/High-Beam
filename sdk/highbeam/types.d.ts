@@ -182,8 +182,10 @@ export interface RowBlock {
 
 /**
  * Standard Web `AbortSignal` shape. The host hands one to your `query()`
- * function and listens for it across `highbeam:http` calls. You can also
- * construct your own via `new AbortController()` for internal flows.
+ * function and `fetch` accepts one via `init.signal`. The runtime classes
+ * are native (llrt) and spec-shaped: `AbortSignal.timeout(ms)`,
+ * `AbortSignal.any([...])`, and `AbortSignal.abort(reason)` statics all
+ * exist, and abort reasons are real `DOMException`s.
  */
 export interface AbortSignal {
     readonly aborted: boolean;
@@ -196,32 +198,6 @@ export interface AbortSignal {
 export interface AbortController {
     readonly signal: AbortSignal;
     abort(reason?: unknown): void;
-}
-
-/** Shape of the value returned from `http.get` / `http.post`. */
-export interface HttpResponse {
-    /** HTTP status code, e.g. 200. */
-    status: number;
-    /** Canonical reason phrase, e.g. `"OK"`. */
-    statusText: string;
-    /** Response headers, lower-cased keys. */
-    headers: Record<string, string>;
-    /** Response body as UTF-8 text. Binary is post-v1. */
-    body: string;
-    /** `status` is in 200..=299. */
-    ok: boolean;
-    /** Parse body as JSON. Throws on parse failure. */
-    json(): unknown;
-    /** Alias for `body`. */
-    text(): string;
-}
-
-/** Options accepted by every `highbeam:http` call. */
-export interface HttpOpts {
-    headers?: Record<string, string>;
-    signal?: AbortSignal;
-    /** Per-request override of the default 30 s timeout. */
-    timeoutMs?: number;
 }
 
 /** Shape `query()` must return: an async iterable of results. */

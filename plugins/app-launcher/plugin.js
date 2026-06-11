@@ -2,7 +2,9 @@ import { exec, openUrl } from "highbeam:actions";
 import { readDir, readText } from "highbeam:fs";
 import { forPath } from "highbeam:icons";
 import { fuzzy } from "highbeam:match";
-import { isLinux, isMacOS } from "highbeam:platform";
+import os from "node:os";
+const isMacOS = () => os.platform() === "darwin";
+const isLinux = () => os.platform() === "linux";
 
 const MAC_APP_DIRECTORIES = [
     "/Applications",

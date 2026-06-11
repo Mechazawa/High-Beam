@@ -136,39 +136,65 @@ type Result = {
 };
 ```
 
-Plugins can `import` only from the `highbeam:*` scheme. `import 'fs'`,
-`import 'lodash'`, etc. are rejected at load time.
+Plugins can `import` from the `highbeam:*` scheme and from the supported
+`node:*` built-ins (`node:path`, `node:fs`, `node:fs/promises`, `node:os`,
+`node:zlib`, `node:string_decoder`, `node:child_process`). Every other
+specifier (`import 'lodash'`, `import 'node:net'`, …) is rejected at load
+time.
 
 ## Capabilities at a glance
 
 | Capability             | Grants                                              |
 |------------------------|-----------------------------------------------------|
 | `actions`              | `highbeam:actions`                                  |
-| `http`                 | `highbeam:http.get` / `.post`                       |
+| `http`                 | global `fetch` (+ `Headers` / `Request` / `Response` / `FormData`) |
 | `clipboard.read`       | `highbeam:clipboard.read`                           |
 | `clipboard.write`      | `highbeam:clipboard.write`                          |
 | `fs.read`              | `highbeam:fs.readDir` / `.readFile` / `.readText`   |
 | `fs.cache`             | `highbeam:fs.readCache` / `.writeCache`             |
+| `fs`                   | full filesystem: `node:fs` / `node:fs/promises` + all `highbeam:fs.*` |
+| `subprocess`           | spawn programs (`node:child_process`) + the `process` global |
 | `icons`                | `highbeam:icons.forPath`                            |
 | `system.exec`          | `highbeam:system.exec`                              |
 | `system.applescript`   | `highbeam:system.applescript`                       |
 
-`highbeam:match`, `highbeam:platform`, and `highbeam:settings` are uncapped
-— no declaration required. See [sdk-reference.md](./sdk-reference.md) for
-per-function behavior, signatures, and examples.
+`highbeam:match`, `highbeam:settings`, `node:path`,
+`node:os`, `node:string_decoder`, and `node:zlib` are uncapped — no
+declaration required. `fs` is the broad "read and write any file your user
+can" grant; prefer the scoped `fs.read` / `fs.cache` when they suffice. See
+[sdk-reference.md](./sdk-reference.md) for per-function behavior, signatures,
+and examples.
 
 ## Runtime globals
 
-The runtime is bare `QuickJS` plus exactly these host-installed globals — no
-other Web APIs exist (`fetch`, `URLSearchParams`, `crypto`, …):
+The runtime is QuickJS (via rquickjs) with the llrt module crates layered on
+top for the Node and Web API surface. Always-on globals, no capability and no
+import:
 
 - `console.log/info/warn/error/debug` — see below.
 - `setTimeout` — awaitable; `clearTimeout` / `clearInterval` are no-ops.
-- `AbortController` / `AbortSignal` — the signal passed to `query()` is one.
-- `TextEncoder` / `TextDecoder` — UTF-8 only. Constructing `TextDecoder`
-  with any other encoding throws `RangeError`; invalid byte sequences
-  decode to U+FFFD. The main consumer is `fs.readCache`, which returns a
-  `Uint8Array`.
+- `URL` / `URLSearchParams`.
+- `Buffer`, `Blob`, `File`.
+- `TextEncoder` / `TextDecoder`: multi-encoding (utf-8, utf-16le, utf-16be,
+  windows-1252), with BOM handling; invalid byte sequences decode to U+FFFD.
+- `ReadableStream` and the rest of the web-streams family.
+- `DOMException`.
+- `AbortController` / `AbortSignal`: the signal passed to `query()` is one.
+  `AbortSignal.timeout(ms)`, `AbortSignal.any([...])`,
+  `AbortSignal.abort(reason)` all work; `signal.reason` is a `DOMException`
+  and `signal.throwIfAborted()` throws it.
+- `crypto`: WebCrypto (`getRandomValues`, `randomUUID`, `subtle.*`) plus the
+  node-style `randomBytes` / `createHash` / `createHmac` helpers.
+- `Temporal`: the full Temporal surface (`Now`, `PlainDate`, `Instant`, …).
+- `Intl`: partial — `DateTimeFormat` and `supportedValuesOf` only, no
+  `NumberFormat` / `Collator`.
+
+`fetch` (with `Headers` / `Request` / `Response` / `FormData`) is gated on
+the `http` capability rather than always-on, and the `process` global is
+gated on `subprocess`. The `node:path`, `node:os`, `node:zlib`,
+`node:string_decoder`, `node:fs`, `node:fs/promises`, and
+`node:child_process` modules are imported, not globals (see
+[sdk-reference.md](./sdk-reference.md#nodepath)).
 
 ## Console + logging
 
@@ -197,6 +223,7 @@ Hand-written `.d.ts` files live in `sdk/highbeam/`. A minimal
         "moduleResolution": "node",
         "strict": true,
         "outDir": ".",
+        "types": ["node"],
         "paths": {
             "highbeam:*": ["./node_modules/@high-beam/sdk/*"]
         }
@@ -206,8 +233,14 @@ Hand-written `.d.ts` files live in `sdk/highbeam/`. A minimal
 ```
 
 `npm install --save-dev <path-to-this-repo>/sdk/highbeam` (or symlink it)
-to pull the ambient types in. Compiled `plugin.js` keeps the bare
-`highbeam:*` specifiers — TypeScript only needs the types at compile time.
+to pull the ambient `highbeam:*` types in. Compiled `plugin.js` keeps the
+bare `highbeam:*` specifiers — TypeScript only needs the types at compile
+time.
+
+Types for the `node:*` modules come from `@types/node`
+(`npm install --save-dev @types/node`, hence `"types": ["node"]` above); the
+SDK no longer ships an `http.d.ts`. The `fetch` / `Response` /
+`AbortSignal` / `AbortController` shapes are in the SDK's `types.d.ts`.
 
 `plugins/echo-ts` has a full working setup.
 
@@ -322,4 +355,4 @@ as a starting point:
 - `dnd` — bundled `5eSpells.json`, `match.fuzzy` ranking, `openUrl`.
 - `app-launcher` — `fs.readDir`, `icons.forPath`, `match.fuzzy`,
   cross-platform Spotlight equivalent.
-- `xkcd` — HTTP + `fs.cache`-backed title index, fuzzy search.
+- `xkcd` — `fetch` + `fs.cache`-backed title index, fuzzy search.

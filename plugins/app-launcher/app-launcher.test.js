@@ -1,14 +1,13 @@
 import { describe, expect, test, vi } from 'vitest';
 
-// `platform` is a near-real stub (no vi.fn() exports), and ESM namespaces are
-// frozen — so spyOn won't bite. Replace the whole module with vi.fn()s.
-vi.mock('highbeam:platform', () => ({
-    isMacOS: vi.fn(() => true),
-    isLinux: vi.fn(() => false),
-    os: 'macos',
-    arch: 'x86_64',
-    version: 'test',
-}));
+// The plugin imports `os` as a default import and calls `os.platform()`.
+// Mock the whole module so we can drive platform detection per-test; expose
+// both a default export (what the plugin uses) and a named `platform` for
+// safety. ESM namespaces are frozen, so replacing the module beats spyOn.
+vi.mock('node:os', () => {
+    const platform = vi.fn(() => 'darwin');
+    return { default: { platform }, platform };
+});
 
 const ICON_SENTINEL = 'data:image/png;base64,SENTINEL';
 
@@ -98,18 +97,21 @@ async function collect(iter) {
     return out;
 }
 
-// vi.resetModules() also reloads `highbeam:*`, so each test's fresh import
-// gets a fresh stub with no implementation. We re-bind mocks against the
-// post-reset module instances and return them alongside the plugin.
+// vi.resetModules() also reloads the mocked modules, so each test's fresh
+// import gets a fresh stub with no implementation. We re-bind mocks against
+// the post-reset module instances and return them alongside the plugin.
 async function loadPlugin({ platform = 'macos' } = {}) {
     vi.resetModules();
     const fs = await import('highbeam:fs');
     const icons = await import('highbeam:icons');
-    const platformMod = await import('highbeam:platform');
-    const isMac = platform === 'macos';
+    const os = (await import('node:os')).default;
     const isLin = platform === 'linux';
-    vi.mocked(platformMod.isMacOS).mockReturnValue(isMac);
-    vi.mocked(platformMod.isLinux).mockReturnValue(isLin);
+    // Map the test's platform label onto a Node os.platform() value. Anything
+    // other than 'linux'/'macos' (e.g. 'other') yields an unsupported value
+    // that the plugin's isMacOS()/isLinux() gates both reject.
+    const osPlatform =
+        platform === 'linux' ? 'linux' : platform === 'macos' ? 'darwin' : platform;
+    vi.mocked(os.platform).mockReturnValue(osPlatform);
     const fixtures = isLin ? LINUX_FIXTURES : MAC_FIXTURES;
     vi.mocked(fs.readDir).mockImplementation((path) =>
         asyncIterable(fixtures[path] ?? []),
@@ -121,7 +123,7 @@ async function loadPlugin({ platform = 'macos' } = {}) {
     });
     vi.mocked(icons.forPath).mockResolvedValue(ICON_SENTINEL);
     const plugin = await import('./plugin.js');
-    return { plugin, fs, icons, platform: platformMod };
+    return { plugin, fs, icons, os };
 }
 
 describe('app-launcher macOS', () => {

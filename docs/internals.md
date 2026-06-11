@@ -16,7 +16,7 @@ see [plugin-authoring.md](./plugin-authoring.md) and
 |---|---|---|
 | Language | Rust (edition 2024) | Native binary, no GC, mature ecosystem for the pieces we need |
 | UI toolkit | Slint | Declarative `.slint` files with runtime-bound properties (good fit for theme tokens); winit windowing |
-| Plugin runtime | rquickjs (QuickJS binding) | ~1 MB embed, pure ECMAScript (not Node), per-context memory caps, interrupt hooks for timeouts |
+| Plugin runtime | rquickjs (QuickJS binding) + llrt module crates | ~1 MB embed, per-context memory caps, interrupt hooks for timeouts; the llrt crates supply the Node/Web API surface (`fetch`, `node:path`, `node:fs`, `URL`, web-streams, …) on top of bare QuickJS |
 | Persistence | SQLite via `rusqlite` | Frecency + query history; schemas versioned with `rusqlite_migration`. Boring, reliable. |
 | Global hotkey | `global-hotkey` (macOS); CLI `--open` (Linux) | Wayland has no portable global-hotkey API; punt to the WM. |
 
@@ -30,7 +30,7 @@ fire-and-forget housekeeping.
   run here; other threads route through `slint::invoke_from_event_loop`.
 - **`highbeam-plugin-runtime`**: single-threaded tokio runtime that
   owns every loaded `LoadedPlugin` (rquickjs `AsyncContext`). Plugins
-  live here because rquickjs futures are `!Send` across `async_with!`
+  live here because rquickjs futures are `!Send` across `async_with`
   under the `parallel` feature, so they can't cross threads.
 - **`highbeam-ipc`**: blocks on the unix socket; hops back to the
   Slint thread to show the window.
@@ -49,12 +49,17 @@ write paths.
 - On every keystroke (post-debounce), the host calls `cancel.cancel()`
   on the previous dispatch token, which both fires JS-side
   `AbortSignal` listeners and sets the rquickjs interrupt flag.
-- All host APIs that do I/O (`http.get`, `fs.readDir`, `system.exec`,
-  etc.) accept an optional `signal` and honor it.
+- I/O honors `AbortSignal`: `fetch` takes `init.signal`, the host APIs
+  (`fs.readDir`, `system.exec`, etc.) take an optional `signal`. The host
+  also injects a 30 s default timeout into every `fetch` via an
+  `AbortSignal`, which an explicit caller signal still overrides on abort.
 - CPU-bound plugins that block synchronously can't be cancelled
   gracefully. The per-plugin `timeoutMs` is the hard kill via the
   rquickjs interrupt hook. The watchdog runs on the blocking thread
   pool so a `while(true){}` JS body can't starve it.
+- `setTimeout` is a host polyfill, not llrt's `llrt_timers`: that crate
+  keys its timer state on a process-global runtime pointer, which is unsound
+  under high-beam's one-runtime-per-plugin model.
 
 ## Frecency
 
@@ -204,12 +209,16 @@ Considered seriously. Rejected because:
   a load-bearing reason, the DX cost is too high.
 - Polyglot plugins are a feature we don't need.
 
-## Why not Node compat
+## Why not full Node compat
 
-Considered. Rejected because once `import 'fs'` works, plugin authors
-reach for npm and we're back to the bundle problem that motivated
-rejecting Electron. The whole point of single-file plugins is to make
-that impossible.
+Full npm-style Node compat was rejected: once arbitrary `require`/npm
+resolution works, plugin authors reach for the registry and we're back to
+the bundle problem that motivated rejecting Electron. The whole point of
+single-file plugins is to make that impossible.
 
-Plugins import from `highbeam:*` modules only. The host loader
-rejects every other specifier.
+The loader allowlist is `highbeam:*` plus a curated set of bare `node:*`
+built-ins (`node:path`, `node:fs`, `node:fs/promises` today, all backed by
+llrt crates). Bare specifiers (`import 'fs'`, `import 'lodash'`) and
+unsupported `node:*` names are rejected. There is no `node_modules`
+resolution, so a `node:*` import can only ever resolve to a built-in the
+host vetted, never to an npm package.

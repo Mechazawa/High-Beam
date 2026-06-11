@@ -39,7 +39,7 @@ pub struct RuntimeBridge {
     /// Fires when the host wants the view's tokio task to exit. The
     /// per-view `view_init` task awaits this; `view_close` triggers it.
     /// Driving the task this way (rather than calling `invoke_close`
-    /// from a separate `async_with!`) avoids two contexts contending
+    /// from a separate `async_with`) avoids two contexts contending
     /// for the same `QuickJS` engine and keeps `setTimeout`/microtask
     /// continuations alive for the view's whole lifetime.
     pub close_signal: tokio_util::sync::CancellationToken,
@@ -248,7 +248,7 @@ pub fn invoke_close(ctx: &Ctx<'_>, handle: u64) -> JsResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rquickjs::{AsyncContext, AsyncRuntime, async_with};
+    use rquickjs::{AsyncContext, AsyncRuntime};
 
     fn rt() -> tokio::runtime::Runtime {
         tokio::runtime::Builder::new_current_thread()
@@ -277,7 +277,7 @@ mod tests {
         runtime.block_on(async {
             let async_rt = AsyncRuntime::new().expect("rt");
             let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
-            async_with!(ctx => |ctx| {
+            ctx.async_with(async move |ctx| {
                 install_runtime(&ctx, test_bridge("test-plugin")).expect("install");
                 install_runtime(&ctx, test_bridge("test-plugin")).expect("re-install");
                 let has_views: bool = ctx
@@ -297,10 +297,10 @@ mod tests {
         runtime.block_on(async {
             let async_rt = AsyncRuntime::new().expect("rt");
             let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
-            async_with!(ctx => |ctx| {
+            ctx.async_with(async move |ctx| {
                 // Bootstrap AbortController so the runtime's `new AbortController()`
                 // in init() resolves.
-                crate::sdk::abort::install_global_controller(&ctx).expect("abort");
+                crate::sdk::abort::install(&ctx).expect("abort");
                 install_runtime(&ctx, test_bridge("t")).expect("install");
 
                 // Plant a fake registry + view that records calls on globals
@@ -351,8 +351,8 @@ mod tests {
         runtime.block_on(async {
             let async_rt = AsyncRuntime::new().expect("rt");
             let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
-            async_with!(ctx => |ctx| {
-                crate::sdk::abort::install_global_controller(&ctx).expect("abort");
+            ctx.async_with(async move |ctx| {
+                crate::sdk::abort::install(&ctx).expect("abort");
                 install_runtime(&ctx, test_bridge("t")).expect("install");
                 // Override the stub paint hooks with recorders so we can assert.
                 ctx.eval::<(), _>(
@@ -395,8 +395,8 @@ mod tests {
         runtime.block_on(async {
             let async_rt = AsyncRuntime::new().expect("rt");
             let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
-            async_with!(ctx => |ctx| {
-                crate::sdk::abort::install_global_controller(&ctx).expect("abort");
+            ctx.async_with(async move |ctx| {
+                crate::sdk::abort::install(&ctx).expect("abort");
                 install_runtime(&ctx, test_bridge("t")).expect("install");
 
                 ctx.eval::<(), _>(
@@ -431,9 +431,7 @@ mod tests {
 
                 invoke_init(&ctx, 9, "{}").expect("init");
 
-                let first_tree: String = ctx
-                    .eval("__paint_calls[0][1]")
-                    .expect("read tree");
+                let first_tree: String = ctx.eval("__paint_calls[0][1]").expect("read tree");
                 let callback_id: u64 = extract_first_callback_id(&first_tree);
                 invoke_event(&ctx, 9, callback_id, "null").expect("event");
 

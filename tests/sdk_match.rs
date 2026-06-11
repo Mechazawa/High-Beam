@@ -1,15 +1,21 @@
 //! Behavioural tests for `highbeam:match` — the fuzzy matcher is Rust but
 //! only callable via JS, so we exercise it via rquickjs.
 
-use rquickjs::loader::{Loader, Resolver};
-use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Error as JsError, Module, async_with};
+use rquickjs::loader::{ImportAttributes, Loader, Resolver};
+use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Error as JsError, Module};
 
 use high_beam::sdk::r#match::MatchModule;
 
 struct OnlyMatch;
 
 impl Resolver for OnlyMatch {
-    fn resolve(&mut self, _ctx: &Ctx<'_>, _base: &str, name: &str) -> Result<String, JsError> {
+    fn resolve<'js>(
+        &mut self,
+        _ctx: &Ctx<'js>,
+        _base: &str,
+        name: &str,
+        _attributes: Option<ImportAttributes<'js>>,
+    ) -> Result<String, JsError> {
         if name == "highbeam:match" || name == "test:harness" {
             Ok(name.to_owned())
         } else {
@@ -19,7 +25,12 @@ impl Resolver for OnlyMatch {
 }
 
 impl Loader for OnlyMatch {
-    fn load<'js>(&mut self, ctx: &Ctx<'js>, name: &str) -> Result<Module<'js>, JsError> {
+    fn load<'js>(
+        &mut self,
+        ctx: &Ctx<'js>,
+        name: &str,
+        _attributes: Option<ImportAttributes<'js>>,
+    ) -> Result<Module<'js>, JsError> {
         Module::declare_def::<MatchModule, _>(ctx.clone(), name)
     }
 }
@@ -37,19 +48,16 @@ fn run_harness(script: &str) -> serde_json::Value {
         let async_rt = AsyncRuntime::new().expect("rt");
         async_rt.set_loader(OnlyMatch, OnlyMatch).await;
         let ctx = AsyncContext::full(&async_rt).await.expect("ctx");
-        let json_str: String = async_with!(ctx => |ctx| {
-            let declared = Module::declare(
-                ctx.clone(),
-                "test:harness",
-                script.as_bytes().to_vec(),
-            )
-            .catch(&ctx)
-            .expect("declare");
-            let (_module, eval) = declared.eval().catch(&ctx).expect("eval");
-            eval.into_future::<()>().await.catch(&ctx).expect("await eval");
-            ctx.globals().get::<_, String>("__out").expect("read __out")
-        })
-        .await;
+        let json_str: String = ctx
+            .async_with(async move |ctx| {
+                let declared = Module::declare(ctx.clone(), "test:harness", script.as_bytes().to_vec())
+                    .catch(&ctx)
+                    .expect("declare");
+                let (_module, eval) = declared.eval().catch(&ctx).expect("eval");
+                eval.into_future::<()>().await.catch(&ctx).expect("await eval");
+                ctx.globals().get::<_, String>("__out").expect("read __out")
+            })
+            .await;
         serde_json::from_str(&json_str).expect("valid JSON")
     })
 }

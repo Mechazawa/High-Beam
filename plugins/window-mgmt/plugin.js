@@ -7,7 +7,8 @@
 // "next display" are out of scope for v1 — see README.md.
 
 import { exec } from "highbeam:actions";
-import { isMacOS } from "highbeam:platform";
+import os from "node:os";
+const isMacOS = () => os.platform() === "darwin";
 
 const WEIGHT = 90;
 

@@ -332,9 +332,9 @@ npm test
 vitest watches by default; `vitest run` runs once and exits. The iteration
 loop is now: edit `plugin.js`, save, vitest re-runs in <100ms.
 
-SDK modules with side effects (`highbeam:http`, `highbeam:clipboard`,
-`highbeam:fs`, `highbeam:system`, `highbeam:icons`) ship as `vi.fn()`s so you
-can spy and override per-call:
+SDK modules with side effects (`highbeam:clipboard`, `highbeam:fs`,
+`highbeam:system`, `highbeam:icons`) ship as `vi.fn()`s so you can spy and
+override per-call:
 
 ```js
 import { readText } from 'highbeam:fs';
