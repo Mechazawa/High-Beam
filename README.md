@@ -37,10 +37,15 @@ Type to query, ↑/↓ to highlight, Enter to invoke, Esc to dismiss. The
 Core built-in handles `settings`, `install <manifest-url>`, `reload`,
 `update`, `shutdown`, `sleep`, `lock`, etc.
 
+`highbeam --query "<text>"` opens with the query box pre-filled (forwarded
+to a running daemon when one exists).
+
 ## Plugins
 
 Single-directory `manifest.json` + `plugin.js`. Reference plugins
-under `plugins/`; bundled ones get seeded on first launch. Authoring
+under `plugins/`; bundled ones get seeded on first launch. The bundled
+`tutorial` opens automatically on the first launch; type `tutorial` (or
+`help`) to revisit it. Authoring
 guide: [docs/plugin-authoring.md](docs/plugin-authoring.md). API
 reference: [docs/sdk-reference.md](docs/sdk-reference.md). Dynamic,
 stateful screens: [docs/views.md](docs/views.md).

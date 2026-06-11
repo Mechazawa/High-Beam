@@ -1,8 +1,15 @@
 //! Unix-domain-socket IPC for single-instance coordination.
 //!
-//! Newline-terminated ASCII commands; today there's exactly one (`open`),
-//! so a fixed read buffer is fine. Length-prefixed framing waits until we
-//! carry payloads bigger than a few bytes.
+//! Newline-terminated commands. `open` is space-delimited; `query` carries a
+//! free-text payload and so uses tab-delimited fields (`query\t<token>\t<text>`)
+//! — a tab can't appear in an activation token and is effectively absent from a
+//! single-line launcher query, so it separates the fields unambiguously without
+//! length-prefixed framing.
+//!
+//! Sends are one-way and fire-and-forget: a daemon predating a command (e.g. an
+//! older build that doesn't know `query`) rejects it and logs a warning, but
+//! the client still sees success — the launcher won't open until that daemon is
+//! restarted.
 
 use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -23,6 +30,14 @@ pub enum Command {
     /// keybind that runs `high-beam --open` from a context where
     /// `XDG_ACTIVATION_TOKEN` was already consumed, or non-Wayland callers.
     Open { activation_token: Option<String> },
+
+    /// Open the query window and pre-fill the query box with `query`, as if
+    /// the user had typed it. `activation_token` carries the same Wayland
+    /// focus token as [`Self::Open`].
+    OpenQuery {
+        query: String,
+        activation_token: Option<String>,
+    },
 }
 
 impl Command {
@@ -30,16 +45,44 @@ impl Command {
     /// * `"open"` — no token (legacy + WM keybind path)
     /// * `"open <token>"` — with token; `<token>` may not contain whitespace
     ///   (real XDG activation tokens are opaque ASCII without spaces).
+    /// * `"query\t<token>\t<text>"` — pre-filled query; `<token>` is empty when
+    ///   absent and `<text>` is the query (single line; CR/LF are collapsed to
+    ///   spaces so the newline framing holds).
     fn as_wire(&self) -> String {
         match self {
             Self::Open { activation_token: None } => "open".to_owned(),
             Self::Open {
                 activation_token: Some(t),
             } => format!("open {t}"),
+            Self::OpenQuery {
+                query,
+                activation_token,
+            } => {
+                let token = activation_token.as_deref().unwrap_or("");
+                // The wire is newline-framed and the daemon reads one line per
+                // connection; collapse any CR/LF so an embedded newline can't
+                // truncate the query on the read side.
+                let query = query.replace(['\n', '\r'], " ");
+
+                format!("query\t{token}\t{query}")
+            }
         }
     }
 
     fn parse(line: &str) -> Result<Self, ParseError> {
+        // Strip only the line terminator — the query payload may carry
+        // meaningful leading/trailing spaces, so it must not be `trim`ed.
+        let line = line.trim_end_matches(['\n', '\r']);
+
+        if let Some(rest) = line.strip_prefix("query\t") {
+            let (token, query) = rest.split_once('\t').unwrap_or(("", rest));
+
+            return Ok(Self::OpenQuery {
+                query: query.to_owned(),
+                activation_token: optional_token(token),
+            });
+        }
+
         let trimmed = line.trim();
 
         if trimmed == "open" {
@@ -47,15 +90,18 @@ impl Command {
         }
 
         if let Some(rest) = trimmed.strip_prefix("open ") {
-            let token = rest.trim();
-
             return Ok(Self::Open {
-                activation_token: (!token.is_empty()).then(|| token.to_owned()),
+                activation_token: optional_token(rest.trim()),
             });
         }
 
         Err(ParseError::Unknown(trimmed.to_owned()))
     }
+}
+
+/// A wire token field is empty when the caller had no activation token.
+fn optional_token(raw: &str) -> Option<String> {
+    (!raw.is_empty()).then(|| raw.to_owned())
 }
 
 #[derive(Debug)]
@@ -191,6 +237,69 @@ mod tests {
         };
         assert_eq!(with_token.as_wire(), "open xdg-foo-bar-123");
         assert_eq!(Command::parse("open xdg-foo-bar-123\n").unwrap(), with_token);
+    }
+
+    #[test]
+    fn open_query_roundtrips_without_token() {
+        let cmd = Command::OpenQuery {
+            query: "calc 2 + 2".to_owned(),
+            activation_token: None,
+        };
+        assert_eq!(cmd.as_wire(), "query\t\tcalc 2 + 2");
+        assert_eq!(Command::parse("query\t\tcalc 2 + 2\n").unwrap(), cmd);
+    }
+
+    #[test]
+    fn open_query_roundtrips_with_token() {
+        let cmd = Command::OpenQuery {
+            query: "http 404".to_owned(),
+            activation_token: Some("xdg-tok-9".to_owned()),
+        };
+        assert_eq!(cmd.as_wire(), "query\txdg-tok-9\thttp 404");
+        assert_eq!(Command::parse("query\txdg-tok-9\thttp 404\n").unwrap(), cmd);
+    }
+
+    #[test]
+    fn open_query_preserves_query_whitespace_and_tabs() {
+        // Leading/trailing spaces are part of the query and must survive; a
+        // stray tab inside the text stays with the query (we split on the
+        // first tab only).
+        let cmd = Command::OpenQuery {
+            query: "  spaced \tquery  ".to_owned(),
+            activation_token: None,
+        };
+        assert_eq!(Command::parse(&format!("{}\n", cmd.as_wire())).unwrap(), cmd);
+    }
+
+    #[test]
+    fn open_query_collapses_newlines_to_stay_single_line() {
+        // The wire is newline-framed, so embedded CR/LF must be coerced rather
+        // than truncated on the read side.
+        let cmd = Command::OpenQuery {
+            query: "foo\nbar\rbaz".to_owned(),
+            activation_token: None,
+        };
+        assert_eq!(cmd.as_wire(), "query\t\tfoo bar baz");
+        assert_eq!(
+            Command::parse(&format!("{}\n", cmd.as_wire())).unwrap(),
+            Command::OpenQuery {
+                query: "foo bar baz".to_owned(),
+                activation_token: None,
+            }
+        );
+    }
+
+    #[test]
+    fn open_query_does_not_collide_with_open() {
+        // A query whose text is literally "open" must parse as OpenQuery, not
+        // the bare Open command.
+        assert_eq!(
+            Command::parse("query\t\topen").unwrap(),
+            Command::OpenQuery {
+                query: "open".to_owned(),
+                activation_token: None,
+            }
+        );
     }
 
     #[test]

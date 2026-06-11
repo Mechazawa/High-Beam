@@ -29,4 +29,10 @@ pub struct Args {
     /// present) or the platform plugin dir.
     #[arg(long, value_name = "PATH")]
     pub plugins_dir: Option<PathBuf>,
+
+    /// Open the launcher with the query box pre-filled with this text, as if
+    /// the user had typed it. Forwarded to a running daemon when one exists,
+    /// otherwise the cold-started daemon opens with it. Implies `--open`.
+    #[arg(long, value_name = "TEXT")]
+    pub query: Option<String>,
 }

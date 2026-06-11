@@ -42,6 +42,7 @@ jobs:
           - http-codes
           - obsidian
           - paper-size
+          - tutorial
           - xkcd
 
     steps:

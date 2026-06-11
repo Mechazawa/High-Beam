@@ -224,7 +224,12 @@ pub(crate) fn apply_theme(window: &QueryWindow, theme: &ThemeVariant) {
 /// `activation_token` (forwarded from the invoking process) or the
 /// compositor won't raise the surface — GNOME-Mutter opens it behind the
 /// active window. macOS uses `NSApp.activate`; X11 lets winit handle it.
-pub(crate) fn show(window: &QueryWindow, settings: &SettingsController, activation_token: Option<&str>) {
+pub(crate) fn show(
+    window: &QueryWindow,
+    settings: &SettingsController,
+    activation_token: Option<&str>,
+    initial_query: Option<&str>,
+) {
     // On Linux the previous dismiss may have left us in the `is-hidden`
     // collapsed-1×1 state instead of going through Slint's hide (which is
     // broken on Wayland — see `window_wayland`). Flip back BEFORE the show
@@ -252,6 +257,12 @@ pub(crate) fn show(window: &QueryWindow, settings: &SettingsController, activati
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     let _ = activation_token;
     window.invoke_focus_input();
+
+    // Pre-fill after the window is shown so the dispatched query renders into
+    // a live launcher view. A no-op when nothing was requested.
+    if let Some(query) = initial_query {
+        window.invoke_prefill_query(query.into());
+    }
 }
 
 /// Hide the window and clear the input so the next open starts fresh. Does
@@ -265,6 +276,10 @@ pub(crate) fn show(window: &QueryWindow, settings: &SettingsController, activati
 /// `shown` state intact.
 pub(crate) fn hide(window: &QueryWindow) {
     window.invoke_clear_input();
+    // Disarm a first-launch tutorial auto-invoke that never fired — an aborted
+    // first launch must not hijack a later manual query. The happy path clears
+    // this on fire, before any hide.
+    window.set_auto_invoke_plugin(slint::SharedString::new());
     #[cfg(target_os = "linux")]
     {
         window.set_is_hidden(true);
