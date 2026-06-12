@@ -122,11 +122,14 @@ impl Server {
     ///
     /// Each connection is read on its own short-lived thread so a client
     /// that connects and stalls can't wedge the accept loop — every later
-    /// `--open` would queue behind it forever. (A read timeout on the
-    /// accept thread would be simpler, but `SO_RCVTIMEO` proved unreliable
-    /// under load on macOS.) Per-connection failures are logged and
-    /// dropped; one bad client must not take the daemon's IPC down for
-    /// the rest of its life.
+    /// `--open` would queue behind it forever. A read timeout would be
+    /// simpler, but `send` is write-then-close, and on macOS `setsockopt`
+    /// fails with EINVAL once the peer has fully disconnected — even with
+    /// the command still readable in the buffer. Accept loses that race
+    /// whenever the machine is busy, so there is no safe place to set the
+    /// timeout. Per-connection failures are logged and dropped; one bad
+    /// client must not take the daemon's IPC down for the rest of its
+    /// life.
     pub(crate) fn run<F>(self, handler: F)
     where
         F: FnMut(Command) + Send + 'static,
