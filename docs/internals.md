@@ -106,9 +106,8 @@ never go through rquickjs: they emit host-only actions (`quit`,
 `openSettings`, `reloadPlugin`, …) the JS boundary rejects, so a plugin
 can't forge them.
 
-Power verbs (shutdown, sleep, lock, …) only emit `exec`, which is
-plugin-legal, so they're a normal bundled plugin (`plugins/system/`)
-instead, which also gives each verb its own Settings toggle.
+A verb only lives here if it needs a host-only action; power verbs just
+run a command, so they ship as the `plugins/system/` JS plugin.
 
 ## Slint gotchas
 
