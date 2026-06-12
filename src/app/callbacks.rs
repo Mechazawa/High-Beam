@@ -568,12 +568,14 @@ pub(super) fn build_view_bridge(
 ) -> Arc<RuntimeBridge> {
     let paint_tree = {
         let plugin = plugin_name.to_owned();
+        let view_stack = Arc::clone(&view_stack);
         let weak = slint_weak.clone();
         Box::new(move |handle: u64, tree_json: String| {
             let plugin = plugin.clone();
+            let view_stack = Arc::clone(&view_stack);
             let weak = weak.clone();
             slint::invoke_from_event_loop(move || {
-                paint_view_tree(&plugin, handle, &tree_json, &weak);
+                paint_view_tree(&plugin, handle, &tree_json, &view_stack, &weak);
             })
             .log_debug("views: paint_tree invoke_from_event_loop");
         })
@@ -684,7 +686,32 @@ fn paint_view_error(plugin: &str, handle: u64, message: &str, stack: &str, weak:
 /// non-rendering blocks (`button`, `input`, `textarea`, `image`, `row`,
 /// `divider`) come through as their `kind` only — Slint paints them as
 /// muted placeholders.
-fn paint_view_tree(plugin: &str, handle: u64, tree_json: &str, weak: &slint::Weak<QueryWindow>) {
+fn paint_view_tree(
+    plugin: &str,
+    handle: u64,
+    tree_json: &str,
+    view_stack: &Arc<Mutex<ViewStack>>,
+    weak: &slint::Weak<QueryWindow>,
+) {
+    // Paints are queued through invoke_from_event_loop, so one can land
+    // after its frame was already popped (Esc raced an in-flight render)
+    // — repainting here would resurrect a dead view with no frame left
+    // to pop. The same check keeps a buried frame's re-render from
+    // overwriting whatever is on top.
+    {
+        let Ok(stack) = view_stack.lock() else {
+            tracing::error!("views: stack lock poisoned; paint dropped");
+            return;
+        };
+        let is_top = stack
+            .top()
+            .is_some_and(|top| top.plugin_name == plugin && top.handle == handle);
+
+        if !is_top {
+            tracing::debug!(%plugin, handle, "views: paint for non-top frame dropped");
+            return;
+        }
+    }
     let parsed: serde_json::Value = match serde_json::from_str(tree_json) {
         Ok(v) => v,
         Err(err) => {
