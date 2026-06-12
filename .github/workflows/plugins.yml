@@ -42,6 +42,7 @@ jobs:
           - http-codes
           - obsidian
           - paper-size
+          - system
           - xkcd
 
     steps:
@@ -56,9 +57,9 @@ jobs:
           cache: 'npm'
           cache-dependency-path: plugins/package-lock.json
 
-      - name: npm ci (workspace root)
+      - name: npm install (workspace root)
         working-directory: plugins
-        run: npm ci
+        run: npm install
 
       - name: npm test
         working-directory: plugins

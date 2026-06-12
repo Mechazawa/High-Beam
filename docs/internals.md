@@ -99,12 +99,15 @@ on a fresh file.
 
 ## Built-in plugins live in the host
 
-Core system actions (shutdown / restart / lock / sleep / exit High Beam
-/ install / reload / update / settings / version readout) are
-implemented in Rust as in-process built-ins
-(`src/plugins/builtin/core.rs`). They appear alongside JS plugins in
-the result list but never go through rquickjs. A buggy plugin must
-not be able to power off the user's machine.
+Core launcher verbs (exit High Beam / install / reload / update /
+settings / version readout) are Rust in-process built-ins
+(`src/plugins/builtin/core.rs`). They render alongside JS plugins but
+never go through rquickjs: they emit host-only actions (`quit`,
+`openSettings`, `reloadPlugin`, …) the JS boundary rejects, so a plugin
+can't forge them.
+
+A verb only lives here if it needs a host-only action; power verbs just
+run a command, so they ship as the `plugins/system/` JS plugin.
 
 ## Slint gotchas
 

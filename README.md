@@ -35,7 +35,9 @@ xattr -dr com.apple.quarantine /Applications/HighBeam.app
 
 Type to query, ↑/↓ to highlight, Enter to invoke, Esc to dismiss. The
 Core built-in handles `settings`, `install <manifest-url>`, `reload`,
-`update`, `shutdown`, `sleep`, `lock`, etc.
+`update`, etc. Power verbs (`shutdown`, `sleep`, `lock`, `restart`,
+`log out`, …) ship in the bundled `system` plugin, each toggleable in
+Settings.
 
 ## Plugins
 
