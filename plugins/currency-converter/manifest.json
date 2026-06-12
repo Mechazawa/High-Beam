@@ -1,7 +1,7 @@
 {
   "name": "currency-converter",
   "displayName": "Currency Converter",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Convert between currencies — `100 USD to EUR`, `5 GBP JPY`, or `200 SEK` against your home currency. Uses open.er-api.com (no API key required).",
   "timeoutMs": 3000,
   "memoryMb": 32,

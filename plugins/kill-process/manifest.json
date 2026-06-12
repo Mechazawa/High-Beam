@@ -1,7 +1,7 @@
 {
   "name": "kill-process",
   "displayName": "Kill Process",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Find and kill a running process by name — type `kill <name>`",
   "debounceMs": 100,
   "timeoutMs": 500,

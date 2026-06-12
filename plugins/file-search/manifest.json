@@ -1,7 +1,7 @@
 {
   "name": "file-search",
   "displayName": "File Search",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Find files by name — type `find <query>`",
   "debounceMs": 150,
   "timeoutMs": 1500,

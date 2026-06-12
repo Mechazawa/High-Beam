@@ -1,7 +1,7 @@
 {
   "name": "dictionary-linux",
   "displayName": "Dictionary (Linux)",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Look up a word using WordNet or DICT — `define <word>`",
   "timeoutMs": 1500,
   "memoryMb": 32,
