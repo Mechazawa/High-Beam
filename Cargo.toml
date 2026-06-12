@@ -62,6 +62,8 @@ resources = [
     { src = "plugins/emoji-picker/emoji-data.json",    target = "plugins/emoji-picker/emoji-data.json" },
     { src = "plugins/obsidian/manifest.json",          target = "plugins/obsidian/manifest.json" },
     { src = "plugins/obsidian/plugin.js",              target = "plugins/obsidian/plugin.js" },
+    { src = "plugins/system/manifest.json",            target = "plugins/system/manifest.json" },
+    { src = "plugins/system/plugin.js",                target = "plugins/system/plugin.js" },
     { src = "themes/yosemite-spotlight.toml",          target = "themes/yosemite-spotlight.toml" },
     { src = "themes/macos-tahoe.toml",                 target = "themes/macos-tahoe.toml" },
     { src = "themes/frosty-glass.toml",                target = "themes/frosty-glass.toml" },
