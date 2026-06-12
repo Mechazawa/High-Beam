@@ -181,6 +181,26 @@ fn require_installer_fields(manifest: &Manifest) -> Result<(), InstallError> {
         return Err(InstallError::MissingField("name"));
     }
 
+    // `name` becomes `<plugins_dir>/<name>` and the destination is
+    // remove_dir_all'd before the move — a separator or `..` in a
+    // remotely-fetched manifest would delete and write outside the
+    // plugins dir.
+    if !is_single_normal_component(&manifest.name) {
+        return Err(InstallError::BadManifest(format!(
+            "name {:?} must be a plain directory name (no separators or `..`)",
+            manifest.name,
+        )));
+    }
+
+    // `entry` is written under the staging dir and read back relative to
+    // the installed plugin dir; both joins must stay inside it.
+    if !is_safe_relative_path(&manifest.entry) {
+        return Err(InstallError::BadManifest(format!(
+            "entry {:?} must be a relative path inside the plugin (no `..` or absolute components)",
+            manifest.entry,
+        )));
+    }
+
     if manifest.version.is_none() {
         return Err(InstallError::MissingField("version"));
     }
@@ -195,6 +215,22 @@ fn require_installer_fields(manifest: &Manifest) -> Result<(), InstallError> {
         (None, None) => Err(InstallError::MissingField("archiveUrl|entryUrl")),
         (Some(_), None) | (None, Some(_)) => Ok(()),
     }
+}
+
+fn is_single_normal_component(name: &str) -> bool {
+    let mut components = Path::new(name).components();
+
+    matches!(
+        (components.next(), components.next()),
+        (Some(std::path::Component::Normal(_)), None)
+    )
+}
+
+fn is_safe_relative_path(path: &str) -> bool {
+    !path.is_empty()
+        && Path::new(path)
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)))
 }
 
 /// Download a single JS entry file (for the `entryUrl` install path). Caller
@@ -654,6 +690,46 @@ mod tests {
             }
             other => panic!("expected ConflictingFields, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn require_installer_fields_rejects_traversal_in_name() {
+        for name in ["../evil", "a/b", "/abs", "..", "."] {
+            let json = format!(r#"{{ "name": {name:?}, "version": "1.0.0", "entryUrl": "https://x/p.js" }}"#);
+            let m = Manifest::parse(json.as_bytes()).unwrap();
+
+            match require_installer_fields(&m) {
+                Err(InstallError::BadManifest(msg)) => {
+                    assert!(msg.contains("name"), "wrong message for {name:?}: {msg}");
+                }
+                other => panic!("expected BadManifest for name {name:?}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn require_installer_fields_rejects_traversal_in_entry() {
+        for entry in ["../../evil.js", "/abs.js", "a/../../b.js"] {
+            let json =
+                format!(r#"{{ "name": "x", "version": "1.0.0", "entry": {entry:?}, "entryUrl": "https://x/p.js" }}"#);
+            let m = Manifest::parse(json.as_bytes()).unwrap();
+
+            match require_installer_fields(&m) {
+                Err(InstallError::BadManifest(msg)) => {
+                    assert!(msg.contains("entry"), "wrong message for {entry:?}: {msg}");
+                }
+                other => panic!("expected BadManifest for entry {entry:?}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn require_installer_fields_accepts_subdir_entry() {
+        let m = Manifest::parse(
+            br#"{ "name": "x", "version": "1.0.0", "entry": "dist/plugin.js", "entryUrl": "https://x/p.js" }"#,
+        )
+        .unwrap();
+        require_installer_fields(&m).expect("subdir entry paths are valid");
     }
 
     #[test]
