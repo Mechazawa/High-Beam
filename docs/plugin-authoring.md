@@ -100,9 +100,15 @@ tolerated so new fields can land without breaking older plugins.
   `"int"`, or `"enum"`), `label`, `default`, plus `min`/`max` (int) or
   `choices` (enum). Plugins read their own values via `highbeam:settings`
   — see [the SDK reference](./sdk-reference.md#highbeamsettings).
-- `archiveUrl` — optional; download URL for the plugin archive
-  (`.tar.gz`, `.tgz`, `.tar`, or `.zip`). Required to be installable via
-  `install <url>`. Missing ⇒ plugin is local-only.
+- `entryUrl` — optional; install URL for a single-file plugin. The
+  installer downloads just this JS file and writes it to `<plugin>/<entry>`.
+  The common case for plugins with no sibling data files. Mutually
+  exclusive with `archiveUrl`.
+- `archiveUrl` — optional; download URL for a multi-file plugin archive
+  (`.tar.gz`, `.tgz`, `.tar`, or `.zip`) — for plugins that ship data files
+  alongside the entry script. Mutually exclusive with `entryUrl`. Declaring
+  one of `entryUrl` / `archiveUrl` is what makes a plugin installable via
+  `install <url>`; with neither it's local-only.
 - `manifestUrl` — optional; canonical URL hosting this manifest. The
   `update` command re-fetches it to learn whether a newer version exists.
   Missing ⇒ plugin opts out of update checks.
@@ -255,7 +261,37 @@ for mocking patterns.
 ## Publishing + distribution
 
 Plugins can ship as install-by-URL packages so users don't have to clone
-or copy directories. The flow is:
+or copy directories. A publishable manifest declares `manifestUrl` (so
+`update` can re-fetch it) plus exactly one distribution shape: `entryUrl`
+for a single hosted JS file, or `archiveUrl` for a multi-file archive.
+
+### Single file (`entryUrl`) — the common case
+
+Most plugins are one `plugin.js` with no sibling data. Host the script and
+the manifest, then point `entryUrl` at the script:
+
+1. Host `plugin.js` and `manifest.json` somewhere your users can `GET`
+   them (a Gist's raw URLs, S3, your own CDN — anything HTTP(S)).
+
+2. Add `entryUrl` and `manifestUrl` to your `manifest.json`:
+
+   ```json
+   {
+     "name": "my-plugin",
+     "version": "1.0.0",
+     "entryUrl": "https://example.com/my-plugin/plugin.js",
+     "manifestUrl": "https://example.com/my-plugin/manifest.json"
+   }
+   ```
+
+The installer downloads `entryUrl` and writes it to `<plugin>/<entry>`
+(`entry` defaults to `plugin.js`), then drops the fetched `manifest.json`
+alongside it.
+
+### Multi-file archive (`archiveUrl`)
+
+When the plugin ships data files next to its entry script, package the
+whole directory instead:
 
 1. Build a `.tar.gz` (or `.zip`) of your plugin directory — anything that
    would land under `<user-plugins-dir>/<name>/` after extraction. The
@@ -282,8 +318,8 @@ or copy directories. The flow is:
    }
    ```
 
-4. Publish the same `manifest.json` at `manifestUrl`. The host re-fetches
-   it on `update` to discover new versions.
+Either way, publish the same `manifest.json` at `manifestUrl` — the host
+re-fetches it on `update` to discover new versions.
 
 Users install with:
 
@@ -296,8 +332,9 @@ the launcher result list.
 
 ### What the installer enforces
 
-- The fetched manifest must have `name`, `version`, and `archiveUrl`.
-  Any missing field aborts the install.
+- The fetched manifest must have `name`, `version`, and exactly one of
+  `entryUrl` / `archiveUrl`. A missing pair, or both at once, aborts the
+  install.
 - If the archive bundles its own `manifest.json`, the installer
   cross-checks it against the URL-fetched manifest:
   - `version` must match exactly (rejected on mismatch).

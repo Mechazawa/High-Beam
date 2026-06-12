@@ -210,8 +210,9 @@ export type QueryFn = (
  * Shape of `manifest.json`. Required: `name`. Everything else is optional —
  * the host applies defaults at load time.
  *
- * `archiveUrl` + `manifestUrl` opt a plugin in to install-by-URL + update
- * checks; without them the plugin is local-only. See
+ * To be installable via `install <manifestUrl>`, a manifest declares
+ * `manifestUrl` plus exactly one of `entryUrl` (single JS file) or
+ * `archiveUrl` (multi-file archive); with neither it's local-only. See
  * docs/plugin-authoring.md for publication guidance.
  */
 export interface Manifest {
@@ -219,6 +220,7 @@ export interface Manifest {
     displayName?: string;
     version?: string;
     description?: string;
+    /** Local entry script the host loads on startup. Defaults to `plugin.js`. */
     entry?: string;
     debounceMs?: number;
     timeoutMs?: number;
@@ -226,7 +228,17 @@ export interface Manifest {
     capabilities?: readonly string[];
     platforms?: readonly ('macos' | 'linux')[];
     options?: readonly OptionDef[];
-    /** Download URL for the plugin archive (`.tar.gz`, `.tgz`, `.tar`, `.zip`). */
+    /**
+     * Install URL for a single-file plugin: the installer downloads just
+     * this JS file and writes it to `<plugin>/<entry>`. The common case.
+     * Mutually exclusive with `archiveUrl`.
+     */
+    entryUrl?: string;
+    /**
+     * Download URL for a multi-file plugin archive (`.tar.gz`, `.tgz`,
+     * `.tar`, `.zip`) — for plugins that ship sibling data files. Mutually
+     * exclusive with `entryUrl`.
+     */
     archiveUrl?: string;
     /** Canonical URL hosting *this* manifest. `update` re-fetches it. */
     manifestUrl?: string;

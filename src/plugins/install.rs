@@ -151,8 +151,9 @@ fn client() -> &'static Client {
 /// # Errors
 ///
 /// Returns [`InstallError::Fetch`] for transport problems, `BadManifest` for
-/// parse failures, and `MissingField` when one of `name` / `version` /
-/// `archiveUrl` is absent.
+/// parse failures, and `MissingField` when `name` / `version` or both of
+/// `archiveUrl` / `entryUrl` are absent (and `ConflictingFields` when both
+/// distribution URLs are set).
 pub async fn fetch_and_validate_manifest(url: &str) -> Result<Manifest, InstallError> {
     let response = client()
         .get(url)
