@@ -13,6 +13,8 @@ import os from "node:os";
 const isMacOS = () => os.platform() === "darwin";
 const isLinux = () => os.platform() === "linux";
 
+const HOME = os.homedir();
+
 const RESULT_LIMIT = 20;
 // Below pinned things (which sit at 100) but above zero-weight stragglers,
 // so file matches don't fight calculator/dnd-style pinned plugins for the
@@ -47,7 +49,7 @@ function parseQuery(input) {
 async function runMdfind(query, signal) {
     const result = await exec(
         "mdfind",
-        ["-onlyin", os.homedir(), query],
+        ["-onlyin", HOME, query],
         { signal },
     );
     if (result.code !== 0) return { paths: [], failed: true };

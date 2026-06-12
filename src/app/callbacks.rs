@@ -703,11 +703,8 @@ fn paint_view_tree(
             tracing::error!("views: stack lock poisoned; paint dropped");
             return;
         };
-        let is_top = stack
-            .top()
-            .is_some_and(|top| top.plugin_name == plugin && top.handle == handle);
 
-        if !is_top {
+        if !stack.is_top(plugin, handle) {
             tracing::debug!(%plugin, handle, "views: paint for non-top frame dropped");
             return;
         }

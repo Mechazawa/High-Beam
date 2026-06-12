@@ -134,21 +134,14 @@ impl Server {
         let handler = Arc::new(Mutex::new(handler));
 
         for stream in self.listener.incoming() {
-            let stream = match stream {
-                Ok(s) => s,
-                Err(err) => {
-                    tracing::warn!(%err, "ipc: accept failed");
-                    continue;
-                }
+            let Some(stream) = stream.log_warn("ipc: accept failed") else {
+                continue;
             };
             let handler = Arc::clone(&handler);
-            let spawned = thread::Builder::new()
+            thread::Builder::new()
                 .name("highbeam-ipc-conn".into())
-                .spawn(move || handle_connection(stream, &handler));
-
-            if let Err(err) = spawned {
-                tracing::warn!(%err, "ipc: connection thread spawn failed");
-            }
+                .spawn(move || handle_connection(stream, &handler))
+                .log_warn("ipc: connection thread spawn failed");
         }
     }
 }

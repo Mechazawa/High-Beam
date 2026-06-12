@@ -218,12 +218,7 @@ fn require_installer_fields(manifest: &Manifest) -> Result<(), InstallError> {
 }
 
 fn is_single_normal_component(name: &str) -> bool {
-    let mut components = Path::new(name).components();
-
-    matches!(
-        (components.next(), components.next()),
-        (Some(std::path::Component::Normal(_)), None)
-    )
+    is_safe_relative_path(name) && Path::new(name).components().count() == 1
 }
 
 fn is_safe_relative_path(path: &str) -> bool {
@@ -466,6 +461,14 @@ pub fn find_payload_root(extracted_dir: &Path) -> PathBuf {
 ///
 /// Returns [`InstallError::Io`] on any filesystem step.
 pub fn move_into_plugins_dir(payload_root: &Path, plugins_dir: &Path, name: &str) -> Result<PathBuf, InstallError> {
+    // Backstop for the remove_dir_all below — the installer validates
+    // manifest names upstream, but this is a pub fn and the destination
+    // is destructive, so don't trust callers to have done so.
+    if !is_single_normal_component(name) {
+        return Err(InstallError::BadManifest(format!(
+            "name {name:?} must be a plain directory name (no separators or `..`)",
+        )));
+    }
     std::fs::create_dir_all(plugins_dir).map_err(|e| InstallError::Io(e.to_string()))?;
 
     let destination = plugins_dir.join(name);
