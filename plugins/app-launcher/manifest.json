@@ -1,7 +1,7 @@
 {
   "name": "app-launcher",
   "displayName": "App Launcher",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Find and open installed applications",
   "debounceMs": 100,
   "timeoutMs": 800,
@@ -13,8 +13,7 @@
   "capabilities": [
     "actions",
     "fs.read",
-    "icons",
-    "system.exec"
+    "icons"
   ],
   "manifestUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/app-launcher/manifest.json",
   "entryUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/app-launcher/plugin.js"

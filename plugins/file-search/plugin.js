@@ -39,13 +39,15 @@ function parseQuery(input) {
     return body;
 }
 
-// `mdfind -onlyin ~ "<query>"` scopes Spotlight to the user's home dir.
+// `mdfind -onlyin <home> "<query>"` scopes Spotlight to the user's home
+// dir. exec spawns without a shell, so `~` would reach mdfind as a literal
+// path and silently match nothing — pass the expanded home dir instead.
 // Output is newline-separated absolute paths; trailing newline is normal.
 // Empty stdout (no matches) is *not* an error — the exit code is still 0.
 async function runMdfind(query, signal) {
     const result = await exec(
         "mdfind",
-        ["-onlyin", "~", query],
+        ["-onlyin", os.homedir(), query],
         { signal },
     );
     if (result.code !== 0) return { paths: [], failed: true };
