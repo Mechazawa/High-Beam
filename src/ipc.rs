@@ -4,11 +4,16 @@
 //! so a fixed read buffer is fine. Length-prefixed framing waits until we
 //! carry payloads bigger than a few bytes.
 
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 use crate::logging::LogErr;
+
+/// Commands are a few bytes; anything past this is not a real client.
+const MAX_COMMAND_BYTES: u64 = 4096;
 
 /// Commands accepted by the running daemon. Wire format is stable; do not
 /// rename without considering compat with running daemons.
@@ -114,25 +119,62 @@ impl Server {
     /// Block on the listener, calling `handler` for each parsed command.
     /// Intended pattern: dedicate a thread that owns the `Server` and
     /// forwards commands to the UI thread.
-    pub(crate) fn run<F>(self, mut handler: F) -> io::Result<()>
+    ///
+    /// Each connection is read on its own short-lived thread so a client
+    /// that connects and stalls can't wedge the accept loop — every later
+    /// `--open` would queue behind it forever. (A read timeout on the
+    /// accept thread would be simpler, but `SO_RCVTIMEO` proved unreliable
+    /// under load on macOS.) Per-connection failures are logged and
+    /// dropped; one bad client must not take the daemon's IPC down for
+    /// the rest of its life.
+    pub(crate) fn run<F>(self, handler: F)
     where
         F: FnMut(Command) + Send + 'static,
     {
+        let handler = Arc::new(Mutex::new(handler));
+
         for stream in self.listener.incoming() {
-            let stream = stream?;
-            let mut reader = BufReader::new(stream);
-            let mut line = String::new();
+            let stream = match stream {
+                Ok(s) => s,
+                Err(err) => {
+                    tracing::warn!(%err, "ipc: accept failed");
+                    continue;
+                }
+            };
+            let handler = Arc::clone(&handler);
+            let spawned = thread::Builder::new()
+                .name("highbeam-ipc-conn".into())
+                .spawn(move || handle_connection(stream, &handler));
 
-            if reader.read_line(&mut line)? == 0 {
-                continue;
-            }
-
-            match Command::parse(&line) {
-                Ok(cmd) => handler(cmd),
-                Err(err) => tracing::warn!(%err, "ipc: rejecting unknown command"),
+            if let Err(err) = spawned {
+                tracing::warn!(%err, "ipc: connection thread spawn failed");
             }
         }
-        Ok(())
+    }
+}
+
+fn handle_connection<F>(stream: UnixStream, handler: &Mutex<F>)
+where
+    F: FnMut(Command),
+{
+    let mut reader = BufReader::new(stream.take(MAX_COMMAND_BYTES));
+    let mut line = String::new();
+
+    match reader.read_line(&mut line) {
+        Ok(0) => return,
+        Ok(_) => {}
+        Err(err) => {
+            tracing::warn!(%err, "ipc: read failed");
+            return;
+        }
+    }
+
+    match Command::parse(&line) {
+        Ok(cmd) => match handler.lock() {
+            Ok(mut handler) => handler(cmd),
+            Err(err) => tracing::error!(%err, "ipc: handler mutex poisoned; command dropped"),
+        },
+        Err(err) => tracing::warn!(%err, "ipc: rejecting unknown command"),
     }
 }
 
@@ -200,7 +242,7 @@ mod tests {
 
         let (tx, rx) = mpsc::channel();
         let handle = thread::spawn(move || {
-            let _ = server.run(move |cmd| {
+            server.run(move |cmd| {
                 let _ = tx.send(cmd);
             });
         });
