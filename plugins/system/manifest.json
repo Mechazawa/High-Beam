@@ -1,0 +1,67 @@
+{
+  "name": "system",
+  "displayName": "System",
+  "version": "0.1.0",
+  "description": "System power commands: `shutdown`, `sleep`, `restart`, `lock`, `log out`, `screensaver`, etc. Toggle each one in Settings.",
+  "timeoutMs": 100,
+  "memoryMb": 16,
+  "capabilities": ["actions"],
+  "manifestUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/system/manifest.json",
+  "entryUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/system/plugin.js",
+  "options": [
+    {
+      "key": "enableShutdown",
+      "type": "bool",
+      "label": "Shutdown",
+      "default": true
+    },
+    {
+      "key": "enableSleep",
+      "type": "bool",
+      "label": "Sleep",
+      "default": true
+    },
+    {
+      "key": "enableRestart",
+      "type": "bool",
+      "label": "Restart / reboot",
+      "default": true
+    },
+    {
+      "key": "enableLock",
+      "type": "bool",
+      "label": "Lock screen",
+      "default": true
+    },
+    {
+      "key": "enableLogout",
+      "type": "bool",
+      "label": "Log out",
+      "default": true
+    },
+    {
+      "key": "enableScreensaver",
+      "type": "bool",
+      "label": "Screensaver",
+      "default": true
+    },
+    {
+      "key": "enableDisplaySleep",
+      "type": "bool",
+      "label": "Display sleep",
+      "default": true
+    },
+    {
+      "key": "enableEmptyTrash",
+      "type": "bool",
+      "label": "Empty trash",
+      "default": true
+    },
+    {
+      "key": "enableEject",
+      "type": "bool",
+      "label": "Eject disks (macOS only)",
+      "default": true
+    }
+  ]
+}

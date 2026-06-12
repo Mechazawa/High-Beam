@@ -1,8 +1,8 @@
-//! Core system actions, implemented in Rust so a buggy plugin can't power
-//! off the machine.
+//! Core launcher verbs: quit, settings, plugin install/reload/update, version
+//! readout.
 //!
-//! Keyword prefix-match, case-insensitive. Score scales by how much of the
-//! keyword has been typed (`query_len / keyword_len`), capped to 100.
+//! Keyword prefix-match, case-insensitive; score scales by typed fraction
+//! (`query_len / keyword_len`), capped to 100.
 
 use std::sync::LazyLock;
 
@@ -26,8 +26,7 @@ struct Keyword {
 }
 
 static KEYWORDS: LazyLock<Vec<Keyword>> = LazyLock::new(|| {
-    #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
-    let mut kws = vec![
+    vec![
         Keyword {
             label: "exit High Beam",
             subtitle: Some("quit the launcher daemon"),
@@ -37,52 +36,6 @@ static KEYWORDS: LazyLock<Vec<Keyword>> = LazyLock::new(|| {
             label: "settings",
             subtitle: Some("open the High Beam settings screen"),
             make_action: || Action::OpenSettings,
-        },
-        Keyword {
-            label: "shutdown",
-            subtitle: Some("shut down this computer"),
-            make_action: shutdown_action,
-        },
-        Keyword {
-            label: "sleep",
-            subtitle: Some("put this computer to sleep"),
-            make_action: sleep_action,
-        },
-        Keyword {
-            label: "restart",
-            subtitle: Some("restart this computer"),
-            make_action: restart_action,
-        },
-        // Alias for restart — same underlying action, different muscle memory.
-        Keyword {
-            label: "reboot",
-            subtitle: Some("restart this computer"),
-            make_action: restart_action,
-        },
-        Keyword {
-            label: "lock",
-            subtitle: Some("lock the screen"),
-            make_action: lock_action,
-        },
-        Keyword {
-            label: "log out",
-            subtitle: Some("end this user session"),
-            make_action: logout_action,
-        },
-        Keyword {
-            label: "screensaver",
-            subtitle: Some("start the screensaver"),
-            make_action: screensaver_action,
-        },
-        Keyword {
-            label: "display sleep",
-            subtitle: Some("turn the display off without sleeping the machine"),
-            make_action: display_sleep_action,
-        },
-        Keyword {
-            label: "empty trash",
-            subtitle: Some("permanently delete trashed files"),
-            make_action: empty_trash_action,
         },
         Keyword {
             label: "check for updates",
@@ -96,175 +49,8 @@ static KEYWORDS: LazyLock<Vec<Keyword>> = LazyLock::new(|| {
             subtitle: None,
             make_action: || Action::Noop,
         },
-    ];
-    // `eject` only ships on macOS — `gio mount --eject` / `udisksctl` would
-    // need a target device, so a bare verb makes no sense on Linux. The
-    // `#[cfg]` gate keeps `eject_action` from being referenced at all on
-    // non-macOS builds, where the function is not compiled.
-    #[cfg(target_os = "macos")]
-    kws.push(Keyword {
-        label: "eject",
-        subtitle: Some("eject all ejectable disks"),
-        make_action: eject_action,
-    });
-    kws
+    ]
 });
-
-fn shutdown_action() -> Action {
-    #[cfg(target_os = "macos")]
-    {
-        Action::Exec {
-            cmd: "/usr/bin/osascript".into(),
-            args: vec!["-e".into(), "tell application \"Finder\" to shut down".into()],
-        }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Action::Exec {
-            cmd: "systemctl".into(),
-            args: vec!["poweroff".into()],
-        }
-    }
-}
-
-fn sleep_action() -> Action {
-    #[cfg(target_os = "macos")]
-    {
-        Action::Exec {
-            cmd: "/usr/bin/osascript".into(),
-            args: vec!["-e".into(), "tell application \"Finder\" to sleep".into()],
-        }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Action::Exec {
-            cmd: "systemctl".into(),
-            args: vec!["suspend".into()],
-        }
-    }
-}
-
-fn restart_action() -> Action {
-    #[cfg(target_os = "macos")]
-    {
-        Action::Exec {
-            cmd: "/usr/bin/osascript".into(),
-            args: vec!["-e".into(), "tell application \"Finder\" to restart".into()],
-        }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Action::Exec {
-            cmd: "systemctl".into(),
-            args: vec!["reboot".into()],
-        }
-    }
-}
-
-fn lock_action() -> Action {
-    #[cfg(target_os = "macos")]
-    {
-        Action::Exec {
-            cmd: "/usr/bin/osascript".into(),
-            args: vec![
-                "-e".into(),
-                "tell application \"System Events\" to keystroke \"q\" using {control down, command down}".into(),
-            ],
-        }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Action::Exec {
-            cmd: "loginctl".into(),
-            args: vec!["lock-session".into()],
-        }
-    }
-}
-
-fn logout_action() -> Action {
-    #[cfg(target_os = "macos")]
-    {
-        Action::Exec {
-            cmd: "/usr/bin/osascript".into(),
-            args: vec!["-e".into(), "tell application \"System Events\" to log out".into()],
-        }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        // `terminate-session` needs a session id; `kill-session self` works
-        // from inside the session without one. `sh -c` lets us fall back at
-        // runtime: env var present → terminate; otherwise kill self.
-        Action::Exec {
-            cmd: "/bin/sh".into(),
-            args: vec![
-                "-c".into(),
-                "if [ -n \"$XDG_SESSION_ID\" ]; then loginctl terminate-session \"$XDG_SESSION_ID\"; else loginctl kill-session self; fi".into(),
-            ],
-        }
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn eject_action() -> Action {
-    Action::Exec {
-        cmd: "/usr/bin/osascript".into(),
-        args: vec![
-            "-e".into(),
-            "tell application \"Finder\" to eject (every disk whose ejectable is true)".into(),
-        ],
-    }
-}
-
-fn screensaver_action() -> Action {
-    #[cfg(target_os = "macos")]
-    {
-        Action::Exec {
-            cmd: "/usr/bin/open".into(),
-            args: vec!["-a".into(), "ScreenSaverEngine".into()],
-        }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Action::Exec {
-            cmd: "xdg-screensaver".into(),
-            args: vec!["activate".into()],
-        }
-    }
-}
-
-fn display_sleep_action() -> Action {
-    #[cfg(target_os = "macos")]
-    {
-        Action::Exec {
-            cmd: "/usr/bin/pmset".into(),
-            args: vec!["displaysleepnow".into()],
-        }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Action::Exec {
-            cmd: "xset".into(),
-            args: vec!["dpms".into(), "force".into(), "off".into()],
-        }
-    }
-}
-
-fn empty_trash_action() -> Action {
-    #[cfg(target_os = "macos")]
-    {
-        Action::Exec {
-            cmd: "/usr/bin/osascript".into(),
-            args: vec!["-e".into(), "tell application \"Finder\" to empty trash".into()],
-        }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Action::Exec {
-            cmd: "gio".into(),
-            args: vec!["trash".into(), "--empty".into()],
-        }
-    }
-}
 
 #[must_use]
 pub(crate) fn query(input: &str, plugin_names: &[&str]) -> Vec<StreamedResult> {
@@ -471,30 +257,30 @@ mod tests {
 
     #[test]
     fn prefix_match_is_case_insensitive() {
-        let results = query("SHUT");
-        assert!(results.iter().any(|r| r.result.title == "shutdown"));
+        let results = query("SET");
+        assert!(results.iter().any(|r| r.result.title == "settings"));
     }
 
     #[test]
     fn exact_match_scores_full() {
-        let results = query("shutdown");
-        let shutdown = results
+        let results = query("settings");
+        let settings = results
             .iter()
-            .find(|r| r.result.title == "shutdown")
-            .expect("shutdown result");
-        assert!((shutdown.result.weight - 100.0).abs() < 1e-6);
+            .find(|r| r.result.title == "settings")
+            .expect("settings result");
+        assert!((settings.result.weight - 100.0).abs() < 1e-6);
     }
 
     #[test]
     fn partial_match_scores_proportionally() {
-        let results = query("sh");
-        let shutdown = results
+        let results = query("se");
+        let settings = results
             .iter()
-            .find(|r| r.result.title == "shutdown")
-            .expect("shutdown result");
+            .find(|r| r.result.title == "settings")
+            .expect("settings result");
         #[allow(clippy::cast_precision_loss)]
-        let expected = (2.0 / "shutdown".len() as f64) * 100.0;
-        assert!((shutdown.result.weight - expected).abs() < 1e-6);
+        let expected = (2.0 / "settings".len() as f64) * 100.0;
+        assert!((settings.result.weight - expected).abs() < 1e-6);
     }
 
     #[test]
@@ -545,64 +331,11 @@ mod tests {
     }
 
     #[test]
-    fn shutdown_action_is_exec_on_macos() {
-        let results = query("shutdown");
-        let r = &results
-            .iter()
-            .find(|r| r.result.title == "shutdown")
-            .expect("shutdown result")
-            .result;
-
-        match &r.action {
-            Action::Exec { cmd, .. } => {
-                #[cfg(target_os = "macos")]
-                assert_eq!(cmd, "/usr/bin/osascript");
-                #[cfg(not(target_os = "macos"))]
-                assert_eq!(cmd, "systemctl");
-            }
-            other => panic!("expected Exec, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn reboot_aliases_restart_action() {
-        let restart = query("restart")
-            .into_iter()
-            .find(|r| r.result.title == "restart")
-            .expect("restart result");
-        let reboot = query("reboot")
-            .into_iter()
-            .find(|r| r.result.title == "reboot")
-            .expect("reboot result");
-
-        // Same Action shape — different labels, identical command + args.
-        match (restart.result.action, reboot.result.action) {
-            (Action::Exec { cmd: c1, args: a1 }, Action::Exec { cmd: c2, args: a2 }) => {
-                assert_eq!(c1, c2);
-                assert_eq!(a1, a2);
-            }
-            other => panic!("expected Exec/Exec, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn log_out_matches_full_phrase() {
-        let results = query("log out");
-        let r = results
-            .iter()
-            .find(|r| r.result.title == "log out")
-            .expect("log out result");
-        assert!(matches!(r.result.action, Action::Exec { .. }));
-    }
-
-    #[test]
-    fn new_verbs_are_unpinned() {
-        for q in ["reboot", "log out", "screensaver", "display sleep", "empty trash"] {
+    fn core_verbs_are_unpinned() {
+        // Core results never pin; frecency ranks them like any other result.
+        for q in ["settings", "exit", "check for updates"] {
             let results = query(q);
-            assert!(
-                results.iter().any(|r| !r.result.pinned),
-                "expected unpinned result for {q}"
-            );
+            assert!(results.iter().any(|r| !r.result.pinned), "expected a result for {q}");
             assert!(
                 results.iter().all(|r| !r.result.pinned),
                 "no core result should be pinned ({q})"
@@ -610,34 +343,15 @@ mod tests {
         }
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
-    fn eject_is_present_on_macos() {
-        let results = query("eject");
-        let r = results
-            .iter()
-            .find(|r| r.result.title == "eject")
-            .expect("eject result on macOS");
-
-        match &r.result.action {
-            Action::Exec { cmd, args } => {
-                assert_eq!(cmd, "/usr/bin/osascript");
-                assert!(args.iter().any(|a| a.contains("eject")));
-            }
-            other => panic!("expected Exec, got {other:?}"),
+    fn power_verbs_not_owned_by_core() {
+        // Power verbs belong to the `system` plugin, not core.
+        for q in ["shutdown", "reboot", "eject", "log out"] {
+            assert!(
+                query(q).iter().all(|r| r.result.title != q),
+                "core must not own the {q:?} verb"
+            );
         }
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn eject_is_absent_on_linux() {
-        // `gio mount --eject` needs a target device, so the bare verb has
-        // no sensible Linux command — the table omits it entirely.
-        let results = query("eject");
-        assert!(
-            results.iter().all(|r| r.result.title != "eject"),
-            "eject should not appear on Linux, got {results:?}"
-        );
     }
 
     #[test]
