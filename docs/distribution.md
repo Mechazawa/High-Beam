@@ -100,6 +100,69 @@ the packager wraps `xcrun notarytool` + `stapler` directly. Apple's
 [Notarizing macOS software](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)
 docs cover the cert + notarytool setup.
 
+## Auto-update (macOS)
+
+The packaged `.app` self-updates in place via
+[`cargo-packager-updater`](https://docs.rs/cargo-packager-updater) — the
+sibling crate to the `cargo-packager` bundler above. The flow lives in
+`src/updater.rs`:
+
+1. A background thread (and the Core `check for updates` verb) fetches
+   `latest.json` from
+   `https://github.com/Mechazawa/high-beam/releases/latest/download/latest.json`.
+   The `latest/download` alias always resolves to the newest non-prerelease,
+   so there are no GitHub API calls or rate limits.
+2. If `latest.json`'s `version` is newer, the user sees an
+   `Update available → vX.Y.Z` row in the launcher. Enter downloads the
+   signed `.app.tar.gz`, minisign-verifies it, swaps the bundle, and
+   relaunches.
+
+**Gating.** The whole feature is disabled unless the running binary lives
+inside a `.app` (`current_exe()` has a `.app/Contents/MacOS` ancestor). That
+one check excludes Homebrew, `cargo install`, and dev runs — none of which
+should self-update. Linux compiles the updater to no-ops.
+
+### Enabling it (one-time)
+
+The updater is inert until a signing key exists. To turn it on:
+
+1. Generate a minisign keypair:
+
+   ```sh
+   cargo packager signer generate
+   ```
+
+2. Paste the printed **public** key into `UPDATER_PUBKEY` in
+   `src/updater.rs` (it is not secret; it ships in the binary).
+3. Add the **private** key + its password as repo secrets
+   `UPDATER_PRIVATE_KEY` and `UPDATER_KEY_PASSWORD`. The release workflow
+   (`.github/workflows/release.yml`) then tars + signs the `.app`, generates
+   `latest.json`, and attaches both to the release. Confirm the
+   `cargo packager signer sign` invocation in the workflow against the help
+   output of your installed `cargo-packager` version.
+
+This is separate from Apple codesigning (above). minisign protects the update
+channel; Gatekeeper trust is a different axis.
+
+> **Single-arch.** GitHub's `macos-latest` runner is arm64, so the published
+> `.app.tar.gz` is arm64-only — the same limitation the `.dmg` already has.
+> Until the release builds both arches and keys `latest.json` by
+> `darwin-<arch>`, Intel Macs should keep updating via the `.dmg`.
+
+### Post-update bundled resources
+
+After an app update lands a new bundle, the next launch reconciles the
+shipped plugins + themes into the user's dirs
+(`src/bundle_install.rs::reconcile_bundled_resources`): plugins and themes
+newly added to the bundle are installed, and existing ones the bundle ships a
+newer copy of are updated — but only when the user hasn't edited their copy
+since we last shipped it. Plugins are gated by manifest `version`
+(`is_newer_version`), themes by content hash (no version field). The
+"what did we last ship" record lives in `shipped-resources.json` in the
+config dir; the reconcile runs once per app-version change and never clobbers
+a user-edited resource. This also covers manual `.dmg` re-installs, not just
+self-update.
+
 ## Linux
 
 Four shipped package formats, in the user-stated priority order. The
@@ -233,6 +296,8 @@ Optional secrets:
 |--------|---------|
 | `MACOS_CERT_P12_BASE64` | Base64 of the codesigning `.p12` (cert + key). Missing → ad-hoc-signed bundle, `xattr` step still required. |
 | `MACOS_CERT_PASSWORD` | The PKCS12 passphrase. |
+| `UPDATER_PRIVATE_KEY` | minisign private key for the self-updater (`cargo packager signer generate`). Missing → no `latest.json`, updater stays inert. See [Auto-update](#auto-update-macos). |
+| `UPDATER_KEY_PASSWORD` | Password for `UPDATER_PRIVATE_KEY`. |
 
 Release notes are AI-summarised via
 [GitHub Models](https://github.com/marketplace/models) using the

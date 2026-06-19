@@ -23,10 +23,84 @@ use crate::logging::LogErr;
 use crate::ui::ViewBlock;
 
 /// Shared slot. `None` when no host view is live.
-pub(super) type HostView = Arc<Mutex<Option<UpdateViewState>>>;
+pub(super) type HostView = Arc<Mutex<Option<HostViewState>>>;
 
 pub(super) fn new_slot() -> HostView {
     Arc::new(Mutex::new(None))
+}
+
+/// The flavours of host-driven view. Both originate in Rust (no plugin
+/// context) and paint into the same Slint view-frame surface: plugin-`update`
+/// progress and macOS app self-update progress.
+pub(super) enum HostViewState {
+    PluginUpdate(UpdateViewState),
+    AppUpdate(AppUpdateViewState),
+}
+
+impl HostViewState {
+    /// The cancel token both variants carry — fired when the view closes.
+    pub(super) fn cancel(&self) -> &CancellationToken {
+        match self {
+            Self::PluginUpdate(state) => &state.cancel,
+            Self::AppUpdate(state) => &state.cancel,
+        }
+    }
+
+    /// Mutable access to the plugin-update state, `None` for the app-update
+    /// variant. Lets the plugin-update pipeline mutate its view without
+    /// reaching for the enum at every call site.
+    pub(super) fn as_plugin_update_mut(&mut self) -> Option<&mut UpdateViewState> {
+        match self {
+            Self::PluginUpdate(state) => Some(state),
+            Self::AppUpdate(_) => None,
+        }
+    }
+}
+
+/// App self-update progress — a single coarse phase, painted as one frame.
+/// (`cargo-packager-updater` exposes no granular download progress, so the
+/// download/install collapses into one "working" phase.)
+pub(super) struct AppUpdateViewState {
+    pub phase: AppUpdatePhase,
+    pub cancel: CancellationToken,
+}
+
+impl AppUpdateViewState {
+    pub(super) fn new() -> Self {
+        Self {
+            phase: AppUpdatePhase::Checking,
+            cancel: CancellationToken::new(),
+        }
+    }
+}
+
+pub(super) enum AppUpdatePhase {
+    /// Hitting the release endpoint.
+    Checking,
+    /// Already on the newest version.
+    UpToDate,
+    /// Downloading + verifying + swapping the bundle; relaunch follows.
+    Installing { version: String },
+    /// Check or install failed.
+    Failed { error: String },
+}
+
+/// Replace the live app-update phase and repaint. No-op when the slot is empty
+/// or holds a plugin-update view (the user closed / swapped it mid-run).
+pub(super) fn set_app_phase(slot: &HostView, weak: &slint::Weak<QueryWindow>, phase: AppUpdatePhase) {
+    {
+        let Ok(mut guard) = slot.lock() else {
+            tracing::error!("host_view: slot lock poisoned during app-update");
+            return;
+        };
+
+        match guard.as_mut() {
+            Some(HostViewState::AppUpdate(state)) => state.phase = phase,
+            _ => return,
+        }
+    }
+
+    schedule_paint(slot, weak);
 }
 
 /// Per-plugin update progress, painted as a single view-frame.
@@ -61,7 +135,7 @@ pub(super) fn take_and_cancel(slot: &HostView) -> bool {
     };
     let Some(state) = guard.take() else { return false };
 
-    state.cancel.cancel();
+    state.cancel().cancel();
     true
 }
 
@@ -114,7 +188,50 @@ pub(super) fn paint(slot: &HostView, weak: &slint::Weak<QueryWindow>) {
     };
     let Some(state) = guard.as_ref() else { return };
 
-    paint_update(&window, state);
+    match state {
+        HostViewState::PluginUpdate(state) => paint_update(&window, state),
+        HostViewState::AppUpdate(state) => paint_app_update(&window, state),
+    }
+}
+
+/// Paint the app self-update view: heading + spinner (while working) and an
+/// outcome line for the terminal phases. The success path never paints — the
+/// process relaunches out from under it.
+fn paint_app_update(window: &QueryWindow, state: &AppUpdateViewState) {
+    let mut blocks = Vec::with_capacity(3);
+
+    let (heading, detail, working) = match &state.phase {
+        AppUpdatePhase::Checking => ("Checking for updates…".to_owned(), None, true),
+        AppUpdatePhase::UpToDate => (
+            "High Beam is up to date".to_owned(),
+            Some(("You're on the latest version.".to_owned(), "success")),
+            false,
+        ),
+        AppUpdatePhase::Installing { version } => (
+            format!("Updating to v{version}…"),
+            Some((
+                "Downloading and installing — High Beam will relaunch.".to_owned(),
+                "muted",
+            )),
+            true,
+        ),
+        AppUpdatePhase::Failed { error } => ("Update failed".to_owned(), Some((error.clone(), "error")), false),
+    };
+
+    blocks.push(text_block("heading", &heading, "", ""));
+
+    if working {
+        blocks.push(spinner_block(""));
+    }
+
+    if let Some((line, tone)) = detail {
+        blocks.push(text_block("text", &line, tone, ""));
+    }
+
+    window.set_view_frame_title("Update High Beam".into());
+    window.set_view_has_title(true);
+    sync_view_blocks_model(window, blocks);
+    window.invoke_show_view_frame();
 }
 
 /// Schedule a `paint` on the Slint event loop. Safe to call from the
