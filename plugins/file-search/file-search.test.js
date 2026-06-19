@@ -4,7 +4,8 @@ import { describe, expect, test, vi } from 'vitest';
 // can flip the reported OS per test without touching the real platform.
 vi.mock('node:os', () => {
     const platform = vi.fn(() => 'darwin');
-    return { default: { platform }, platform };
+    const homedir = vi.fn(() => '/Users/me');
+    return { default: { platform, homedir }, platform, homedir };
 });
 
 const ICON_SENTINEL = 'data:image/png;base64,SENTINEL';
@@ -95,7 +96,7 @@ describe('file-search macOS', () => {
 
         expect(system.exec).toHaveBeenCalledWith(
             'mdfind',
-            ['-onlyin', '~', 'report'],
+            ['-onlyin', '/Users/me', 'report'],
             expect.objectContaining({}),
         );
         expect(results).toHaveLength(3);

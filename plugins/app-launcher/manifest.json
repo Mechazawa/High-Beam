@@ -13,8 +13,7 @@
   "capabilities": [
     "actions",
     "fs.read",
-    "icons",
-    "system.exec"
+    "icons"
   ],
   "manifestUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/app-launcher/manifest.json",
   "entryUrl": "https://raw.githubusercontent.com/Mechazawa/High-Beam/master/plugins/app-launcher/plugin.js"

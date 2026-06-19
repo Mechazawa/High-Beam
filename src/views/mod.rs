@@ -123,6 +123,13 @@ impl ViewStack {
         self.frames.last()
     }
 
+    /// Whether `(plugin, handle)` identifies the visible (top) frame.
+    #[must_use]
+    pub fn is_top(&self, plugin: &str, handle: u64) -> bool {
+        self.top()
+            .is_some_and(|top| top.plugin_name == plugin && top.handle == handle)
+    }
+
     /// Iterate every frame bottom-up.
     pub fn iter(&self) -> std::slice::Iter<'_, ViewFrame> {
         self.frames.iter()

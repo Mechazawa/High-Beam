@@ -202,7 +202,7 @@ fn spawn_ipc_listener(
 ) -> io::Result<()> {
     let server = Server::bind(socket_path)?;
     thread::Builder::new().name("highbeam-ipc".into()).spawn(move || {
-        let result = server.run(move |cmd| match cmd {
+        server.run(move |cmd| match cmd {
             Command::Open { activation_token } => {
                 let weak = weak.clone();
                 let settings = settings.clone();
@@ -215,10 +215,6 @@ fn spawn_ipc_listener(
                 .log_debug("ipc: post Open to event loop");
             }
         });
-
-        if let Err(err) = result {
-            tracing::error!(%err, "ipc server exited");
-        }
     })?;
     Ok(())
 }
