@@ -9,7 +9,7 @@ const PREF_PANE_DIRECTORIES = [
     "/System/Library/PreferencePanes",
     "/Library/PreferencePanes",
     // User-installed panes; absent on a default install, readDir swallows the miss.
-    "~/Library/PreferencePanes",
+    `${os.homedir()}/Library/PreferencePanes`,
 ];
 
 const PANE_EXT = ".prefPane";

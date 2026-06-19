@@ -10,15 +10,13 @@ const MAC_APP_DIRECTORIES = [
     "/Applications",
     "/System/Applications",
     "/System/Library/CoreServices",
-    // QuickJS doesn't expose `$HOME`; the SDK silently skips unreadable dirs,
-    // so listing this unconditionally is cheap and safe.
-    "~/Applications",
+    `${os.homedir()}/Applications`,
 ];
 
 const LINUX_DESKTOP_DIRECTORIES = [
     "/usr/share/applications",
     "/usr/local/share/applications",
-    "~/.local/share/applications",
+    `${os.homedir()}/.local/share/applications`,
 ];
 
 const APP_EXT = ".app";

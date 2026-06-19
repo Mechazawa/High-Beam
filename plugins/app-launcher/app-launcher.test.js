@@ -6,7 +6,8 @@ import { describe, expect, test, vi } from 'vitest';
 // safety. ESM namespaces are frozen, so replacing the module beats spyOn.
 vi.mock('node:os', () => {
     const platform = vi.fn(() => 'darwin');
-    return { default: { platform }, platform };
+    const homedir = vi.fn(() => '/Users/me');
+    return { default: { platform, homedir }, platform, homedir };
 });
 
 const ICON_SENTINEL = 'data:image/png;base64,SENTINEL';

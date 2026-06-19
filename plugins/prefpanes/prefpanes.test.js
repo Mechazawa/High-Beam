@@ -4,7 +4,8 @@ import { describe, expect, test, vi } from 'vitest';
 // return value is reassignable per-test ('darwin' = macOS, anything else = not).
 vi.mock('node:os', () => {
     const platform = vi.fn(() => 'darwin');
-    return { default: { platform }, platform };
+    const homedir = vi.fn(() => '/Users/me');
+    return { default: { platform, homedir }, platform, homedir };
 });
 
 const ICON_SENTINEL = 'data:image/png;base64,PREFPANE';
