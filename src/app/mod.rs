@@ -61,6 +61,9 @@ pub(super) enum HostMessage {
     /// Run the update-all pipeline, streaming progress into the host-driven
     /// update view (the slot was seeded before this message was sent).
     UpdateAll,
+    /// Run the macOS app self-update check / install loop, streaming progress
+    /// into the host-driven app-update view (seeded before this was sent).
+    CheckAppUpdate,
     Shutdown,
     /// Drive a freshly-pushed view frame through its `setup → first render
     /// → mounted` sequence. Sent by `callbacks::push_view_frame`. The
@@ -303,6 +306,25 @@ fn spawn_runtime_thread(
                                 &settings,
                             )
                             .await;
+                        }
+                        HostMessage::CheckAppUpdate => {
+                            if let Some(prev) = current_cancel.take() {
+                                prev.cancel();
+                            }
+                            // Same reasoning as UpdateAll: kill JS views, leave
+                            // the host view slot (seeded by the Slint thread)
+                            // and VIEW-VIEWS in place, bump the query id so a
+                            // stale yield can't paint over the progress frame.
+                            tear_down_js_views(
+                                &mut view_close_signals,
+                                &mut view_event_senders,
+                                &view_stack,
+                                &weak,
+                                "app update view",
+                                false,
+                            );
+                            latest_id.fetch_add(1, Ordering::Relaxed);
+                            install_flow::run_app_update_view(Arc::clone(&host_view), weak.clone()).await;
                         }
                         HostMessage::ViewInit { plugin, handle, props } => {
                             let plugins = registry.snapshot().await;
