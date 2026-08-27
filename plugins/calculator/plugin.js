@@ -31,6 +31,19 @@ const BINARY_OPS = {
 
 const UNARY_PREC = 5;
 
+// 171! overflows a double; stopping short of that gives a specific error
+// instead of a bare `Infinity`.
+const FACTORIAL_MAX = 170;
+
+function factorial(n) {
+    if (!Number.isInteger(n)) throw new Error("factorial expects a whole number");
+    if (n < 0) throw new Error("factorial of a negative number");
+    if (n > FACTORIAL_MAX) throw new Error("factorial too large");
+    let acc = 1;
+    for (let i = 2; i <= n; i += 1) acc *= i;
+    return acc;
+}
+
 function tokenize(src) {
     const tokens = [];
     let i = 0;
@@ -72,6 +85,11 @@ function tokenize(src) {
             i += 2;
             continue;
         }
+        if (c === "!") {
+            tokens.push({ kind: "op", op: "!" });
+            i += 1;
+            continue;
+        }
         if ("+-*/%".includes(c)) {
             tokens.push({ kind: "op", op: c });
             i += 1;
@@ -92,6 +110,11 @@ function applyOp(op, stack) {
         if (stack.length < 1) throw new Error("missing operand");
         const v = stack.pop();
         stack.push(-v);
+        return;
+    }
+    if (op.kind === "factorial") {
+        if (stack.length < 1) throw new Error("missing operand");
+        stack.push(factorial(stack.pop()));
         return;
     }
     if (op.kind === "fn") {
@@ -197,6 +220,15 @@ function parseAndEvaluate(src) {
             continue;
         }
         if (tok.kind === "op") {
+            // Postfix `!` binds tighter than every other operator, so `-3!` is
+            // `-(3!)` and `2**3!` is `2**(3!)`. Its operand is already reduced
+            // on the value stack, so it applies on sight and never queues —
+            // which also makes `3!!` iterate as `(3!)!`.
+            if (tok.op === "!") {
+                if (expectOperand) throw new Error("unexpected operator !");
+                applyOp({ kind: "factorial" }, output);
+                continue;
+            }
             if (expectOperand) {
                 if (tok.op === "-") {
                     ops.push({ kind: "unary" });

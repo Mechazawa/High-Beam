@@ -2,7 +2,7 @@
   "name": "calculator",
   "displayName": "Calculator",
   "version": "0.1.0",
-  "description": "Evaluate math expressions. Supports + - * / % ** parens unary - and common functions.",
+  "description": "Evaluate math expressions. Supports + - * / % ** postfix ! parens unary - and common functions.",
   "timeoutMs": 100,
   "memoryMb": 16,
   "capabilities": [

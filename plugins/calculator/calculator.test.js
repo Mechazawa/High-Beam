@@ -98,6 +98,57 @@ describe('calculator plugin', () => {
         expect((await run('abs(-7)'))[0].title).toBe('7');
     });
 
+    test('postfix factorial', async () => {
+        expect((await run('5!'))[0].title).toBe('120');
+        expect((await run('0!'))[0].title).toBe('1');
+        expect((await run('1!'))[0].title).toBe('1');
+        expect((await run('12!'))[0].title).toBe('479001600');
+        // Last factorial that fits in a double.
+        expect((await run('170!'))[0].title.startsWith('7.2574156153')).toBe(true);
+    });
+
+    test('factorial binds tighter than the other operators', async () => {
+        // `-(3!)`, not `(-3)!`.
+        expect((await run('-3!'))[0].title).toBe('-6');
+        // `2**(3!)`, not `(2**3)!`.
+        expect((await run('2**3!'))[0].title).toBe('64');
+        expect((await run('3!**2'))[0].title).toBe('36');
+        expect((await run('3! + 4!'))[0].title).toBe('30');
+        expect((await run('2*3!'))[0].title).toBe('12');
+    });
+
+    test('factorial composes with parens and functions', async () => {
+        expect((await run('(2+2)!'))[0].title).toBe('24');
+        expect((await run('sqrt(16)!'))[0].title).toBe('24');
+        expect((await run('max(2!, 3)'))[0].title).toBe('3');
+        expect((await run('abs(-4)!'))[0].title).toBe('24');
+        // Chained `!` iterates: `(3!)!` = 720.
+        expect((await run('3!!'))[0].title).toBe('720');
+    });
+
+    test('invalid factorial operands yield no result', async () => {
+        // Negative and fractional operands are outside the integer factorial.
+        expect(await run('(-1)!')).toEqual([]);
+        expect(await run('2.5!')).toEqual([]);
+        // 171! overflows a double.
+        expect(await run('171!')).toEqual([]);
+        // `!` is postfix only — nothing to its left is an error.
+        expect(await run('!5')).toEqual([]);
+        expect(await run('3+!2')).toEqual([]);
+    });
+
+    test('= prefix explains a rejected factorial', async () => {
+        const [neg] = await run('=(-1)!');
+        expect(neg.title).toBe('Syntax error');
+        expect(neg.subtitle).toBe('factorial of a negative number');
+
+        const [frac] = await run('=2.5!');
+        expect(frac.subtitle).toBe('factorial expects a whole number');
+
+        const [big] = await run('=171!');
+        expect(big.subtitle).toBe('factorial too large');
+    });
+
     test('stable key per input', async () => {
         const [a] = await run('1+1');
         const [b] = await run(' 1+1 ');
