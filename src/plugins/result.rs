@@ -95,6 +95,11 @@ pub enum Action {
     /// — produced by the Core `update` verb.
     #[serde(rename = "updatePlugins")]
     UpdatePlugins,
+    /// Check GitHub for a newer High Beam release and, if found, download +
+    /// install it and relaunch. Host-only — produced by the Core `check for
+    /// updates` verb; macOS-only at runtime (the updater no-ops elsewhere).
+    #[serde(rename = "checkForUpdates")]
+    CheckForUpdates,
     /// A no-op result that just sits in the list (e.g. version readout).
     #[serde(rename = "noop")]
     Noop,
@@ -134,6 +139,7 @@ impl Action {
             Self::ReloadPlugin { .. } => Some("reloadPlugin"),
             Self::InstallPlugin { .. } => Some("installPlugin"),
             Self::UpdatePlugins => Some("updatePlugins"),
+            Self::CheckForUpdates => Some("checkForUpdates"),
             Self::OpenUrl { .. }
             | Self::Copy { .. }
             | Self::Exec { .. }

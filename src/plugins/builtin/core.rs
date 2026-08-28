@@ -37,11 +37,6 @@ static KEYWORDS: LazyLock<Vec<Keyword>> = LazyLock::new(|| {
             subtitle: Some("open the High Beam settings screen"),
             make_action: || Action::OpenSettings,
         },
-        Keyword {
-            label: "check for updates",
-            subtitle: Some("not implemented yet"),
-            make_action: || Action::Noop,
-        },
         // Label synthesised at query time so it always reflects the running
         // binary's version.
         Keyword {
@@ -93,7 +88,38 @@ pub(crate) fn query(input: &str, plugin_names: &[&str]) -> Vec<StreamedResult> {
     out.extend(install_rows(&q_lower, q));
     out.extend(reload_rows(&q_lower, q, plugin_names));
     out.extend(update_rows(&q_lower));
+    out.extend(check_update_rows(&q_lower));
     out
+}
+
+/// `check for updates` — macOS app self-update. Shown only when the updater is
+/// supported (running from a `.app` with a configured signing key), so the row
+/// never appears on Linux, under Homebrew, or in dev runs. When a background
+/// check has already found a newer version, the row advertises it directly and
+/// Enter installs + relaunches; otherwise Enter runs a fresh check.
+fn check_update_rows(q_lower: &str) -> Vec<StreamedResult> {
+    if !crate::updater::is_supported() {
+        return Vec::new();
+    }
+
+    let Some(weight) = match_weight(q_lower, "check for updates") else {
+        return Vec::new();
+    };
+    let (title, subtitle) = match crate::updater::pending_version() {
+        Some(version) => (
+            format!("Update available → v{version}"),
+            "install the new version and relaunch",
+        ),
+        None => ("check for updates".to_owned(), "check GitHub for a newer High Beam"),
+    };
+
+    vec![row(
+        "check-for-updates".to_owned(),
+        title,
+        Some(subtitle),
+        weight,
+        Action::CheckForUpdates,
+    )]
 }
 
 /// `install <url>` — one row, only when the verb prefix matches and an
@@ -304,13 +330,15 @@ mod tests {
     }
 
     #[test]
-    fn check_for_updates_produces_noop() {
+    fn check_for_updates_row_hidden_when_unsupported() {
+        // Tests don't run from a signed `.app`, so `updater::is_supported()`
+        // is false and the self-update row is suppressed entirely (rather
+        // than the old always-present "not implemented yet" placeholder).
         let results = query("check");
-        let r = results
-            .iter()
-            .find(|r| r.result.title == "check for updates")
-            .expect("check for updates result");
-        assert!(matches!(r.result.action, Action::Noop));
+        assert!(
+            results.iter().all(|r| r.result.title != "check for updates"),
+            "check-for-updates row should be hidden when self-update is unsupported"
+        );
     }
 
     #[test]
@@ -333,7 +361,8 @@ mod tests {
     #[test]
     fn core_verbs_are_unpinned() {
         // Core results never pin; frecency ranks them like any other result.
-        for q in ["settings", "exit", "check for updates"] {
+        // (`check for updates` is macOS-`.app`-only, so it's excluded here.)
+        for q in ["settings", "exit"] {
             let results = query(q);
             assert!(results.iter().any(|r| !r.result.pinned), "expected a result for {q}");
             assert!(

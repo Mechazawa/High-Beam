@@ -105,6 +105,45 @@ jobs:
             target/release/HighBeam.app
           if-no-files-found: error
 
+      # In-app self-update artifact. Only runs when an updater signing key is
+      # present, so unsigned releases still publish — the updater stays inert
+      # until both the key (here) and the matching public key (pasted into
+      # `src/updater.rs::UPDATER_PUBKEY`) are in place.
+      #
+      # `cargo-packager-updater` downloads + extracts a `.app.tar.gz`, so we
+      # tar the bundle and minisign-sign it (the `.sig` content goes into
+      # `latest.json` in the release job). The env-var names follow
+      # cargo-packager's convention; confirm them against `cargo packager
+      # signer sign --help` when first generating the key with `cargo packager
+      # signer generate`.
+      #
+      # NOTE: single-arch. GitHub's `macos-latest` is arm64, so this artifact
+      # is arm64-only — same limitation the `.dmg` already has. Universal /
+      # multi-arch updates are a follow-up (build both, key `latest.json` by
+      # `darwin-<arch>` in a `platforms` map).
+      - name: Build + sign updater artifact
+        if: env.CARGO_PACKAGER_SIGN_PRIVATE_KEY != ''
+        env:
+          CARGO_PACKAGER_SIGN_PRIVATE_KEY: ${{ secrets.UPDATER_PRIVATE_KEY }}
+          CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD: ${{ secrets.UPDATER_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          cd target/release
+          tar -czf HighBeam.app.tar.gz HighBeam.app
+          cargo packager signer sign HighBeam.app.tar.gz
+
+      - name: Upload updater artifacts
+        if: env.CARGO_PACKAGER_SIGN_PRIVATE_KEY != ''
+        env:
+          CARGO_PACKAGER_SIGN_PRIVATE_KEY: ${{ secrets.UPDATER_PRIVATE_KEY }}
+        uses: actions/upload-artifact@v5
+        with:
+          name: updater
+          path: |
+            target/release/HighBeam.app.tar.gz
+            target/release/HighBeam.app.tar.gz.sig
+          if-no-files-found: error
+
   build-linux:
     name: build (linux)
     runs-on: ubuntu-latest
@@ -205,6 +244,16 @@ jobs:
         with:
           name: linux
           path: dist/linux
+
+      # Present only when the build job signed an updater artifact (key set).
+      # `continue-on-error` so an unsigned release doesn't fail at the missing
+      # artifact.
+      - name: Download updater artifacts
+        continue-on-error: true
+        uses: actions/download-artifact@v5
+        with:
+          name: updater
+          path: dist/updater
 
       # Build the raw commit-log changelog between the previous tag and the
       # current one. `--exclude` keeps the lookup from returning the current
@@ -322,6 +371,37 @@ jobs:
           echo "--- release-body.md ---"
           cat release-body.md
 
+      # Build the updater manifest the in-app self-updater fetches from
+      # `releases/latest/download/latest.json`. Only when a signed artifact is
+      # present (key configured). The signature is the verbatim `.sig` content;
+      # the URL uses the tag-agnostic `latest/download` form so it always
+      # resolves to the newest non-prerelease.
+      - name: Generate updater manifest
+        id: updater
+        run: |
+          set -euo pipefail
+          SIG_FILE="dist/updater/HighBeam.app.tar.gz.sig"
+          if [ ! -f "$SIG_FILE" ]; then
+              echo "No signed updater artifact; skipping latest.json."
+              echo "present=false" >> "$GITHUB_OUTPUT"
+              exit 0
+          fi
+          VERSION="${GITHUB_REF_NAME#v}"
+          python3 - "$VERSION" "$SIG_FILE" <<'PY' > dist/updater/latest.json
+          import json, sys, pathlib
+          version, sig_path = sys.argv[1], sys.argv[2]
+          manifest = {
+              "version": version,
+              "format": "app",
+              "url": "https://github.com/Mechazawa/high-beam/releases/latest/download/HighBeam.app.tar.gz",
+              "signature": pathlib.Path(sig_path).read_text().strip(),
+          }
+          print(json.dumps(manifest, indent=2))
+          PY
+          echo "--- latest.json ---"
+          cat dist/updater/latest.json
+          echo "present=true" >> "$GITHUB_OUTPUT"
+
       # softprops/action-gh-release is the de-facto choice for tag-driven
       # GitHub releases. Pinned to v2 (current major); the `files:` glob
       # uploads everything the build jobs staged into dist/.
@@ -345,3 +425,16 @@ jobs:
             dist/linux/**/*.deb
             dist/linux/**/*.rpm
             dist/linux/**/*.tar.gz
+
+      # Updater assets attach in a second pass (additive — updates the same
+      # release) so the strict `fail_on_unmatched_files` above stays in force
+      # for the always-present bundles. Only runs when a manifest was built.
+      - name: Attach updater assets
+        if: steps.updater.outputs.present == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          fail_on_unmatched_files: false
+          files: |
+            dist/updater/HighBeam.app.tar.gz
+            dist/updater/latest.json

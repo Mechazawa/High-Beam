@@ -36,6 +36,9 @@ pub enum ActionOutcome {
     },
     CloseView,
     ShowUpdateView,
+    /// Open the host-driven app self-update view and kick off the check /
+    /// download / relaunch loop on the runtime thread.
+    ShowAppUpdateView,
 }
 
 /// Host-side maintenance tasks the runtime thread executes off the back of
@@ -88,6 +91,7 @@ pub fn execute(action: &Action) -> Result<ActionOutcome, Box<dyn Error>> {
         Action::ReloadPlugin { name } => Ok(ActionOutcome::HostTask(HostTask::Reload { name: name.clone() })),
         Action::InstallPlugin { url } => Ok(ActionOutcome::HostTask(HostTask::Install { url: url.clone() })),
         Action::UpdatePlugins => Ok(ActionOutcome::ShowUpdateView),
+        Action::CheckForUpdates => Ok(ActionOutcome::ShowAppUpdateView),
         // Noop preserved the pre-outcome behaviour of hiding the window —
         // the launcher closes after Enter, even on a `Noop` row like the
         // version readout, because the user explicitly chose to act.
@@ -176,6 +180,12 @@ mod tests {
     fn update_action_yields_show_update_view() {
         let outcome = execute(&Action::UpdatePlugins).expect("execute");
         assert_eq!(outcome, ActionOutcome::ShowUpdateView);
+    }
+
+    #[test]
+    fn check_for_updates_yields_app_update_view() {
+        let outcome = execute(&Action::CheckForUpdates).expect("execute");
+        assert_eq!(outcome, ActionOutcome::ShowAppUpdateView);
     }
 
     #[test]

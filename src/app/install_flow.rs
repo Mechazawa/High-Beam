@@ -32,7 +32,7 @@ use crate::settings_ui::SettingsController;
 use crate::ui::ConfirmCapRow;
 
 use super::ConfirmState;
-use super::host_view::{self, EntryStatus, HostView, UpdateEntry, UpdateSummary};
+use super::host_view::{self, AppUpdatePhase, EntryStatus, HostView, HostViewState, UpdateEntry, UpdateSummary};
 
 /// Stable-key stream of progress rows shared with the launcher's result
 /// list. Re-emitting a key replaces the previous row in place, so the
@@ -560,7 +560,7 @@ pub(super) async fn run_update_view(
 ) {
     let plugins = registry.snapshot().await;
     let cancel = match host_view.lock() {
-        Ok(g) => g.as_ref().map(|s| s.cancel.clone()),
+        Ok(g) => g.as_ref().map(HostViewState::cancel).cloned(),
         Err(err) => {
             tracing::error!(%err, "update: host_view lock poisoned at start");
             return;
@@ -619,6 +619,84 @@ pub(super) async fn run_update_view(
             failed: tally.failed,
         });
     });
+}
+
+/// Drive the macOS app self-update host view: check, then — if a newer
+/// version exists — download + install + relaunch. The Slint thread seeded the
+/// slot with an `AppUpdate` state before posting `HostMessage::CheckAppUpdate`.
+/// The blocking `cargo-packager-updater` calls run on `spawn_blocking`.
+///
+/// Cancellation (Esc) clears the view. A check is abandoned cleanly; an
+/// in-flight install still completes (the swap can't be interrupted), but we
+/// skip the relaunch so the new bundle simply applies on next launch.
+pub(super) async fn run_app_update_view(host_view: HostView, weak: slint::Weak<QueryWindow>) {
+    let cancel = match host_view.lock() {
+        Ok(g) => g.as_ref().map(HostViewState::cancel).cloned(),
+        Err(err) => {
+            tracing::error!(%err, "app-update: host_view lock poisoned at start");
+            return;
+        }
+    };
+    let Some(cancel) = cancel else {
+        tracing::warn!("app-update: host view slot empty at start; aborting");
+        return;
+    };
+
+    let version = match tokio::task::spawn_blocking(crate::updater::check).await {
+        Ok(Ok(Some(version))) => version,
+        Ok(Ok(None)) => {
+            host_view::set_app_phase(&host_view, &weak, AppUpdatePhase::UpToDate);
+            return;
+        }
+        Ok(Err(error)) => {
+            host_view::set_app_phase(&host_view, &weak, AppUpdatePhase::Failed { error });
+            return;
+        }
+        Err(join) => {
+            host_view::set_app_phase(
+                &host_view,
+                &weak,
+                AppUpdatePhase::Failed {
+                    error: join.to_string(),
+                },
+            );
+
+            return;
+        }
+    };
+
+    if cancel.is_cancelled() {
+        tracing::info!("app-update: cancelled before install");
+        return;
+    }
+
+    host_view::set_app_phase(
+        &host_view,
+        &weak,
+        AppUpdatePhase::Installing {
+            version: version.clone(),
+        },
+    );
+
+    match tokio::task::spawn_blocking(crate::updater::install).await {
+        Ok(Ok(Some(_))) => {
+            if cancel.is_cancelled() {
+                tracing::info!("app-update: installed but cancelled; applies on next launch");
+            } else {
+                crate::updater::relaunch();
+            }
+        }
+        // Became up to date between the check and the install (rare race).
+        Ok(Ok(None)) => host_view::set_app_phase(&host_view, &weak, AppUpdatePhase::UpToDate),
+        Ok(Err(error)) => host_view::set_app_phase(&host_view, &weak, AppUpdatePhase::Failed { error }),
+        Err(join) => host_view::set_app_phase(
+            &host_view,
+            &weak,
+            AppUpdatePhase::Failed {
+                error: join.to_string(),
+            },
+        ),
+    }
 }
 
 #[derive(Default)]
@@ -758,7 +836,7 @@ where
             tracing::error!("update: host_view lock poisoned during update");
             return;
         };
-        let Some(state) = guard.as_mut() else {
+        let Some(state) = guard.as_mut().and_then(HostViewState::as_plugin_update_mut) else {
             return;
         };
         mutate(state);

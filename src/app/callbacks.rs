@@ -23,7 +23,7 @@ use crate::ui::{ResultRow, ViewBlock};
 use crate::views::{PushError, ViewFrame, ViewStack};
 use crate::window;
 
-use super::host_view::{self as host_view_mod, HostView};
+use super::host_view::{self as host_view_mod, AppUpdateViewState, HostView, HostViewState, UpdateViewState};
 use super::{ConfirmState, HostMessage};
 
 /// Aggregate of plugin-result + confirm + history state threaded into
@@ -425,6 +425,9 @@ fn invoke_selected(
                 actions::ActionOutcome::ShowUpdateView => {
                     open_update_view(host_view, host_tx, &w);
                 }
+                actions::ActionOutcome::ShowAppUpdateView => {
+                    open_app_update_view(host_view, host_tx, &w);
+                }
             }
         }
         Err(err) => {
@@ -446,9 +449,9 @@ fn open_update_view(host_view: &HostView, host_tx: &mpsc::UnboundedSender<HostMe
             return;
         };
         if let Some(prev) = guard.take() {
-            prev.cancel.cancel();
+            prev.cancel().cancel();
         }
-        *guard = Some(host_view_mod::UpdateViewState::new());
+        *guard = Some(HostViewState::PluginUpdate(UpdateViewState::new()));
     }
     // Initial paint so the user sees the view immediately even before the
     // runtime thread fetches the plugin list.
@@ -457,6 +460,29 @@ fn open_update_view(host_view: &HostView, host_tx: &mpsc::UnboundedSender<HostMe
 
     if host_tx.send(HostMessage::UpdateAll).is_err() {
         tracing::error!("update: runtime thread exited; UpdateAll dropped");
+    }
+}
+
+/// Seed the host view slot with a fresh [`AppUpdateViewState`], paint the
+/// initial "Checking…" frame, and post `HostMessage::CheckAppUpdate` so the
+/// runtime thread runs the macOS self-update check / install loop. Replaces
+/// any existing host view (firing its cancel token first).
+fn open_app_update_view(host_view: &HostView, host_tx: &mpsc::UnboundedSender<HostMessage>, window: &QueryWindow) {
+    {
+        let Ok(mut guard) = host_view.lock() else {
+            tracing::error!("app-update: host_view lock poisoned on open");
+            return;
+        };
+        if let Some(prev) = guard.take() {
+            prev.cancel().cancel();
+        }
+        *guard = Some(HostViewState::AppUpdate(AppUpdateViewState::new()));
+    }
+    let weak = window.as_weak();
+    host_view_mod::paint(host_view, &weak);
+
+    if host_tx.send(HostMessage::CheckAppUpdate).is_err() {
+        tracing::error!("app-update: runtime thread exited; CheckAppUpdate dropped");
     }
 }
 
@@ -954,7 +980,9 @@ fn handle_view_dispatch(
         actions::ActionOutcome::OpenSettingsView => {
             tracing::warn!(%plugin, "views: dispatch of openSettings ignored — would tear down the view");
         }
-        actions::ActionOutcome::HostTask(_) | actions::ActionOutcome::ShowUpdateView => {
+        actions::ActionOutcome::HostTask(_)
+        | actions::ActionOutcome::ShowUpdateView
+        | actions::ActionOutcome::ShowAppUpdateView => {
             tracing::warn!(%plugin, "views: dispatch of host task ignored");
         }
     }

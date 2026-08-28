@@ -68,6 +68,14 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
     // Independent of the plugins-dir override — themes live in the config dir.
     bundle_install::install_default_themes_if_needed();
 
+    // Post-update reconcile: after a self-update (or manual `.dmg` install)
+    // bumps the app version, install plugins/themes newly added to the bundle
+    // and update existing ones the bundle ships a newer copy of — without
+    // clobbering anything the user edited. Runs the work once per version
+    // change; a no-op otherwise. Skips plugins under a `--plugins-dir`
+    // override, matching the first-launch seed gate above.
+    bundle_install::reconcile_bundled_resources(options.plugins_dir.is_none());
+
     // Pin the winit backend explicitly — we rely on it for monitor enumeration
     // and focus events; a default-backend swap would otherwise fail opaquely.
     slint::BackendSelector::new().backend_name("winit".into()).select()?;
@@ -139,6 +147,13 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
 
     // Keep the host alive for the daemon's lifetime; `Drop` sends Shutdown.
     let _plugin_host = app::start(&window, options.plugins_dir.clone(), settings_controller.clone())?;
+
+    // Background macOS self-update poller (no-op unless running from a signed
+    // `.app`). Skipped in once-shot mode — an ephemeral process won't live
+    // long enough to matter, and the check would race its own exit.
+    if !options.once {
+        crate::updater::spawn_background_check();
+    }
 
     // Single-shot mode skips the IPC bind: every invocation is a fresh
     // process, so there's no "already running" daemon to forward to and

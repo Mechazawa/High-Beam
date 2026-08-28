@@ -272,6 +272,11 @@ tar = "0.4"
 flate2 = "1"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
+# Content fingerprints for the post-update bundled-resource reconcile: themes
+# carry no version field, so we hash file bytes to tell "user-edited" from
+# "matches what we last shipped" before overwriting. See `bundle_install`.
+sha2 = "0.10"
+
 # Host-side structured logging. `tracing` is the event/macro surface; the
 # `fmt`+`env-filter` subscriber gives us level-routed stderr output with
 # `RUST_LOG`-style filtering. Per-plugin logs still go through `PluginLog`.
@@ -297,6 +302,14 @@ objc2-app-kit = { version = "0.2", features = [
 ] }
 objc2-foundation = { version = "0.2", features = ["NSThread"] }
 raw-window-handle = "0.6"
+
+# macOS in-place self-update (sibling crate to the `cargo-packager` bundler
+# we already ship with). Fetches a signed `latest.json` off GitHub Releases,
+# minisign-verifies the `.app.tar.gz`, and swaps the bundle. macOS-only: the
+# self-updater is gated on running from inside a `.app`, so Homebrew /
+# `cargo install` / dev runs never touch it (see `src/updater.rs`).
+# `rustls-tls` (the default) matches the rustls provider reqwest already links.
+cargo-packager-updater = "0.2"
 
 # Linux-only:
 #   * `wayland-client` + `wayland-backend` — share winit's wl_display via
